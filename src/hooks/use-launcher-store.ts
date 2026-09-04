@@ -835,6 +835,15 @@ export function useLauncherStore() {
     return path ?? null
   }, [api, run, showToast])
 
+  /** 删除确认框用的包占用字节数；失败返回 0（不弹错，静默降级）。 */
+  const packDiskUsage = useCallback(async (packId: string): Promise<number> => {
+    try {
+      return await api.packDiskUsage(packId)
+    } catch {
+      return 0
+    }
+  }, [api])
+
   const exportProfile = useCallback(async (profileName: string, mode: Parameters<LauncherApi['exportProfile']>[1], options?: Parameters<LauncherApi['exportProfile']>[2]): Promise<string | null> => {
     const result = await run(`profile-export:${profileName}:${mode}`, () => api.exportProfile(profileName, mode, options))
     if (result) showToast({ kind: 'success', message: mode === 'repository' ? `Profile 已同步到 ${result}` : `Profile 已导出到 ${result}` })
@@ -1042,6 +1051,7 @@ export function useLauncherStore() {
     activatePack,
     renamePack,
     createBlankPack,
+    packDiskUsage,
     removePack,
     exportPack,
     exportProfile,

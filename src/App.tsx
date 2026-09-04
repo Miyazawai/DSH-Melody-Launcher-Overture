@@ -153,8 +153,12 @@ function LauncherShell() {
                       void store.refreshRuntimeEnvironment(true)
                     }}
                     onImportPack={() => void handlePackImport()}
-                    onInstallDshVersion={store.installDshVersion}
-                    onSelectDshVersion={store.selectDshVersion}
+                    onInstallDshVersion={async version => {
+                      const ok = await store.installDshVersion(version)
+                      // 装版本会自动补发同名整合包（主进程回调），刷新列表让新包立刻可见。
+                      if (ok) await store.refreshPacks()
+                      return ok
+                    }}
                     onRemoveDshVersion={store.removeDshVersion}
                     onTogglePlugin={store.togglePlugin}
                     onToggleSkill={store.toggleSkill}
@@ -162,6 +166,9 @@ function LauncherShell() {
                     onSkillInstalled={store.applyCatalogSkillInstall}
                     onProfileChanged={() => { void store.refreshProfile() }}
                     onActivatePack={store.activatePack}
+                    onRenamePack={store.renamePack}
+                    onCreateBlankPack={(name, dshVersion) => store.createBlankPack({ name, dshVersion })}
+                    onPackDiskUsage={store.packDiskUsage}
                     onRemovePack={store.removePack}
                     onExportPack={store.exportPack}
                     onOpenDshFolder={() => void api.openDshFolder()}

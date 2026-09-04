@@ -11,6 +11,7 @@ import {
   Maximize2,
   Minus,
   Package,
+  Pencil,
   RefreshCw,
   Search,
   Settings,
@@ -22,6 +23,7 @@ import {
 } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { useLauncherApi } from '../api/client'
+import { formatBytes } from '../lib/format'
 import { SkeletonStrip } from '../components/Skeleton'
 import { DshMarketView } from './DshMarketView'
 import {
@@ -78,7 +80,6 @@ interface SettingsPanelsProps {
   onRefresh: () => void
   onImportPack: () => void
   onInstallDshVersion: (version: string) => Promise<boolean>
-  onSelectDshVersion: (version: string) => Promise<boolean>
   onRemoveDshVersion: (version: string) => Promise<boolean>
   onTogglePlugin: (plugin: ManagedPlugin, enabled: boolean) => Promise<boolean>
   onToggleSkill: (skill: InstalledSkill, enabled: boolean) => void
@@ -86,6 +87,9 @@ interface SettingsPanelsProps {
   onSkillInstalled: (result: SkillInstallResult) => void
   onProfileChanged: () => void
   onActivatePack: (packId: string) => Promise<boolean>
+  onRenamePack: (packId: string, name: string) => Promise<boolean>
+  onCreateBlankPack: (name: string, dshVersion: string | null) => Promise<PackStatus | undefined>
+  onPackDiskUsage: (packId: string) => Promise<number>
   onRemovePack: (packId: string) => Promise<boolean>
   onExportPack: (packId: string) => Promise<string | null>
   onOpenDshFolder: () => void
@@ -108,7 +112,6 @@ export function SettingsPanels({
   onRefresh,
   onImportPack,
   onInstallDshVersion,
-  onSelectDshVersion,
   onRemoveDshVersion,
   onTogglePlugin,
   onToggleSkill,
@@ -116,6 +119,9 @@ export function SettingsPanels({
   onSkillInstalled,
   onProfileChanged,
   onActivatePack,
+  onRenamePack,
+  onCreateBlankPack,
+  onPackDiskUsage,
   onRemovePack,
   onExportPack,
   onOpenDshFolder,
@@ -140,7 +146,6 @@ export function SettingsPanels({
               busy={locked}
               installProgress={installProgress}
               onInstall={onInstallDshVersion}
-              onSelect={onSelectDshVersion}
               onRemove={onRemoveDshVersion}
               onOpenFolder={onOpenDshFolder}
               onRefresh={onRefresh}
@@ -186,13 +191,18 @@ export function SettingsPanels({
               packs={packs}
               activePack={activePack}
               busy={locked}
+              dshInstalledVersions={(runtimeEnvironment?.dshInstalled ?? []).map(item => item.version)}
               onRefresh={onRefresh}
               onImport={onImportPack}
-              onActivate={id => { void onActivatePack(id) }}
-              onExport={id => { void onExportPack(id) }}
-              onRemove={id => {
-                if (window.confirm('确定删除这个整合包吗？已导入的独立环境会一并移除。')) void onRemovePack(id)
+              onCreateBlank={async (name, dshVersion) => {
+                const created = await onCreateBlankPack(name, dshVersion)
+                return created !== undefined
               }}
+              onActivate={id => { void onActivatePack(id) }}
+              onRename={async (id, name) => onRenamePack(id, name)}
+              onExport={id => { void onExportPack(id) }}
+              onRemove={id => { void onRemovePack(id) }}
+              onDiskUsage={onPackDiskUsage}
             />
           )}
       </main>
@@ -215,7 +225,6 @@ function SettingsVersions({
   busy,
   installProgress,
   onInstall,
-  onSelect,
   onRemove,
   onOpenFolder,
   onRefresh,
@@ -226,7 +235,6 @@ function SettingsVersions({
   busy: boolean
   installProgress: InstallProgress | null
   onInstall: (version: string) => Promise<boolean>
-  onSelect: (version: string) => Promise<boolean>
   onRemove: (version: string) => Promise<boolean>
   onOpenFolder: () => void
   onRefresh: () => void
@@ -255,9 +263,10 @@ function SettingsVersions({
           </div>
         </div>
         <div className="settings-current">
-          <span>当前使用</span>
-          <strong>{environment.dshSelectedVersion ?? '未选择'}</strong>
+          <span>当前整合包使用</span>
+          <strong>{environment.dshSelectedVersion ?? '未绑定'}</strong>
         </div>
+        <div className="settings-hint">本页只负责版本的下载与删除；切换环境请到「整合包」页（每个 DSH 版本对应一个自动整合包）。</div>
         <div className="settings-list">
           {environment.dshInstalled.map(item => (
             <ResourceRow
@@ -267,7 +276,6 @@ function SettingsVersions({
               enabled={item.selected}
               selected
               busy={busy}
-              onSelect={item.selected ? undefined : () => { void onSelect(item.version) }}
               onRemove={item.removable ? () => { void onRemove(item.version) } : undefined}
             />
           ))}
@@ -291,7 +299,7 @@ function SettingsVersions({
             {!dshProgress.indeterminate && dshProgress.percent > 0 && <strong>{dshProgress.percent}%</strong>}
           </div>
         )}
-        <div className="settings-hint">点「下载」直接安装该版本；完成后会自动设为当前使用。</div>
+        <div className="settings-hint">点「下载」直接安装该版本；完成后会自动设为当前使用，并生成一个同名整合包。</div>
         {stable.length === 0 && prerelease.length === 0 && <div className="settings-empty">registry 里没有更多可下载的版本。</div>}
         <VersionGroup
           title="稳定版"
@@ -809,53 +817,125 @@ function SettingsPacks({
   packs,
   activePack,
   busy,
+  dshInstalledVersions,
   onRefresh,
   onImport,
+  onCreateBlank,
   onActivate,
+  onRename,
   onExport,
   onRemove,
+  onDiskUsage,
 }: {
   packs: PackStatus[]
   activePack: PackStatus | null
   busy: boolean
+  dshInstalledVersions: string[]
   onRefresh: () => void
   onImport: () => void
+  onCreateBlank: (name: string, dshVersion: string | null) => Promise<boolean>
   onActivate: (packId: string) => void
+  onRename: (packId: string, name: string) => Promise<boolean>
   onExport: (packId: string) => void
   onRemove: (packId: string) => void
+  onDiskUsage: (packId: string) => Promise<number>
 }) {
+  const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newVersion, setNewVersion] = useState<string>('')
+
+  const confirmRemove = async (pack: PackStatus) => {
+    const bytes = await onDiskUsage(pack.id).catch(() => 0)
+    const size = bytes > 0 ? `（占用 ${formatBytes(bytes)}）` : ''
+    if (window.confirm(`确定删除整合包「${pack.name}」${size}吗？\n它的插件、技能、预设、配置与会话会一并删除；共享的 DSH 版本保留。`)) onRemove(pack.id)
+  }
+
   return (
     <div className="settings-panel">
       <div className="settings-panel-heading">
         <div className="settings-panel-title"><Package size={17} /><span>整合包</span>{packs.length > 0 && <span className="settings-count">{packs.length}</span>}</div>
         <div className="settings-market-heading-actions">
           <PanelRefresh onClick={onRefresh} disabled={busy} />
+          <button type="button" className="secondary-button" onClick={() => { setCreating(v => !v); setNewName(''); setNewVersion(dshInstalledVersions.at(-1) ?? '') }} disabled={busy}>新建整合包</button>
           <button type="button" className="primary-command" onClick={onImport} disabled={busy}><Download size={15} />导入整合包</button>
         </div>
       </div>
-      <div className="settings-hint">整合包是一整套「DSH 版本 + 插件 + 技能 + 预设 + 配置」；导入时若机器上没有配套的 DSH 版本会自动下载，并与其它环境隔离。</div>
-      {packs.length === 0 && <div className="settings-empty">还没有任何整合包；可导入他人分享的 .zip，或到「完整管理界面」里创建一个。</div>}
+      <div className="settings-hint">每个整合包是一套真隔离环境（DSH 版本 + 插件 + 技能 + 预设 + 配置 + 会话），互不串扰；下载 DSH 版本会自动生成对应整合包，导入时缺少的版本也会自动下载。</div>
+      {creating && (
+        <div className="settings-pack-create">
+          <input
+            className="settings-pack-name-input"
+            placeholder="整合包名称（字母/数字/-_）"
+            value={newName}
+            onChange={event => setNewName(event.target.value)}
+            disabled={busy}
+          />
+          <select className="settings-pack-version-select" value={newVersion} onChange={event => setNewVersion(event.target.value)} disabled={busy}>
+            <option value="">跟随当前版本</option>
+            {dshInstalledVersions.map(version => <option key={version} value={version}>DSH {version}</option>)}
+          </select>
+          <button
+            type="button"
+            className="primary-command"
+            disabled={busy || newName.trim() === ''}
+            onClick={() => { void onCreateBlank(newName.trim(), newVersion || null).then(ok => { if (ok) setCreating(false) }) }}
+          >创建</button>
+          <button type="button" className="secondary-button" disabled={busy} onClick={() => setCreating(false)}>取消</button>
+        </div>
+      )}
+      {packs.length === 0 && !creating && <div className="settings-empty">还没有任何整合包；可导入他人分享的 .zip，或点「新建整合包」。</div>}
       <div className="settings-list">
         {packs.map(pack => {
           const isActive = activePack?.id === pack.id
-          const itemCount = pack.plugins.length
-            + (pack.skills?.length ?? 0)
-            + (pack.presets?.length ?? 0)
-            + (pack.applications?.length ?? 0)
+          const counts = [
+            `${pack.plugins.length} 插件`,
+            ...(pack.skills?.length ? [`${pack.skills.length} 技能`] : []),
+            ...(pack.presets?.length ? [`${pack.presets.length} 预设`] : []),
+            ...(pack.applications?.length ? [`${pack.applications.length} 应用`] : []),
+          ].join(' · ')
           return (
             <div key={pack.id} className={`settings-pack-row ${isActive ? 'active' : ''}`}>
               <div className="settings-pack-copy">
-                <strong>{pack.name}</strong>
-                <span>{pack.description || pack.id}{pack.dshVersion ? ` · DSH ${pack.dshVersion}` : ''} · {itemCount} 项内容</span>
+                {renaming?.id === pack.id ? (
+                  <span className="settings-pack-rename">
+                    <input
+                      className="settings-pack-name-input"
+                      value={renaming.value}
+                      autoFocus
+                      onChange={event => setRenaming({ id: pack.id, value: event.target.value })}
+                      onKeyDown={event => {
+                        if (event.key === 'Enter' && renaming.value.trim()) void onRename(pack.id, renaming.value.trim()).then(ok => { if (ok) setRenaming(null) })
+                        if (event.key === 'Escape') setRenaming(null)
+                      }}
+                    />
+                    <button type="button" className="secondary-button" disabled={busy || !renaming.value.trim()} onClick={() => void onRename(pack.id, renaming.value.trim()).then(ok => { if (ok) setRenaming(null) })}>保存</button>
+                    <button type="button" className="icon-button" onClick={() => setRenaming(null)} title="取消重命名" aria-label="取消重命名"><X size={14} /></button>
+                  </span>
+                ) : (
+                  <span className="settings-pack-title-line">
+                    <strong>{pack.name}</strong>
+                    <span className="settings-pack-badge">v{pack.version}</span>
+                    {pack.auto && <span className="settings-pack-badge auto">自动</span>}
+                    <button type="button" className="icon-button settings-pack-edit" onClick={() => setRenaming({ id: pack.id, value: pack.name })} title="重命名" aria-label="重命名"><Pencil size={13} /></button>
+                  </span>
+                )}
+                <span>
+                  {pack.dshVersion ? `DSH ${pack.dshVersion}` : 'DSH 未绑定'}
+                  {counts ? ` · ${counts}` : ' · 空白环境'}
+                  {pack.state !== 'complete' ? ' · 未完成安装' : ''}
+                </span>
               </div>
               <div className="settings-pack-actions">
                 {isActive
                   ? <span className="settings-pack-active"><Check size={13} />当前使用</span>
                   : pack.state === 'complete'
                     ? <button type="button" className="secondary-button" disabled={busy} onClick={() => onActivate(pack.id)}>切换</button>
-                    : <span className="settings-pack-state">未完成安装</span>}
-                <button type="button" className="secondary-button" disabled={busy} onClick={() => onExport(pack.id)} title="导出为压缩包">导出</button>
-                <button type="button" className="icon-button" disabled={busy} onClick={() => onRemove(pack.id)} title="删除整合包" aria-label="删除整合包"><Trash2 size={15} /></button>
+                    : pack.state === 'partial'
+                      ? <button type="button" className="secondary-button" disabled={busy} onClick={() => onActivate(pack.id)} title="重新进入该包环境">继续</button>
+                      : <span className="settings-pack-state">未完成安装</span>}
+                <button type="button" className="secondary-button" disabled={busy} onClick={() => onExport(pack.id)} title="导出为压缩包（不含会话与登录）">导出</button>
+                <button type="button" className="icon-button" disabled={busy || isActive} onClick={() => { void confirmRemove(pack) }} title={isActive ? '激活中的整合包不能删除' : '删除整合包（连同环境数据）'} aria-label="删除整合包"><Trash2 size={15} /></button>
               </div>
             </div>
           )

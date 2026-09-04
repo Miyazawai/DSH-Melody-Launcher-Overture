@@ -8038,6 +8038,98 @@ input:focus-visible {
   gap: 10px;
 }
 
+/* 整合包真隔离：标题行徽章、内联重命名、新建表单。 */
+.settings-pack-title-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.settings-pack-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.settings-pack-badge.auto {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.settings-pack-edit {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.settings-pack-row:hover .settings-pack-edit,
+.settings-pack-edit:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .settings-pack-edit { opacity: 1; }
+}
+
+.settings-pack-rename {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-pack-name-input {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.settings-pack-name-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-pack-create {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-soft);
+}
+
+.settings-pack-create .settings-pack-name-input { flex: 1; min-width: 0; }
+
+.settings-pack-version-select {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-family: inherit;
+}
+
+.settings-pack-create .primary-command,
+.settings-pack-create .secondary-button {
+  padding: 5px 12px;
+  font-size: 12.5px;
+}
+
 .settings-progress {
   display: flex;
   align-items: center;
