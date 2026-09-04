@@ -821,18 +821,6 @@ input:focus-visible {
 
 .widget-bubble-sub > strong { font-size: 15px; }
 
-.widget-pricing {
-  display: flex;
-  flex-wrap: wrap;
-  margin-top: auto;
-  padding-top: 10px;
-  gap: 4px 12px;
-  border-top: 1px dashed var(--line);
-  color: var(--quiet);
-  font-size: 10.5px;
-  font-variant-numeric: tabular-nums;
-}
-
 .widget-card-actions { margin-left: auto; }
 
 .widget-key-form { display: flex; flex-direction: column; gap: 8px; }

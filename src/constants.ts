@@ -16,12 +16,6 @@ export const DEFAULT_PROFILE_NAME = 'web'
 /** 渲染层保留的最大日志条数，超出后丢弃最旧的记录。 */
 export const MAX_LOG_LINES = 500
 
-/**
- * AI 尝试安装功能的开关。DSH ACP 相关包均为 rc 预览版，若接口漂移或出现问题，
- * 关掉这里即可隐藏入口，不影响普通安装。
- */
-export const AI_INSTALL_ENABLED = true
-
 /** 尚未取到主进程状态时的占位值。 */
 export const EMPTY_RUNTIME_STATE = { running: false, pid: null, startedAt: null, url: null, port: null } as const
 export const EMPTY_DSH_INSTALLATION = { installed: false, version: null, executable: null, source: null } as const

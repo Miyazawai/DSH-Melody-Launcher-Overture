@@ -1,9 +1,9 @@
-import { Minus, SquareArrowOutUpRight, Wrench, X } from 'lucide-react'
+import { Minus, SquareArrowOutUpRight, X } from 'lucide-react'
 import type { HomeTab } from '../types'
 
 /**
- * 全局顶栏（PCL2 式）：DML 文字标记 + 一级导航 tab + 打开网页（运行中）+ 开发人员选项 + 窗口键。
- * 整条可拖拽；按钮区 no-drag。管理界面激活时 tab 全部落空、开发人员选项高亮。
+ * 全局顶栏（PCL2 式）：DML 文字标记 + 一级导航 tab + 打开网页（运行中）+ 窗口键。
+ * 整条可拖拽；按钮区 no-drag。
  */
 
 const HOME_TABS: Array<{ id: HomeTab; label: string }> = [
@@ -17,17 +17,15 @@ const HOME_TABS: Array<{ id: HomeTab; label: string }> = [
 
 interface TopBarProps {
   activeTab: HomeTab | null
-  developerActive: boolean
   /** DSH 运行中且有本地 Web 地址时，右上角出现「打开网页」。 */
   openWebVisible: boolean
   onSelectTab: (tab: HomeTab) => void
   onOpenHarness: () => void
-  onOpenDeveloper: () => void
   onMinimize: () => void
   onClose: () => void
 }
 
-export function TopBar({ activeTab, developerActive, openWebVisible, onSelectTab, onOpenHarness, onOpenDeveloper, onMinimize, onClose }: TopBarProps) {
+export function TopBar({ activeTab, openWebVisible, onSelectTab, onOpenHarness, onMinimize, onClose }: TopBarProps) {
   return (
     <header className="topbar">
       <span className="topbar-mark" aria-hidden="true">DML</span>
@@ -49,9 +47,6 @@ export function TopBar({ activeTab, developerActive, openWebVisible, onSelectTab
             <SquareArrowOutUpRight size={16} />
           </button>
         )}
-        <button type="button" className={`topbar-developer ${developerActive ? 'active' : ''}`} onClick={onOpenDeveloper} title="资源市场 / GitHub / 运行环境">
-          <Wrench size={14} /><span>开发人员选项</span>
-        </button>
         <button type="button" className="topbar-window-button" title="最小化" aria-label="最小化" onClick={onMinimize}><Minus size={17} /></button>
         <button type="button" className="topbar-window-close" title="关闭" aria-label="关闭" onClick={onClose}><X size={18} /></button>
       </div>

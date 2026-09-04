@@ -1,7 +1,7 @@
 import { Box, ChevronLeft, ChevronRight, Cpu, Layers, Newspaper, Puzzle, RefreshCw, Sparkles, Wand2, Wallet } from 'lucide-react'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { useLauncherApi } from '../api/client'
-import { DEEPSEEK_PRICING, periodPrice, pricingPeriod, type PricingPeriod } from '../lib/deepseek-pricing'
+import { pricingPeriod, type PricingPeriod } from '../lib/deepseek-pricing'
 import type { DeepSeekBalanceResult, DshUpdateStatus, DshUsageResult, HomeTab, LauncherUpdateStatus, NewsFeedResult } from '../types'
 
 /** Token 数智能缩写：1284532 → 1.28M，8421 → 8.4K。 */
@@ -244,10 +244,6 @@ function BalanceCard() {
         : undefined}
     >
       {body}
-      <div className="widget-pricing">
-        <span>{DEEPSEEK_PRICING.map(row => `${row.model.replace('deepseek-v4-', '')} ${periodPrice(row.hit, period)} / ${periodPrice(row.miss, period)} / ${periodPrice(row.output, period)}`).join('　·　')}（命中/未命中/输出）</span>
-        <span className="widget-muted">元/百万 tokens · 峰段 9–12、14–18（北京时间，工作日）</span>
-      </div>
     </WidgetCard>
   )
 }
