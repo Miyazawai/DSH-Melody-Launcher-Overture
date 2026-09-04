@@ -86,7 +86,6 @@ interface SettingsPanelsProps {
   onSkillInstalled: (result: SkillInstallResult) => void
   onProfileChanged: () => void
   onActivatePack: (packId: string) => Promise<boolean>
-  onDeactivatePack: () => Promise<boolean>
   onRemovePack: (packId: string) => Promise<boolean>
   onExportPack: (packId: string) => Promise<string | null>
   onOpenDshFolder: () => void
@@ -117,7 +116,6 @@ export function SettingsPanels({
   onSkillInstalled,
   onProfileChanged,
   onActivatePack,
-  onDeactivatePack,
   onRemovePack,
   onExportPack,
   onOpenDshFolder,
@@ -191,7 +189,6 @@ export function SettingsPanels({
               onRefresh={onRefresh}
               onImport={onImportPack}
               onActivate={id => { void onActivatePack(id) }}
-              onDeactivate={() => { void onDeactivatePack() }}
               onExport={id => { void onExportPack(id) }}
               onRemove={id => {
                 if (window.confirm('确定删除这个整合包吗？已导入的独立环境会一并移除。')) void onRemovePack(id)
@@ -815,7 +812,6 @@ function SettingsPacks({
   onRefresh,
   onImport,
   onActivate,
-  onDeactivate,
   onExport,
   onRemove,
 }: {
@@ -825,7 +821,6 @@ function SettingsPacks({
   onRefresh: () => void
   onImport: () => void
   onActivate: (packId: string) => void
-  onDeactivate: () => void
   onExport: (packId: string) => void
   onRemove: (packId: string) => void
 }) {
@@ -866,11 +861,6 @@ function SettingsPacks({
           )
         })}
       </div>
-      {activePack && (
-        <div className="settings-pack-footer">
-          <button type="button" className="secondary-button" disabled={busy} onClick={onDeactivate}>停用当前整合包</button>
-        </div>
-      )}
     </div>
   )
 }

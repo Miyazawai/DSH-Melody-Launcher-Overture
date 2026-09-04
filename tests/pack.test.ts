@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -767,7 +768,7 @@ describe('removePack runtime guard', () => {
     expect(await readPackRegistry(env.registryPath)).toEqual([])
   })
 
-  it('still blocks deleting an active pack while DSH runtime is running', async () => {
+  it('blocks deleting the active pack regardless of runtime state', async () => {
     const env = await makeEnv()
     const stub = makeInstallerStub()
     stub.readProfile.mockResolvedValue({ ...defaultProfile, plugins: [managedPlugin('alpha')] })
@@ -776,7 +777,7 @@ describe('removePack runtime guard', () => {
     const { manager } = makeManager(env, stub, store, { isRuntimeRunning: () => true })
     await upsertPackRecord(env.registryPath, recordFor('pack-x', [{ packageName: 'alpha', enabled: true }]))
 
-    await expect(manager.removePack('pack-x')).rejects.toThrow('DSH 运行时正在运行')
+    await expect(manager.removePack('pack-x')).rejects.toThrow('当前激活的整合包不能删除')
     expect(await readPackRegistry(env.registryPath)).toHaveLength(1)
   })
 })
@@ -785,8 +786,8 @@ describe('removePack runtime guard', () => {
 // activate / deactivate
 // ---------------------------------------------------------------------------
 
-describe.skip('legacy activatePack / deactivatePack tests（独立 Profile 语义已废弃）', () => {
-  it('activatePack 切到 pack profile，deactivatePack 回到默认 profile', async () => {
+describe('activatePack（真隔离指针）', () => {
+  it('激活同步写 activePackId 与 profileName，并补齐缺失的包骨架', async () => {
     const env = await makeEnv()
     const stub = makeInstallerStub()
     const store = makeSettings(env.dshHome, 'web')
@@ -795,11 +796,11 @@ describe.skip('legacy activatePack / deactivatePack tests（独立 Profile 语�
 
     const activated = await manager.activatePack('pack-x')
     expect(activated.profileName).toBe('pack-x')
+    expect(activated.activePackId).toBe('pack-x')
     expect(store.current.profileName).toBe('pack-x')
-
-    const deactivated = await manager.deactivatePack()
-    expect(deactivated.profileName).toBe('web')
-    expect(store.current.profileName).toBe('web')
+    expect(store.current.activePackId).toBe('pack-x')
+    // 骨架：profiles/pack-x/package.json 已落盘。
+    expect(existsSync(path.join(env.dshHome, 'profiles', 'pack-x', 'package.json'))).toBe(true)
   })
 
   it('activatePack 对不存在的包抛错', async () => {
@@ -808,6 +809,36 @@ describe.skip('legacy activatePack / deactivatePack tests（独立 Profile 语�
     const store = makeSettings(env.dshHome)
     const { manager } = makeManager(env, stub, store)
     await expect(manager.activatePack('pack-ghost')).rejects.toThrow('整合包不存在')
+  })
+
+  it('激活带 dshVersion 的包时先确保版本已装并切换可执行文件', async () => {
+    const env = await makeEnv()
+    const stub = makeInstallerStub()
+    const store = makeSettings(env.dshHome, 'web')
+    const emitEvent = vi.fn()
+    const ensureDshVersionInstalled = vi.fn(async () => {})
+    const selectDshVersion = vi.fn(async () => {})
+    const manager = createPackManager({
+      readSettings: store.readSettings,
+      saveSettings: store.saveSettings,
+      registryPath: env.registryPath,
+      snapshotRoot: env.snapshotRoot,
+      pluginReceiptsPath: env.pluginReceiptsPath,
+      presetReceiptsPath: env.presetReceiptsPath,
+      skillReceiptsPath: env.skillReceiptsPath,
+      applicationAddons: { list: vi.fn(async () => []), install: vi.fn(async () => {}), uninstall: vi.fn(async () => []) },
+      installer: stub,
+      emitEvent,
+      isRuntimeRunning: () => false,
+      isInstallerBusy: () => false,
+      dshHome: env.dshHome,
+      ensureDshVersionInstalled,
+      selectDshVersion,
+    })
+    await upsertPackRecord(env.registryPath, { ...recordFor('pack-v'), dshVersion: '9.9.9' })
+    await manager.activatePack('pack-v')
+    expect(ensureDshVersionInstalled).toHaveBeenCalledWith('9.9.9')
+    expect(selectDshVersion).toHaveBeenCalledWith('9.9.9')
   })
 })
 

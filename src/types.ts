@@ -5,14 +5,17 @@ export type UiTheme = 'deepseek' | 'night'
 
 export interface AppSettings {
   dshInstallPath: string
+  /** 默认 DSH 家目录（无私有目录的整合包共用）；激活带私有目录的整合包后，read() 返回的 dshHome 即该包目录。 */
   dshHome: string
   /** 当前选中的启动器托管 DSH 版本；null 表示沿用旧版自动检测。 */
   dshVersion?: string | null
   /** 当前选中的启动器托管 Node.js 版本；null 表示系统 Node 优先。 */
   nodeVersion?: string | null
   profileName: string
-  /** 当前选中的整合包清单；不改变实际 DSH Profile。 */
+  /** 当前激活的整合包 id（真隔离环境的唯一指针）；与 profileName 同步切换。 */
   activePackId?: string | null
+  /** 一次性迁移「整合包=私有家目录」是否已执行。 */
+  packsV2Migrated?: boolean
   workspace: string
   launchExecutable: string
   launchArgs: string[]
@@ -944,7 +947,10 @@ export interface PackStatus {
   /** 当前整合包要求的 DSH 版本；旧注册表记录可能为空。 */
   dshVersion: string | null
   source: PackSource
-  enabled: boolean            // 当前选中的整合包清单
+  /** 当前激活的整合包（真隔离环境的唯一指针）。 */
+  enabled: boolean
+  /** 安装 DSH 版本时自动生成的包。 */
+  auto?: boolean
   state: 'complete' | 'partial' | 'failed'
   plugins: PackInstalledPlugin[]
   skills?: PackInstalledSkill[]
@@ -1195,7 +1201,10 @@ export interface LauncherApi {
   exportPack(packId: string): Promise<string | null>
   pickPackFile(): Promise<string | null>
   activatePack(packId: string): Promise<AppSettings>
-  deactivatePack(): Promise<AppSettings>
+  renamePack(packId: string, name: string): Promise<PackStatus>
+  createBlankPack(request: { name: string; dshVersion: string | null }): Promise<PackStatus>
+  /** 整合包私有目录占用字节数（删除确认框展示）。 */
+  packDiskUsage(packId: string): Promise<number>
   removePack(packId: string): Promise<{ removed: number }>
   rollbackPack(): Promise<{ restored: number; profileName: string }>
   packHasSnapshot(): Promise<boolean>

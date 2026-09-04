@@ -23,6 +23,13 @@ export interface PackRecord {
   version: string
   /** 当前整合包要求的 DSH 精确版本；旧注册表记录可能缺省。 */
   dshVersion?: string
+  /**
+   * 该包的私有 DSH 家目录（真隔离载体）。缺省 = 共用 settings 里的默认家目录
+   * （迁移前的旧 web/旧 Profile 包走这条路，存量数据零搬迁）。
+   */
+  homePath?: string
+  /** 安装 DSH 版本时自动生成的包（界面上可区分、可改名）。 */
+  auto?: boolean
   source: PackSource
   installedAt: string
   updatedAt: string
@@ -116,6 +123,7 @@ export function toPackStatus(record: PackRecord, activePackId: string | null | u
     dshVersion: record.dshVersion ?? null,
     source: record.source,
     enabled: record.id === activePackId,
+    ...(record.auto ? { auto: true } : {}),
     state: record.state,
     plugins: record.plugins,
     skills: record.skills,

@@ -36,6 +36,7 @@ export function defaultSettings(input: DefaultSettingsInput): AppSettings {
     nodeVersion: null,
     profileName: DEFAULT_PROFILE_NAME,
     activePackId: null,
+    packsV2Migrated: false,
     workspace: input.documentsDirectory,
     launchExecutable: input.systemNpx ?? (platform === 'win32' ? 'npx.cmd' : 'npx'),
     launchArgs: ['--yes', DSH_PACKAGE_NAME, 'web'],
@@ -122,9 +123,9 @@ export function validateSettings(input: AppSettings): AppSettings {
     dshVersion: input.dshVersion == null ? null : validRuntimeVersion(input.dshVersion) ? input.dshVersion.trim() : null,
     nodeVersion: input.nodeVersion == null ? null : validRuntimeVersion(input.nodeVersion) ? input.nodeVersion.trim() : null,
     profileName: input.profileName,
-    // Kept only so older settings.json files remain readable. Runtime code
-    // selects an environment exclusively through profileName.
-    activePackId: null,
+    // 整合包是真隔离环境的唯一实体：activePackId 与 profileName 同步指向当前激活包 id。
+    activePackId: typeof input.activePackId === 'string' && input.activePackId ? input.activePackId : null,
+    packsV2Migrated: Boolean(input.packsV2Migrated),
     workspace: input.workspace,
     launchExecutable: input.launchExecutable.trim(),
     launchArgs: input.launchArgs,
@@ -149,7 +150,8 @@ export function mergeStoredSettings(defaults: AppSettings, stored: Partial<AppSe
     ...stored,
     dshVersion: stored.dshVersion == null ? null : validRuntimeVersion(stored.dshVersion) ? stored.dshVersion.trim() : null,
     nodeVersion: stored.nodeVersion == null ? null : validRuntimeVersion(stored.nodeVersion) ? stored.nodeVersion.trim() : null,
-    activePackId: null,
+    activePackId: typeof stored.activePackId === 'string' && stored.activePackId ? stored.activePackId : null,
+    packsV2Migrated: Boolean(stored.packsV2Migrated),
     dshInstallPath: typeof stored.dshInstallPath === 'string' && path.isAbsolute(stored.dshInstallPath)
       ? stored.dshInstallPath
       : defaults.dshInstallPath,
@@ -182,6 +184,8 @@ export function adoptDetectedDsh(settings: AppSettings, detected: DshInstallatio
 
 export interface SettingsStore {
   read(): Promise<AppSettings>
+  /** 未派生的存储态：settings.json 里真实的默认家目录（不含激活包的私有目录）。 */
+  readStored(): Promise<AppSettings>
   save(input: AppSettings): Promise<AppSettings>
 }
 
@@ -190,32 +194,60 @@ export interface SettingsStoreOptions {
   createDefaults: () => AppSettings
   /** 首次读取时用于把按需拉取的配置绑定到已安装的 DSH。 */
   detectInstalledDsh: (settings: AppSettings) => Promise<DshInstallationStatus>
+  /**
+   * 整合包真隔离的咽喉点：按激活包（activePackId）派生其私有 DSH 家目录。
+   * 返回 null 表示用存储的默认家目录。派生值只存在于内存返回值里，绝不写回 settings.json。
+   */
+  resolvePackHome?: (settings: AppSettings) => Promise<string | null>
 }
 
 export function createSettingsStore(options: SettingsStoreOptions): SettingsStore {
+  /** 未派生的存储态（settings.json 的形状）。 */
+  let stored: AppSettings | null = null
+  /** 对外返回值 = stored + 激活包派生的 dshHome。 */
   let cache: AppSettings | null = null
 
+  async function derive(base: AppSettings): Promise<AppSettings> {
+    if (!options.resolvePackHome || !base.activePackId) return base
+    const home = await options.resolvePackHome(base)
+    return home ? { ...base, dshHome: home } : base
+  }
+
+  async function ensureLoaded(): Promise<{ stored: AppSettings; derived: AppSettings }> {
+    if (stored && cache) return { stored, derived: cache }
+    const defaults = options.createDefaults()
+    let parsed: Partial<AppSettings> | null = null
+    try {
+      parsed = JSON.parse(await readFile(options.filePath, 'utf8')) as Partial<AppSettings>
+    } catch {
+      parsed = null
+    }
+    let base = mergeStoredSettings(defaults, parsed)
+    if (usesOnDemandDsh(base)) {
+      base = adoptDetectedDsh(base, await options.detectInstalledDsh(base))
+    }
+    stored = base
+    cache = await derive(base)
+    return { stored: base, derived: cache }
+  }
+
   return {
+    async readStored(): Promise<AppSettings> {
+      return (await ensureLoaded()).stored
+    },
+
     async read(): Promise<AppSettings> {
-      if (cache) return cache
-      const defaults = options.createDefaults()
-      let stored: Partial<AppSettings> | null = null
-      try {
-        stored = JSON.parse(await readFile(options.filePath, 'utf8')) as Partial<AppSettings>
-      } catch {
-        stored = null
-      }
-      cache = mergeStoredSettings(defaults, stored)
-      if (usesOnDemandDsh(cache)) {
-        cache = adoptDetectedDsh(cache, await options.detectInstalledDsh(cache))
-      }
-      return cache
+      return (await ensureLoaded()).derived
     },
 
     async save(input: AppSettings): Promise<AppSettings> {
-      const current = cache ?? input
+      const current = stored ?? input
       let next = validateSettings(input)
-      if (current.profileName !== next.profileName) next = { ...next, activePackId: null }
+      // 剥离派生值：调用方常把 read() 的返回值整包传回来，其中 dshHome 可能已是激活包的私有目录；
+      // 未改动的派生值一律还原为存储的默认家目录，防止包目录被写死进 settings.json。
+      if (current.activePackId && cache && !samePath(next.dshHome, current.dshHome) && samePath(next.dshHome, cache.dshHome)) {
+        next = { ...next, dshHome: current.dshHome }
+      }
       // 用户改动了 DSH 本体安装目录，而启动命令仍指向旧目录里的可执行文件时，跟随切过去。
       const installPathChanged = !samePath(current.dshInstallPath, next.dshInstallPath)
       const usedPreviousManagedExecutable = samePath(next.launchExecutable, managedDshExecutable(current.dshInstallPath))
@@ -224,8 +256,9 @@ export function createSettingsStore(options: SettingsStoreOptions): SettingsStor
       }
       await mkdir(path.dirname(options.filePath), { recursive: true })
       await writeFile(options.filePath, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
-      cache = next
-      return next
+      stored = next
+      cache = await derive(next)
+      return cache
     },
   }
 }

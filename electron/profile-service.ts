@@ -597,6 +597,8 @@ function migratedPackageManifest(profileName: string, record: PackRecord, base?:
  * files; it intentionally does not perform network installs during startup. */
 export async function migrateLegacyPacks(options: ProfileServiceOptions): Promise<{ migrated: number; backupPath: string | null }> {
   if (!options.registryPath && !options.manifestRoot) return { migrated: 0, backupPath: null }
+  // packsV2 之后，packs.json 是整合包注册表（唯一清单），不再是 legacy 数据。
+  if ((await options.readSettings()).packsV2Migrated) return { migrated: 0, backupPath: null }
   let records = options.registryPath ? await readPackRegistry(options.registryPath) : []
   // Some older builds persisted only pack-manifests/*.yaml. Treat those files
   // as the same legacy source and convert them before backing the directory up.

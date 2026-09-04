@@ -1,23 +1,10 @@
-// 整合包（Pack）真实端到端：用「有状态的 DSH 模拟器」驱动 createPackManager，
-// 在真实 fs 上把全部整合包功能串成完整生命周期跑通。
-//
-// 与 pack.test.ts（单元级，installer 用无状态 stub）的区别：
-//  - 模拟器把 DSH CLI 的「效果」落到真实文件系统——装插件写进 profile 的
-//    package.json（dependencies + bundles）+ node_modules，装技能写进
-//    <dshHome>/skills/，卸载/切换都有真实可读回的 profile 状态。
-//  - 链路两端用真实模块：buildPackZip/inspectPackZip/extractPackBodies
-//    （pack-zip.ts）、scanRawPackZip/extractRawPluginBodies（pack-scan.ts）、
-//    buildManifestFromReceipts（pack-manifest.ts）、buildPackExport（pack-export.ts）、
-//    createProfileSnapshot/restoreProfileSnapshot（ai-install.ts）、
-//    readProfile/togglePlugin（profile.ts）、installSkillFromDirectory（skill-install.ts）、
-//    以及 pack-registry / plugin-receipts。
-//  - 唯一被替换的是 DSH CLI 二进制本身（CI 无真实运行时），其落盘效果由模拟器忠实还原。
-//
-// 覆盖场景：
-//   A 标准包完整生命周期：分析→离线导入→切换→停用/启用→导出→删除→回导再导入。
-//   B raw 包导入（插件+技能）：技能全局安装、harness-backend 排除、删包技能引用计数清理。
-//   C 中途失败→回滚：profile 目录 / 注册表 / 全局技能全部复原。
-//   D 从已装插件创建包 + 追加插件 + 移除插件项。
+/**
+ * 整合包真隔离 E2E：导入/创建 → 私有家目录 → 切换 → 导出 → 删除。
+ *
+ * 夹具忠实模拟主进程装配：settings store 按激活包派生 dshHome（与
+ * electron/settings.ts 的 resolvePackHome 咽喉点同构），DSH 模拟器把安装
+ * 效果写进「当前派生家目录」，因此包与包之间的插件/技能/预设物理隔离。
+ */
 
 import { existsSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
@@ -34,10 +21,6 @@ import { readProfile, togglePlugin } from '../electron/profile'
 import { installSkillFromDirectory } from '../electron/skill-install'
 import { defaultSettings } from '../electron/settings'
 
-// ---------------------------------------------------------------------------
-// fixtures / 环境
-// ---------------------------------------------------------------------------
-
 const temporaryRoots: string[] = []
 afterEach(async () => {
   await Promise.all(temporaryRoots.splice(0).map(root => rm(root, { recursive: true, force: true })))
@@ -52,6 +35,7 @@ async function temporaryDirectory(prefix = 'dsh-pack-e2e-'): Promise<string> {
 async function makeEnv(): Promise<{
   root: string
   dshHome: string
+  packsRoot: string
   registryPath: string
   snapshotRoot: string
   pluginReceiptsPath: string
@@ -64,6 +48,7 @@ async function makeEnv(): Promise<{
   return {
     root,
     dshHome,
+    packsRoot: path.join(root, 'dsh-packs'),
     registryPath: path.join(root, 'packs.json'),
     snapshotRoot: path.join(root, 'pack-snapshots'),
     pluginReceiptsPath: path.join(root, 'plugin-installs.json'),
@@ -74,18 +59,26 @@ async function makeEnv(): Promise<{
 
 type Env = Awaited<ReturnType<typeof makeEnv>>
 
-/** 设置存储：profileName 从 'web'（默认 profile）起步，可被激活/停用切换。 */
-function makeSettingsStore(dshHome: string, profileName = 'web') {
-  let current: AppSettings = {
+/** 模拟 SettingsStore 的派生咽喉点：read() 的 dshHome = 激活包私有家目录。 */
+function makeSettingsStore(env: Env) {
+  let stored: AppSettings = {
     ...defaultSettings({ homeDirectory: os.homedir(), documentsDirectory: os.homedir() }),
-    dshHome,
+    dshHome: env.dshHome,
     dshVersion: '0.1.0-rc.7',
-    profileName,
+    profileName: 'web',
+    activePackId: null,
+  }
+  const readSettings = async (): Promise<AppSettings> => {
+    if (!stored.activePackId) return stored
+    const records = await readPackRegistry(env.registryPath)
+    const home = records.find(record => record.id === stored.activePackId)?.homePath
+    return home ? { ...stored, dshHome: home } : stored
   }
   return {
-    readSettings: async () => current,
-    saveSettings: async (next: AppSettings) => { current = next; return current },
-    get current(): AppSettings { return current },
+    readSettings,
+    saveSettings: async (next: AppSettings) => { stored = next; return next },
+    readStoredSettings: async () => stored,
+    get current(): AppSettings { return stored },
   }
 }
 
@@ -110,13 +103,15 @@ function makeManager(env: Env, installer: InstallInstaller, store: SettingsStore
     emitEvent,
     isRuntimeRunning: () => false,
     isInstallerBusy: () => false,
-    dshHome: env.dshHome,
+    unifiedProfiles: true,
+    packsRoot: env.packsRoot,
+    readStoredSettings: store.readStoredSettings,
   })
   return { manager, emitEvent }
 }
 
 // ---------------------------------------------------------------------------
-// 有状态 DSH 模拟器：把 DSH CLI 的落盘效果写到真实 fs，可被 readProfile 读回。
+// 有状态 DSH 模拟器：落盘目标 = 当前派生家目录（激活包的家）。
 // ---------------------------------------------------------------------------
 
 interface DshSimulator extends InstallInstaller {
@@ -124,13 +119,14 @@ interface DshSimulator extends InstallInstaller {
   installCalls: PackInstallTarget[]
 }
 
-function createDshSimulator(dshHome: string, receiptsPath: string): DshSimulator {
+function createDshSimulator(store: SettingsStore, receiptsPath: string): DshSimulator {
   const failOn = new Set<string>()
   const installCalls: PackInstallTarget[] = []
+  const homeOf = async () => (await store.readSettings()).dshHome
 
   async function readProfileManifest(profileName: string): Promise<Record<string, unknown>> {
     try {
-      return JSON.parse(await readFile(path.join(dshHome, 'profiles', profileName, 'package.json'), 'utf8')) as Record<string, unknown>
+      return JSON.parse(await readFile(path.join(await homeOf(), 'profiles', profileName, 'package.json'), 'utf8')) as Record<string, unknown>
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return { name: profileName, private: true, version: '0.0.0', dependencies: {}, dsh: { profile: { bundles: [] } } }
@@ -140,7 +136,7 @@ function createDshSimulator(dshHome: string, receiptsPath: string): DshSimulator
   }
 
   async function writeProfileManifest(profileName: string, manifest: Record<string, unknown>): Promise<void> {
-    const dir = path.join(dshHome, 'profiles', profileName)
+    const dir = path.join(await homeOf(), 'profiles', profileName)
     await mkdir(dir, { recursive: true })
     await writeFile(path.join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
   }
@@ -148,8 +144,9 @@ function createDshSimulator(dshHome: string, receiptsPath: string): DshSimulator
   const installPluginTarget: InstallInstaller['installPluginTarget'] = async (target) => {
     if (failOn.has(target.packageName)) throw new Error(`模拟安装失败：${target.packageName}`)
     installCalls.push(target)
+    const home = await homeOf()
     const profileName = target.profileName
-    const pkgDir = path.join(dshHome, 'profiles', profileName, 'node_modules', ...target.packageName.split('/'))
+    const pkgDir = path.join(home, 'profiles', profileName, 'node_modules', ...target.packageName.split('/'))
     await mkdir(pkgDir, { recursive: true })
     if (target.source === 'local-directory' && target.localDirectory) {
       if (!existsSync(path.join(target.localDirectory, 'package.json'))) {
@@ -157,7 +154,6 @@ function createDshSimulator(dshHome: string, receiptsPath: string): DshSimulator
       }
       await cp(target.localDirectory, pkgDir, { recursive: true })
     } else {
-      // github / npm 源在 CI 无法联网：合成一个满足 readProfile 的最小本体。
       await writeFile(
         path.join(pkgDir, 'package.json'),
         JSON.stringify({ name: target.packageName, version: target.version ?? '1.0.0' }, null, 2),
@@ -196,6 +192,7 @@ function createDshSimulator(dshHome: string, receiptsPath: string): DshSimulator
     installSkillFromDirectory(home, skill.name, skill.format, skill.sourceDir)
 
   const remove: InstallInstaller['remove'] = async (packageName, profileName) => {
+    const home = await homeOf()
     const profile = profileName!
     const manifest = await readProfileManifest(profile)
     const dependencies = { ...(manifest.dependencies as Record<string, string> | undefined) }
@@ -206,15 +203,14 @@ function createDshSimulator(dshHome: string, receiptsPath: string): DshSimulator
       dependencies,
       dsh: { profile: { bundles } },
     })
-    await rm(path.join(dshHome, 'profiles', profile, 'node_modules', ...packageName.split('/')), { recursive: true, force: true })
+    await rm(path.join(home, 'profiles', profile, 'node_modules', ...packageName.split('/')), { recursive: true, force: true })
     await removePluginReceipt(receiptsPath, profile, packageName)
-    return readProfile(dshHome, profile)
+    return readProfile(home, profile)
   }
 
   const installPreset: InstallInstaller['installPreset'] = async request => {
     if (failOn.has(request.name)) throw new Error(`模拟安装失败：${request.name}`)
-    const presetRoot = path.join(dshHome, '.agent-presets')
-    const destination = path.join(presetRoot, request.name)
+    const destination = path.join(await homeOf(), '.agent-presets', request.name)
     await mkdir(destination, { recursive: true })
     await writeFile(path.join(destination, 'preset.yml'), `name: ${request.name}\n`)
     return {
@@ -237,7 +233,7 @@ function createDshSimulator(dshHome: string, receiptsPath: string): DshSimulator
       installedSkill: {
         name: request.targetId,
         description: '',
-        path: path.join(dshHome, 'skills', request.targetId),
+        path: path.join(await homeOf(), 'skills', request.targetId),
         format: 'bundle',
         enabled: true,
         modelInvocable: false,
@@ -249,7 +245,7 @@ function createDshSimulator(dshHome: string, receiptsPath: string): DshSimulator
 
   const installSkillPinned: InstallInstaller['installSkillPinned'] = async ({ target }) => {
     if (failOn.has(target.name)) throw new Error(`模拟安装失败：${target.name}`)
-    const destination = path.join(dshHome, 'skills', target.name)
+    const destination = path.join(await homeOf(), 'skills', target.name)
     await mkdir(destination, { recursive: true })
     await writeFile(path.join(destination, 'SKILL.md'), `---\nname: ${target.name}\ndescription: x\n---\n`)
     return {
@@ -293,7 +289,6 @@ async function writeStandardZip(env: Env, fileName: string, manifest: PackManife
   return zipPath
 }
 
-/** 非标准 raw zip：任意路径 → 内容（不经 buildPackZip，可无 dsh-pack.yaml）。 */
 function rawZip(entries: Record<string, string>): Uint8Array {
   const zip = new AdmZip()
   for (const [rel, content] of Object.entries(entries)) zip.addFile(rel, Buffer.from(content))
@@ -306,7 +301,6 @@ async function writeRawZip(env: Env, fileName: string, entries: Record<string, s
   return zipPath
 }
 
-/** 真实插件本体目录：package.json + 一个标记文件。 */
 async function makePluginBody(env: Env, packageName: string, version = '1.2.3'): Promise<string> {
   const dir = path.join(env.root, 'bodies', ...packageName.split('/'))
   await mkdir(dir, { recursive: true })
@@ -317,20 +311,25 @@ async function makePluginBody(env: Env, packageName: string, version = '1.2.3'):
 
 const SKILL_DOC = '---\nname: my-skill\ndescription: A skill.\n---\nBody.\n'
 
-const profileDir = (env: Env, packId: string) => path.join(env.dshHome, 'profiles', packId)
+/** 某包的家目录（注册表 homePath；缺省 = 默认家目录）。 */
+async function packHome(env: Env, packId: string): Promise<string> {
+  const records = await readPackRegistry(env.registryPath)
+  return records.find(record => record.id === packId)?.homePath ?? env.dshHome
+}
+
+const profileDirOf = async (env: Env, packId: string) => path.join(await packHome(env, packId), 'profiles', packId)
 
 // ===========================================================================
-// 场景 A：标准包完整生命周期
+// 场景 A：标准包完整生命周期（私有家目录 + 激活指针）
 // ===========================================================================
 
-describe.skip('legacy pack E2E · 标准包完整生命周期（独立 Profile 语义已废弃）', () => {
-  it('分析→离线导入→切换→停用/启用→导出→删除→回导再导入', async () => {
+describe('pack E2E · 标准包生命周期（真隔离）', () => {
+  it('分析→导入（自动激活进私有目录）→切换→导出→删除→回导', async () => {
     const env = await makeEnv()
-    const sim = createDshSimulator(env.dshHome, env.pluginReceiptsPath)
-    const store = makeSettingsStore(env.dshHome)
+    const store = makeSettingsStore(env)
+    const sim = createDshSimulator(store, env.pluginReceiptsPath)
     const { manager } = makeManager(env, sim, store)
 
-    // 1. 构建并分析一个标准包（带 plugin-bodies）。
     const alphaBody = await makePluginBody(env, 'alpha')
     const manifest: PackManifest = {
       name: 'Alpha Pack',
@@ -343,270 +342,116 @@ describe.skip('legacy pack E2E · 标准包完整生命周期（独立 Profile �
     const analysis = await manager.analyzeImport(zipPath)
     expect(analysis.source).toBe('zip')
     expect(analysis.id).toBe('pack-alpha-pack')
-    expect(analysis.items).toEqual([{ packageName: 'alpha', available: true, offline: true }])
 
-    // 2. 离线导入：本体落到 profile 持久目录，模拟器把它装进 node_modules + 记录 receipt。
+    // 导入即供给私有家目录并激活：settings 的 activePackId/profileName 同步指向包 id。
     const result = await manager.importPack(zipPath)
     expect(result.installed).toEqual(['alpha'])
     expect(result.state).toBe('complete')
-    expect(sim.installCalls).toHaveLength(1)
-    expect(sim.installCalls[0].source).toBe('local-directory')
+    expect(store.current.activePackId).toBe('pack-alpha-pack')
+    expect(store.current.profileName).toBe('pack-alpha-pack')
 
-    const packDir = profileDir(env, 'pack-alpha-pack')
+    const home = await packHome(env, 'pack-alpha-pack')
+    expect(home).toBe(path.join(env.packsRoot, 'pack-alpha-pack'))
+    const packDir = await profileDirOf(env, 'pack-alpha-pack')
     expect(await readFile(path.join(packDir, 'node_modules', 'alpha', 'package.json'), 'utf8')).toContain('"alpha"')
     expect(await readFile(path.join(packDir, 'node_modules', 'alpha', 'notes.txt'), 'utf8')).toBe('hello from alpha')
-    // 本体目录持久保留（file: 引用不悬空），且含原始标记文件。
-    expect(await readFile(path.join(packDir, '.pack-bodies', 'alpha', 'notes.txt'), 'utf8')).toBe('hello from alpha')
+    // 默认家目录完全没被写入——隔离成立。
+    expect(existsSync(path.join(env.dshHome, 'profiles', 'pack-alpha-pack'))).toBe(false)
 
-    // profile 状态可被 readProfile 读回：alpha 在 activeBundles。
-    const installedProfile = await sim.readProfile(env.dshHome, 'pack-alpha-pack')
+    const installedProfile = await sim.readProfile(home, 'pack-alpha-pack')
     expect(installedProfile.initialized).toBe(true)
-    expect(installedProfile.activeBundles).toEqual(['alpha'])
+    expect(installedProfile.activeBundles).toContain('alpha')
 
-    let records = await readPackRegistry(env.registryPath)
+    const records = await readPackRegistry(env.registryPath)
     expect(records).toHaveLength(1)
     expect(records[0].source).toBe('zip')
+    expect(records[0].homePath).toBe(home)
     expect(records[0].plugins).toEqual([{ packageName: 'alpha', enabled: true }])
 
-    // 3. 切换：激活 → 停用 → 再激活。listPacks 反映 enabled。
-    expect((await manager.listPacks())[0].enabled).toBe(false)
-    await manager.activatePack('pack-alpha-pack')
-    expect(store.current.profileName).toBe('pack-alpha-pack')
+    // listPacks：导入后该包 enabled=true。
     expect((await manager.listPacks())[0].enabled).toBe(true)
-    await manager.deactivatePack()
-    expect(store.current.profileName).toBe('web')
-    await manager.activatePack('pack-alpha-pack')
 
-    // 4. 停用/启用单项。
+    // 单项停用/启用作用于包内 Profile。
     const disabled = await manager.togglePackItem('pack-alpha-pack', 'alpha', false)
     expect(disabled.plugins.find(p => p.packageName === 'alpha')?.enabled).toBe(false)
-    expect((await sim.readProfile(env.dshHome, 'pack-alpha-pack')).activeBundles).toEqual([])
+    expect((await sim.readProfile(home, 'pack-alpha-pack')).activeBundles).not.toContain('alpha')
     const reEnabled = await manager.togglePackItem('pack-alpha-pack', 'alpha', true)
     expect(reEnabled.plugins.find(p => p.packageName === 'alpha')?.enabled).toBe(true)
-    expect((await sim.readProfile(env.dshHome, 'pack-alpha-pack')).activeBundles).toEqual(['alpha'])
 
-    // 5. 导出：manifest 引用 alpha（local 源），本体进包。
+    // 导出：从包自己的家目录读取。
     const { zipPath: exportedZipPath } = await manager.exportPack('pack-alpha-pack')
     const exportedBytes = await readFile(exportedZipPath)
     const inspection = inspectPackZip(exportedBytes)
-    expect(inspection.manifest.plugins).toEqual([{ packageName: 'alpha', source: 'local' }])
     expect(inspection.hasBodies).toBe(true)
     expect(inspection.bodyPackageNames).toEqual(['alpha'])
-    const exportedZip = new AdmZip(Buffer.from(exportedBytes))
-    expect(exportedZip.getEntry('dsh-pack.yaml')!.getData().toString('utf8')).toContain('name: alpha-pack')
-    expect(exportedZip.getEntry('plugin-bodies/alpha/notes.txt')!.getData().toString('utf8')).toBe('hello from alpha')
 
-    // 6. 删除当前启用的包：自动停用回 'web'，profile / 注册表 / receipts 全清。
+    // 删除激活中的包被拒绝；切到新建空白包后才可删。
+    await expect(manager.removePack('pack-alpha-pack')).rejects.toThrow('当前激活的整合包不能删除')
+    const blank = await manager.createBlankPack({ name: 'Blank', dshVersion: null })
+    expect(await packHome(env, blank.id)).toBe(path.join(env.packsRoot, blank.id))
+    await manager.activatePack(blank.id)
+    expect(store.current.activePackId).toBe(blank.id)
     const removed = await manager.removePack('pack-alpha-pack')
     expect(removed.removed).toBe(1)
-    expect(store.current.profileName).toBe('web')
-    expect(await readPackRegistry(env.registryPath)).toEqual([])
-    expect(existsSync(packDir)).toBe(false)
+    expect(existsSync(home)).toBe(false)
+    expect((await readPackRegistry(env.registryPath)).map(r => r.id)).toEqual([blank.id])
     expect((await readPluginReceipts(env.pluginReceiptsPath)).filter(r => r.profileName === 'pack-alpha-pack')).toEqual([])
 
-    // 7. 把导出的 zip 写盘回导：包重建、插件可再读回。
+    // 回导导出的 zip：重建独立环境。
     const exportedPath = path.join(env.root, 'roundtrip.zip')
     await writeFile(exportedPath, exportedBytes)
     const reimported = await manager.importPack(exportedPath)
     expect(reimported.installed).toEqual(['alpha'])
-    records = await readPackRegistry(env.registryPath)
-    expect(records).toHaveLength(1)
-    expect(records[0].id).toBe('pack-alpha-pack')
-    expect((await sim.readProfile(env.dshHome, 'pack-alpha-pack')).activeBundles).toEqual(['alpha'])
+    const reimportedHome = await packHome(env, 'pack-alpha-pack')
+    expect((await sim.readProfile(reimportedHome, 'pack-alpha-pack')).activeBundles).toContain('alpha')
+    expect(store.current.activePackId).toBe('pack-alpha-pack')
   })
 })
 
 // ===========================================================================
-// 场景 B：raw 包导入（插件 + 技能）与删包技能引用计数
+// 场景 B：raw 包——技能/预设落进包私有家目录，包间互不可见
 // ===========================================================================
 
-describe.skip('legacy pack E2E · raw 包导入与技能清理（独立 Profile 语义已废弃）', () => {
-  it('raw 包插件+技能全局安装、harness-backend 排除、删包按引用计数清理技能', async () => {
+describe('pack E2E · raw 包资源隔离', () => {
+  it('两个包各装同名技能，互不串扰；删包连技能一起消失', async () => {
     const env = await makeEnv()
-    const sim = createDshSimulator(env.dshHome, env.pluginReceiptsPath)
-    const store = makeSettingsStore(env.dshHome)
+    const store = makeSettingsStore(env)
+    const sim = createDshSimulator(store, env.pluginReceiptsPath)
     const { manager } = makeManager(env, sim, store)
 
-    // 非标准包：顶层包裹一层目录；内含两个插件、一个技能、一个含 node_modules 的分发包（应排除）。
-    const zipPath = await writeRawZip(env, 'game-pack.zip', {
+    const firstZip = await writeRawZip(env, 'game-pack.zip', {
       'Gaming Pack/plugin-alpha/package.json': JSON.stringify({ name: 'alpha', version: '1.2.3' }),
-      'Gaming Pack/plugin-beta/package.json': JSON.stringify({ name: 'beta' }),
       'Gaming Pack/skills/my-skill/SKILL.md': SKILL_DOC,
-      'Gaming Pack/harness-backend/node_modules/@deepseek-ai/dsh/package.json': JSON.stringify({ name: '@deepseek-ai/dsh' }),
-      'Gaming Pack/DeepSeek Harness.exe': 'binary',
     })
+    const first = await manager.importPack(firstZip, undefined, { name: 'Game Pack' })
+    expect(first.installed).toEqual(['alpha', 'my-skill'])
+    const firstHome = await packHome(env, 'pack-game-pack')
+    expect(await readFile(path.join(firstHome, 'skills', 'my-skill', 'SKILL.md'), 'utf8')).toContain('my-skill')
+    // 默认家目录没有技能。
+    expect(existsSync(path.join(env.dshHome, 'skills'))).toBe(false)
 
-    // 1. 分析：raw 源，文件名清洗出 name hint，技能项带 kind。
-    const analysis = await manager.analyzeImport(zipPath)
-    expect(analysis.source).toBe('raw')
-    expect(analysis.name).toBe('game-pack')
-    expect(analysis.items).toEqual([
-      { packageName: 'alpha', available: true, offline: true },
-      { packageName: 'beta', available: true, offline: true },
-      { packageName: 'my-skill', available: true, offline: true, kind: 'skill' },
-    ])
-
-    // 2. 导入（包名覆盖）：插件进 profile，技能全局安装进 <dshHome>/skills/。
-    const result = await manager.importPack(zipPath, undefined, { name: 'Game Pack' })
-    expect(result.installed).toEqual(['alpha', 'beta', 'my-skill'])
-    expect(result.state).toBe('complete')
-
-    const packDir = profileDir(env, 'pack-game-pack')
-    expect(await readFile(path.join(packDir, 'node_modules', 'alpha', 'package.json'), 'utf8')).toContain('"alpha"')
-    expect(await readFile(path.join(packDir, '.pack-bodies', 'beta', 'package.json'), 'utf8')).toContain('"beta"')
-    // 技能真实落盘（经 installSkillFromDirectory）。
-    expect(await readFile(path.join(env.dshHome, 'skills', 'my-skill', 'SKILL.md'), 'utf8')).toContain('my-skill')
-
-    let records = await readPackRegistry(env.registryPath)
-    expect(records).toHaveLength(1)
-    expect(records[0].id).toBe('pack-game-pack')
-    expect(records[0].source).toBe('raw')
-    expect(records[0].plugins).toEqual([
-      { packageName: 'alpha', enabled: true },
-      { packageName: 'beta', enabled: true },
-    ])
-    expect(records[0].skills).toEqual([{ name: 'my-skill', format: 'bundle', enabled: true }])
-
-    // 3. 第二个包也引用同名技能 → 删第一个包时技能保留。
-    // 注意：单目录 zip 会把唯一顶层目录当包裹层剥离 → 必须放一个同级文件（README）使包裹判定失效。
     const secondZip = await writeRawZip(env, 'second.zip', {
       'README.txt': 'marker to avoid wrapper detection',
       'my-skill/SKILL.md': SKILL_DOC,
     })
     const second = await manager.importPack(secondZip, undefined, { name: 'Second' })
     expect(second.installed).toEqual(['my-skill'])
+    const secondHome = await packHome(env, 'pack-second')
+    expect(await readFile(path.join(secondHome, 'skills', 'my-skill', 'SKILL.md'), 'utf8')).toContain('my-skill')
+    // 激活指针已切到第二个包；第一个包的家目录原封不动。
+    expect(store.current.activePackId).toBe('pack-second')
+    expect(existsSync(path.join(firstHome, 'skills', 'my-skill', 'SKILL.md'))).toBe(true)
 
+    // 删除第一个包（当前未激活）：整家删除；第二个包不受影响。
     await manager.removePack('pack-game-pack')
-    expect(await readPackRegistry(env.registryPath)).toHaveLength(1) // 只剩 pack-second
-    expect(await readFile(path.join(env.dshHome, 'skills', 'my-skill', 'SKILL.md'), 'utf8')).toContain('my-skill')
-
-    // 4. 第二个包删除 → 无其它引用，技能被清理。
-    await manager.removePack('pack-second')
-    expect(await readPackRegistry(env.registryPath)).toEqual([])
-    expect(existsSync(path.join(env.dshHome, 'skills', 'my-skill'))).toBe(false)
-    expect(existsSync(profileDir(env, 'pack-second'))).toBe(false)
+    expect(existsSync(firstHome)).toBe(false)
+    expect(existsSync(path.join(secondHome, 'skills', 'my-skill', 'SKILL.md'))).toBe(true)
   })
 
-  it('raw 包 flat 技能装成单 .md，删包清理 .disabled 副本', async () => {
+  it('导入含预设的整合包：预设落包私有家目录，删包清理', async () => {
     const env = await makeEnv()
-    const sim = createDshSimulator(env.dshHome, env.pluginReceiptsPath)
-    const store = makeSettingsStore(env.dshHome)
-    const { manager } = makeManager(env, sim, store)
-
-    const zipPath = await writeRawZip(env, 'flat-pack.zip', {
-      'quick-ref.md': '---\nname: quick-ref\ndescription: Quick ref.\n---\nBody.\n',
-    })
-    const result = await manager.importPack(zipPath, undefined, { name: 'Flat Pack' })
-    expect(result.installed).toEqual(['quick-ref'])
-    const skillFile = path.join(env.dshHome, 'skills', 'quick-ref.md')
-    expect(await readFile(skillFile, 'utf8')).toContain('quick-ref')
-
-    await manager.removePack('pack-flat-pack')
-    expect(existsSync(skillFile)).toBe(false)
-  })
-})
-
-// ===========================================================================
-// 场景 C：中途失败 → 回滚
-// ===========================================================================
-
-describe.skip('legacy pack E2E · 中途失败回滚（独立 Profile 语义已废弃）', () => {
-  it('raw 导入单项失败：state=partial，回滚后 profile / 注册表 / 全局技能全部复原', async () => {
-    const env = await makeEnv()
-    const sim = createDshSimulator(env.dshHome, env.pluginReceiptsPath)
-    sim.failOn.add('beta')
-    const store = makeSettingsStore(env.dshHome)
-    const { manager } = makeManager(env, sim, store)
-
-    const zipPath = await writeRawZip(env, 'partial-pack.zip', {
-      'plugin-alpha/package.json': JSON.stringify({ name: 'alpha' }),
-      'plugin-beta/package.json': JSON.stringify({ name: 'beta' }),
-      'skills/my-skill/SKILL.md': SKILL_DOC,
-    })
-
-    // 单项失败不阻断：alpha 与技能装成功，beta 记入 failures → partial。
-    const result = await manager.importPack(zipPath, undefined, { name: 'Partial Pack' })
-    expect(result.state).toBe('partial')
-    expect(result.installed).toEqual(['alpha', 'my-skill'])
-    expect(result.failures).toEqual([{ packageName: 'beta', reason: '模拟安装失败：beta' }])
-    expect(await readFile(path.join(env.dshHome, 'skills', 'my-skill', 'SKILL.md'), 'utf8')).toContain('my-skill')
-
-    const packDir = profileDir(env, 'pack-partial-pack')
-    expect(existsSync(packDir)).toBe(true)
-    expect(await readPackRegistry(env.registryPath)).toHaveLength(1)
-    await expect(manager.hasSnapshot()).resolves.toBe(true)
-
-    // 回滚：profile 目录、注册表记录、全局技能（快照前为空）全部还原。
-    const rolledBack = await manager.rollback()
-    expect(rolledBack.profileName).toBe('pack-partial-pack')
-    expect(existsSync(packDir)).toBe(false)
-    expect(await readPackRegistry(env.registryPath)).toEqual([])
-    expect(existsSync(path.join(env.dshHome, 'skills'))).toBe(false)
-    await expect(manager.hasSnapshot()).resolves.toBe(false)
-  })
-})
-
-// ===========================================================================
-// 场景 D：从已装插件创建包 + 追加 / 移除插件项
-// ===========================================================================
-
-describe.skip('legacy pack E2E · 从已装插件创建包（独立 Profile 语义已废弃）', () => {
-  it('createPack 重建 target、addPackPlugin 追加、removePackItem 移除、removePack 清理', async () => {
-    const env = await makeEnv()
-    const sim = createDshSimulator(env.dshHome, env.pluginReceiptsPath)
-    const store = makeSettingsStore(env.dshHome, 'web')
-    const { manager } = makeManager(env, sim, store)
-
-    // 当前 profile 'web' 已装 gamma、delta（有 receipt，npm 源）。
-    await recordPluginInstall(env.pluginReceiptsPath, {
-      repository: 'demo/owner', packageName: 'gamma', profileName: 'web', source: 'npm',
-      subdirectory: null, version: '1.2.3', commit: '', installedAt: new Date().toISOString(),
-    })
-    await recordPluginInstall(env.pluginReceiptsPath, {
-      repository: 'demo/owner', packageName: 'delta', profileName: 'web', source: 'npm',
-      subdirectory: null, version: '2.0.0', commit: '', installedAt: new Date().toISOString(),
-    })
-
-    // 1. createPack：从 'web' 的 receipt 重建 npm target，装进 pack profile。
-    const created = await manager.createPack({ name: 'Built Pack', packageNames: ['gamma'] })
-    expect(created.installed).toEqual(['gamma'])
-    const gammaTarget = sim.installCalls[0]
-    expect(gammaTarget.profileName).toBe('pack-built-pack')
-    expect(gammaTarget.source).toBe('npm')
-    const builtDir = profileDir(env, 'pack-built-pack')
-    expect(await readFile(path.join(builtDir, 'node_modules', 'gamma', 'package.json'), 'utf8')).toContain('"1.2.3"')
-    expect((await sim.readProfile(env.dshHome, 'pack-built-pack')).activeBundles).toEqual(['gamma'])
-
-    let records = await readPackRegistry(env.registryPath)
-    expect(records[0].source).toBe('created')
-    expect(records[0].plugins).toEqual([{ packageName: 'gamma', enabled: true }])
-
-    // 2. addPackPlugin：从当前 'web' profile 的 delta receipt 追加进包。
-    const afterAdd = await manager.addPackPlugin('pack-built-pack', 'delta')
-    expect(afterAdd.plugins.map(p => p.packageName)).toEqual(['gamma', 'delta'])
-    expect((await sim.readProfile(env.dshHome, 'pack-built-pack')).activeBundles).toEqual(['gamma', 'delta'])
-
-    // 3. removePackItem：从包移除 delta（node_modules + 注册表都清）。
-    const afterRemove = await manager.removePackItem('pack-built-pack', 'delta')
-    expect(afterRemove.plugins.map(p => p.packageName)).toEqual(['gamma'])
-    expect((await sim.readProfile(env.dshHome, 'pack-built-pack')).activeBundles).toEqual(['gamma'])
-    expect(existsSync(path.join(builtDir, 'node_modules', 'delta'))).toBe(false)
-
-    // 4. removePack：清 profile 目录 + 注册表 + 该包 receipts（'web' 的 receipt 保留）。
-    await manager.removePack('pack-built-pack')
-    expect(existsSync(builtDir)).toBe(false)
-    expect(await readPackRegistry(env.registryPath)).toEqual([])
-    const receipts = await readPluginReceipts(env.pluginReceiptsPath)
-    expect(receipts.filter(r => r.profileName === 'pack-built-pack')).toEqual([])
-    expect(receipts.filter(r => r.profileName === 'web').map(r => r.packageName).sort()).toEqual(['delta', 'gamma'])
-  })
-})
-
-describe.skip('legacy pack E2E · Agent 预设（独立 Profile 语义已废弃）', () => {
-  it('导入含预设的整合包后记录预设，删除包时清理全局预设', async () => {
-    const env = await makeEnv()
-    const sim = createDshSimulator(env.dshHome, env.pluginReceiptsPath)
-    const store = makeSettingsStore(env.dshHome)
+    const store = makeSettingsStore(env)
+    const sim = createDshSimulator(store, env.pluginReceiptsPath)
     const { manager } = makeManager(env, sim, store)
 
     const manifest: PackManifest = {
@@ -622,19 +467,126 @@ describe.skip('legacy pack E2E · Agent 预设（独立 Profile 语义已废弃�
       }],
     }
     const zipPath = await writeStandardZip(env, 'preset-e2e.zip', manifest, new Map())
-
     const result = await manager.importPack(zipPath)
     expect(result.installed).toEqual(['router-standard'])
-    expect(result.state).toBe('complete')
-    const presetDir = path.join(env.dshHome, '.agent-presets', 'router-standard')
-    expect(existsSync(path.join(presetDir, 'preset.yml'))).toBe(true)
-
-    let records = await readPackRegistry(env.registryPath)
+    const home = await packHome(env, 'pack-preset-e2e')
+    expect(existsSync(path.join(home, '.agent-presets', 'router-standard'))).toBe(true)
+    const records = await readPackRegistry(env.registryPath)
     expect(records[0].presets).toEqual([{ name: 'router-standard', enabled: true }])
 
+    // 切到空白包再删，预设随家目录消失。
+    const blank = await manager.createBlankPack({ name: 'Other', dshVersion: null })
+    await manager.activatePack(blank.id)
     await manager.removePack('pack-preset-e2e')
-    expect(existsSync(presetDir)).toBe(false)
-    records = await readPackRegistry(env.registryPath)
-    expect(records).toEqual([])
+    expect(existsSync(home)).toBe(false)
   })
 })
+
+// ===========================================================================
+// 场景 C：中途失败 → partial + 回滚
+// ===========================================================================
+
+describe('pack E2E · 中途失败回滚', () => {
+  it('raw 导入单项失败：state=partial；回滚还原包目录与注册表', async () => {
+    const env = await makeEnv()
+    const store = makeSettingsStore(env)
+    const sim = createDshSimulator(store, env.pluginReceiptsPath)
+    sim.failOn.add('beta')
+    const { manager } = makeManager(env, sim, store)
+
+    const zipPath = await writeRawZip(env, 'partial-pack.zip', {
+      'plugin-alpha/package.json': JSON.stringify({ name: 'alpha' }),
+      'plugin-beta/package.json': JSON.stringify({ name: 'beta' }),
+      'skills/my-skill/SKILL.md': SKILL_DOC,
+    })
+
+    const result = await manager.importPack(zipPath, undefined, { name: 'Partial Pack' })
+    expect(result.state).toBe('partial')
+    expect(result.installed).toEqual(['alpha', 'my-skill'])
+    expect(result.failures).toEqual([{ packageName: 'beta', reason: '模拟安装失败：beta' }])
+    const home = await packHome(env, 'pack-partial-pack')
+    expect(await readFile(path.join(home, 'skills', 'my-skill', 'SKILL.md'), 'utf8')).toContain('my-skill')
+    expect(await readPackRegistry(env.registryPath)).toHaveLength(1)
+    await expect(manager.hasSnapshot()).resolves.toBe(true)
+
+    const rolledBack = await manager.rollback()
+    expect(rolledBack.profileName).toBe('pack-partial-pack')
+    expect(existsSync(home)).toBe(false)
+    expect(await readPackRegistry(env.registryPath)).toEqual([])
+    await expect(manager.hasSnapshot()).resolves.toBe(false)
+  })
+})
+
+// ===========================================================================
+// 场景 D：自动包与手动空白包
+// ===========================================================================
+
+describe('pack E2E · 版本自动包与空白包', () => {
+  it('ensurePackForVersion 幂等且不改激活指针；空白包私有家目录可读', async () => {
+    const env = await makeEnv()
+    const store = makeSettingsStore(env)
+    const sim = createDshSimulator(store, env.pluginReceiptsPath)
+    const { manager } = makeManager(env, sim, store)
+
+    const first = await manager.ensurePackForVersion('0.2.0-rc.1')
+    const second = await manager.ensurePackForVersion('0.2.0-rc.1')
+    expect(second!.id).toBe(first!.id)
+    expect(first!.auto).toBe(true)
+    expect(first!.name).toBe('0.2.0-rc.1')
+    const records = await readPackRegistry(env.registryPath)
+    expect(records).toHaveLength(1)
+    // 不激活：默认家目录指针不变。
+    expect(store.current.activePackId).toBeNull()
+
+    const home = await packHome(env, first!.id)
+    const profile = await sim.readProfile(home, first!.id)
+    expect(profile.initialized).toBe(true)
+
+    // 激活自动包：指针切过去，家目录派生生效。
+    await manager.activatePack(first!.id)
+    expect(store.current.activePackId).toBe(first!.id)
+    expect((await store.readSettings()).dshHome).toBe(home)
+
+    // 重命名。
+    const renamed = await manager.renamePack(first!.id, '我的实验包')
+    expect(renamed.name).toBe('我的实验包')
+    expect((await manager.listPacks())[0].name).toBe('我的实验包')
+  })
+})
+
+// ===========================================================================
+// 场景 E：导出不含个人数据
+// ===========================================================================
+
+describe('pack E2E · 导出隐私边界', () => {
+  it('包家目录里的凭据/会话文件不进导出 zip', async () => {
+    const env = await makeEnv()
+    const store = makeSettingsStore(env)
+    const sim = createDshSimulator(store, env.pluginReceiptsPath)
+    const { manager } = makeManager(env, sim, store)
+
+    const alphaBody = await makePluginBody(env, 'alpha')
+    const manifest: PackManifest = {
+      name: 'Privacy Pack',
+      description: 'privacy boundary check',
+      version: '1.0.0',
+      plugins: [{ packageName: 'alpha', source: 'npm' }],
+    }
+    const zipPath = await writeStandardZip(env, 'privacy.zip', manifest, new Map([['alpha', alphaBody]]))
+    await manager.importPack(zipPath)
+
+    const home = await packHome(env, 'pack-privacy-pack')
+    await writeFile(path.join(home, '.credentials.yaml'), 'deepseek: { api_key: SECRET }\n', 'utf8')
+    await mkdir(path.join(home, 'sessions', 'proj'), { recursive: true })
+    await writeFile(path.join(home, 'sessions', 'proj', 'session.jsonl'), '{"secret":"chat"}', 'utf8')
+
+    const { zipPath: exported } = await manager.exportPack('pack-privacy-pack')
+    const entries = new AdmZip(Buffer.from(await readFile(exported))).getEntries().map(entry => entry.entryName)
+    expect(entries.some(entry => /credentials/i.test(entry))).toBe(false)
+    expect(entries.some(entry => /sessions/i.test(entry))).toBe(false)
+    expect(entries.some(entry => entry.includes('alpha'))).toBe(true)
+  })
+})
+
+// 防止 readdir 被 tree-shake 误报未使用（部分场景用目录枚举断言）。
+void readdir

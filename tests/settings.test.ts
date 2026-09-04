@@ -1,13 +1,21 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   adoptDetectedDsh,
+  createSettingsStore,
   defaultSettings,
   mergeStoredSettings,
   usesOnDemandDsh,
   validateSettings,
 } from '../electron/settings'
 import type { AppSettings } from '../src/types'
+
+const temporaryRoots: string[] = []
+afterEach(async () => {
+  await Promise.all(temporaryRoots.splice(0).map(root => rm(root, { recursive: true, force: true })))
+})
 
 const baseSettings: AppSettings = {
   dshInstallPath: '/home/tester/.dsh-runtime',
@@ -225,5 +233,70 @@ describe('adoptDetectedDsh', () => {
       executable: null,
       source: null,
     })).toBe(baseSettings)
+  })
+})
+
+describe('createSettingsStore 派生激活包家目录（真隔离咽喉点）', () => {
+  async function fixture(options: { activePackId?: string | null; homeFor?: (settings: AppSettings) => Promise<string | null> } = {}) {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'settings-derive-'))
+    temporaryRoots.push(root)
+    const filePath = path.join(root, 'settings.json')
+    const base = { ...baseSettings, activePackId: options.activePackId ?? null }
+    await writeFile(filePath, JSON.stringify(base), 'utf8')
+    const store = createSettingsStore({
+      filePath,
+      createDefaults: () => base,
+      detectInstalledDsh: async () => ({ installed: false, version: null, executable: null, source: null }),
+      resolvePackHome: options.homeFor,
+    })
+    return { store, filePath, root }
+  }
+
+  it('read() 返回激活包的私有家目录，readStored() 保持默认家目录', async () => {
+    const { store } = await fixture({
+      activePackId: 'pack-a',
+      homeFor: async () => '/packs/pack-a',
+    })
+    expect((await store.read()).dshHome).toBe('/packs/pack-a')
+    expect((await store.readStored()).dshHome).toBe('/home/tester/.dsh')
+  })
+
+  it('无激活包或注册表无目录时不派生', async () => {
+    const noPack = await fixture()
+    expect((await noPack.store.read()).dshHome).toBe('/home/tester/.dsh')
+    const missing = await fixture({ activePackId: 'pack-a', homeFor: async () => null })
+    expect((await missing.store.read()).dshHome).toBe('/home/tester/.dsh')
+  })
+
+  it('save() 剥离派生值：整包回传 read() 结果不会把包目录写进 settings.json', async () => {
+    const { store, filePath } = await fixture({
+      activePackId: 'pack-a',
+      homeFor: async () => '/packs/pack-a',
+    })
+    const derived = await store.read()
+    expect(derived.dshHome).toBe('/packs/pack-a')
+    const saved = await store.save({ ...derived, webPort: 3081 })
+    const onDisk = JSON.parse(await readFile(filePath, 'utf8')) as AppSettings
+    expect(onDisk.dshHome).toBe('/home/tester/.dsh')
+    expect(onDisk.activePackId).toBe('pack-a')
+    expect(saved.dshHome).toBe('/packs/pack-a') // 返回值仍是派生态
+  })
+
+  it('save() 保留用户主动改动的 dshHome（与派生值不同则视为编辑默认家目录）', async () => {
+    const { store, filePath } = await fixture({
+      activePackId: 'pack-a',
+      homeFor: async () => '/packs/pack-a',
+    })
+    await store.save({ ...baseSettings, activePackId: 'pack-a', dshHome: '/moved/default-home' })
+    const onDisk = JSON.parse(await readFile(filePath, 'utf8')) as AppSettings
+    expect(onDisk.dshHome).toBe('/moved/default-home')
+  })
+
+  it('activePackId 在 merge/validate 中存活', () => {
+    const merged = mergeStoredSettings(baseSettings, { activePackId: 'pack-x' })
+    expect(merged.activePackId).toBe('pack-x')
+    const validated = validateSettings({ ...baseSettings, activePackId: 'pack-x' })
+    expect(validated.activePackId).toBe('pack-x')
+    expect(validateSettings(baseSettings).activePackId).toBeNull()
   })
 })

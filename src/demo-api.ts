@@ -319,6 +319,20 @@ let demoPacks: PackStatus[] = [
     installedAt: '2026-08-11T14:00:00Z',
     updatedAt: '2026-08-11T14:00:00Z',
   },
+  {
+    id: 'pack-0-1-0-rc-7',
+    name: '0.1.0-rc.7',
+    description: '',
+    version: '1.0.0',
+    dshVersion: '0.1.0-rc.7',
+    source: 'created',
+    enabled: false,
+    auto: true,
+    state: 'complete',
+    plugins: [],
+    installedAt: '2026-08-12T12:00:00Z',
+    updatedAt: '2026-08-12T12:00:00Z',
+  },
 ]
 let demoAiStatus: AiInstallStatus = { phase: 'idle', repository: null, taskKind: 'repository-install', subject: null, startedAt: null, sessionId: null, message: '' }
 const demoPluginTrials = new Map<string, PluginTrialResult>()
@@ -1585,13 +1599,41 @@ export const demoApi: LauncherApi = {
     const pack = demoPacks.find(item => item.id === packId)
     if (!pack) throw new Error(`未找到整合包：${packId}`)
     demoPacks = demoPacks.map(item => ({ ...item, enabled: item.id === packId }))
-    demoSettings = { ...demoSettings, activePackId: packId }
+    demoSettings = { ...demoSettings, activePackId: packId, profileName: packId, ...(pack.dshVersion ? { dshVersion: pack.dshVersion } : {}) }
     return demoSettings
   },
-  deactivatePack: async () => {
-    demoPacks = demoPacks.map(item => ({ ...item, enabled: false }))
-    demoSettings = { ...demoSettings, activePackId: null }
-    return demoSettings
+  renamePack: async (packId, name) => {
+    const pack = demoPacks.find(item => item.id === packId)
+    if (!pack) throw new Error(`未找到整合包：${packId}`)
+    const next = { ...pack, name: name.trim(), updatedAt: new Date().toISOString() }
+    demoPacks = demoPacks.map(item => (item.id === packId ? next : item))
+    return next
+  },
+  createBlankPack: async request => {
+    const now = new Date().toISOString()
+    const slug = request.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'untitled'
+    let id = `pack-${slug}`
+    for (let index = 2; demoPacks.some(item => item.id === id); index += 1) id = `pack-${slug}-${index}`
+    const pack: PackStatus = {
+      id,
+      name: request.name.trim(),
+      description: '',
+      version: '1.0.0',
+      dshVersion: request.dshVersion ?? demoSettings.dshVersion ?? '0.1.0-rc.7',
+      source: 'created',
+      enabled: false,
+      state: 'complete',
+      plugins: [],
+      installedAt: now,
+      updatedAt: now,
+    }
+    demoPacks = [...demoPacks, pack]
+    return pack
+  },
+  packDiskUsage: async packId => {
+    const pack = demoPacks.find(item => item.id === packId)
+    if (!pack) throw new Error(`未找到整合包：${packId}`)
+    return 42_000_000 + pack.plugins.length * 18_000_000
   },
   removePack: async packId => {
     const before = demoPacks.length

@@ -30,6 +30,8 @@ import {
 } from './node-runtime'
 import { createProxyAwareFetch } from './network'
 import { createPackManager, type InstallInstaller, type PackInstallTarget, type PackManager } from './pack'
+import { migrateToPackHomesV2 } from './pack-migration'
+import { readPackRegistry } from './pack-registry'
 import { createPluginTrialManager, type PluginTrialManager } from './plugin-trial'
 import { readPluginReceipts, recordPluginInstall } from './plugin-receipts'
 import { configureProcessTracker, shutdownTrackedProcesses, withExecutableDirectoryOnPath } from './process'
@@ -41,7 +43,7 @@ import { installPresetFromDirectory } from './preset-install'
 import { installSkillFromDirectory } from './skill-install'
 import { createRendererEvents } from './renderer-events'
 import { createRuntimeController, type RuntimeController } from './runtime'
-import { createRuntimeVersionService, type RuntimeVersionService } from './runtime-versions'
+import { createRuntimeVersionService, ensureDshVersionInstalled, findManagedDshVersions, type RuntimeVersionService } from './runtime-versions'
 import { createSettingsStore, defaultSettings, type SettingsStore } from './settings'
 import { createTray, type TrayController } from './tray'
 import { recoverLegacyCredentials } from './dsh-credentials-compat'
@@ -101,6 +103,8 @@ function createServices(): Services {
   const skillReceiptsPath = path.join(userData, 'skill-installs.json')
   const skillSourceRoot = path.join(userData, 'skill-sources')
   const applicationRoot = path.join(userData, 'application-addons')
+  const packsJsonPath = path.join(userData, 'packs.json')
+  const packsRoot = path.join(userData, 'dsh-packs')
   const proxyAwareFetch = createProxyAwareFetch((input, init) => net.fetch(input, init))
   const githubAuth = createGitHubAuthService({
     filePath: path.join(userData, 'github-auth.bin'),
@@ -169,6 +173,12 @@ function createServices(): Services {
       managedRoot: settings.dshInstallPath,
       configuredExecutable: settings.launchExecutable,
     }),
+    // 整合包真隔离的咽喉点：read() 返回的 dshHome 即激活包的私有家目录（缺省 = 默认家目录）。
+    resolvePackHome: async current => {
+      if (!current.activePackId) return null
+      const records = await readPackRegistry(packsJsonPath)
+      return records.find(record => record.id === current.activePackId)?.homePath ?? null
+    },
   })
 
   let applicationAddons: ApplicationAddonManager
@@ -335,6 +345,10 @@ function createServices(): Services {
     emitOutput: (level, text) => events.output('plugin', level, text),
     emitProgress: progress => events.installProgress(progress),
     githubFetch: githubAuth.fetch,
+    // 装一个 DSH 版本 = 自动诞生一个以它命名的整合包（幂等；packManager 此时尚未赋值，闭包延后取用）。
+    onDshVersionInstalled: async version => {
+      await packManager?.ensurePackForVersion(version)
+    },
   })
 
   applicationAddons = createApplicationAddonManager({
@@ -532,7 +546,7 @@ function createServices(): Services {
   packManager = createPackManager({
     readSettings: () => settings.read(),
     saveSettings: next => settings.save(next),
-    registryPath: path.join(userData, 'packs.json'),
+    registryPath: packsJsonPath,
     manifestRoot: path.join(userData, 'pack-manifests'),
     snapshotRoot: path.join(userData, 'pack-snapshots'),
     pluginReceiptsPath,
@@ -545,6 +559,16 @@ function createServices(): Services {
     isRuntimeRunning: () => runtime.isRunning(),
     isInstallerBusy: () => installer.isBusy(),
     unifiedProfiles: true,
+    packsRoot,
+    readStoredSettings: () => settings.readStored(),
+    ensureDshVersionInstalled: async version => {
+      const current = await settings.read()
+      const installed = await findManagedDshVersions(current.dshInstallPath)
+      await ensureDshVersionInstalled(installed, next => runtimeVersions.installDsh(next), version)
+    },
+    selectDshVersion: async version => {
+      await runtimeVersions.selectDsh(version)
+    },
   })
 
   const launcherUpdater = createLauncherUpdater({
@@ -573,6 +597,16 @@ function createServices(): Services {
     const current = await settings.read()
     const result = await consolidatePluginPool(current.dshHome)
     if (result.dependencies > 0) events.output('plugin', 'info', `已将 ${result.dependencies} 个 Profile 插件依赖归并到共享插件池。`)
+  }).then(async () => {
+    await migrateToPackHomesV2({
+      registryPath: packsJsonPath,
+      packsRoot,
+      readStoredSettings: () => settings.readStored(),
+      saveSettings: next => settings.save(next),
+      listManagedDshVersions: findManagedDshVersions,
+      ensurePackForVersion: version => packManager.ensurePackForVersion(version),
+      isRuntimeRunning: () => runtime.isRunning(),
+    })
   }).catch(error => events.output('plugin', 'error', `旧整合包/插件池迁移失败：${error instanceof Error ? error.message : String(error)}`))
 
   return { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager: packManager!, githubAuth, applicationAddons, catalogSync, dshMarket, recommendedWebUi, runtimeVersions, profiles: profileService, profilePoolReady }

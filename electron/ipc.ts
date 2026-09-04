@@ -975,9 +975,19 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     return packManager.activatePack(packId)
   })
 
-  ipcMain.handle(IPC.packsDeactivate, () => {
+  ipcMain.handle(IPC.packsRename, async (_event, payload: { packId: string; name: string }) => {
+    if (!isSafeProfileName(payload.packId)) throw new Error('整合包标识无效。')
+    return packManager.renamePack(payload.packId, payload.name)
+  })
+
+  ipcMain.handle(IPC.packsCreateBlank, async (_event, request: { name: string; dshVersion: string | null }) => {
     assertProfileMutationAvailable()
-    return packManager.deactivatePack()
+    return packManager.createBlankPack(request)
+  })
+
+  ipcMain.handle(IPC.packsDiskUsage, (_event, packId: string) => {
+    if (!isSafeProfileName(packId)) throw new Error('整合包标识无效。')
+    return packManager.packDiskUsage(packId)
   })
 
   ipcMain.handle(IPC.packsRemove, async (_event, packId: string) => {

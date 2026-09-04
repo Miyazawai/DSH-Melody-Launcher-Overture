@@ -795,23 +795,30 @@ export function useLauncherStore() {
     const next = await run(`pack-activate:${packId}`, async () => {
       const settings = await api.activatePack(packId)
       setSettings(settings)
-      await refreshProfile()
-      await refreshPacks()
+      // 切包 = 切整个隔离环境：插件/技能/预设/运行环境读数全部随激活包家目录换脸。
+      await Promise.all([refreshProfile(), refreshPacks(), refreshSecondaryResources(), refreshRuntimeEnvironment()])
       return settings
-    }, { success: '整合包已启用，插件开关与顺序已应用。' })
+    }, { success: '已切换到该整合包，插件、技能与预设已随之更新。' })
     return next !== undefined
-  }, [api, refreshPacks, refreshProfile, run])
+  }, [api, refreshPacks, refreshProfile, refreshRuntimeEnvironment, refreshSecondaryResources, run])
 
-  const deactivatePack = useCallback(async (): Promise<boolean> => {
-    const next = await run('pack-deactivate', async () => {
-      const settings = await api.deactivatePack()
-      setSettings(settings)
-      await refreshProfile()
-      await refreshPacks()
-      return settings
-    }, { success: '已停用整合包，已恢复切换前的插件状态。' })
+  const renamePack = useCallback(async (packId: string, name: string): Promise<boolean> => {
+    const next = await run(`pack-rename:${packId}`, async () => {
+      const pack = await api.renamePack(packId, name)
+      applyPackUpdate(pack)
+      return pack
+    }, { success: '整合包已重命名。' })
     return next !== undefined
-  }, [api, refreshPacks, refreshProfile, run])
+  }, [api, applyPackUpdate, run])
+
+  const createBlankPack = useCallback(async (request: { name: string; dshVersion: string | null }): Promise<PackStatus | undefined> => {
+    const pack = await run('pack-create-blank', async () => {
+      const created = await api.createBlankPack(request)
+      await refreshPacks()
+      return created
+    }, { success: `整合包「${request.name}」已创建。` })
+    return pack
+  }, [api, refreshPacks, run])
 
   const removePack = useCallback(async (packId: string): Promise<boolean> => {
     const next = await run(`pack-remove:${packId}`, async () => {
@@ -1033,7 +1040,8 @@ export function useLauncherStore() {
     deleteProfile,
     refreshPackSnapshots,
     activatePack,
-    deactivatePack,
+    renamePack,
+    createBlankPack,
     removePack,
     exportPack,
     exportProfile,

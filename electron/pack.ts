@@ -7,7 +7,7 @@
 // Installer，测试注入 stub）。
 
 import { existsSync } from 'node:fs'
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type {
   AppSettings,
@@ -61,6 +61,8 @@ import { readPresetReceipts, type PresetInstallReceipt } from './preset-receipts
 import { readSkillReceipts, type SkillInstallReceipt } from './skill-receipts'
 import { createProfileSnapshot, restoreProfileSnapshot, type ProfileSnapshot } from './ai-install'
 import { isSafePackageName, isSafeProfileName, reorderPlugins } from './profile'
+import { samePath } from './settings'
+import { DEFAULT_PROFILE_NAME } from '../src/constants'
 import { ensureProfileCoreBundles, readProfileMetadata, writeProfileMetadata } from './profile-service'
 import { readPackManifest, removePackManifest, writePackManifest } from './pack-manifest-store'
 
@@ -122,6 +124,16 @@ export interface PackManagerOptions {
   dshHome?: string
   /** 新运行态：把每个整合包 id materialize 为 Profile。 */
   unifiedProfiles?: boolean
+  /** 新整合包私有 DSH 家目录的根（真隔离载体）；缺省 packs.json 同级的 dsh-packs/。 */
+  packsRoot?: string
+  /** 读未派生的存储态（settings.json 里的默认家目录）。 */
+  readStoredSettings?: () => Promise<AppSettings>
+  /** 确保某 DSH 版本已安装（缺失时补装）；激活/新建包时绑定版本用。 */
+  ensureDshVersionInstalled?: (version: string) => Promise<void>
+  /** 把启动可执行文件切到某个已安装的托管 DSH 版本。 */
+  selectDshVersion?: (version: string) => Promise<void>
+  /** DSH 版本安装成功后回调（自动补发同名整合包）。 */
+  onPackCreated?: (packId: string) => void
 }
 
 export interface PackManager {
@@ -132,8 +144,14 @@ export interface PackManager {
   importPack(filePath: string, items?: string[], options?: PackImportOptions): Promise<PackInstallResult>
   exportPack(packId: string, mode?: ProfileExportMode): Promise<{ zipPath: string; fileName: string }>
   activatePack(packId: string): Promise<AppSettings>
-  deactivatePack(): Promise<AppSettings>
   removePack(packId: string): Promise<{ removed: number }>
+  /** 为某 DSH 版本幂等补发自动整合包（已存在则原样返回）。 */
+  ensurePackForVersion(version: string): Promise<PackStatus | null>
+  renamePack(packId: string, name: string): Promise<PackStatus>
+  /** 新建空白整合包：私有家目录 + 选定 DSH 版本，不自动激活。 */
+  createBlankPack(request: { name: string; dshVersion: string | null }): Promise<PackStatus>
+  /** 整合包私有目录占用字节数（删除确认框展示）。 */
+  packDiskUsage(packId: string): Promise<number>
   rollback(): Promise<{ restored: number; profileName: string }>
   hasSnapshot(): Promise<boolean>
   addPackPlugin(packId: string, packageName: string): Promise<PackStatus>
@@ -187,6 +205,8 @@ export function createPackManager(options: PackManagerOptions): PackManager {
   let snapshot: ProfileSnapshot | null = null
   /** 兼容旧快照字段；共享 Profile 模式下始终为 false。 */
   let profileWasNew = false
+  /** 本次导入是否新建了私有家目录（回滚时整家删除；覆盖导入则只还原文件）。 */
+  let provisionedNewHome = false
   const manifestRoot = options.manifestRoot ?? path.join(path.dirname(options.registryPath), 'pack-manifests')
   const baselinePath = path.join(manifestRoot, 'default-state.json')
 
@@ -220,6 +240,48 @@ export function createPackManager(options: PackManagerOptions): PackManager {
   }
 
   const getDshHome = async (): Promise<string> => options.dshHome || (await options.readSettings()).dshHome
+  const packsRoot = options.packsRoot ?? path.join(path.dirname(options.registryPath), 'dsh-packs')
+
+  /** 存储的默认家目录（无私有目录的包共用；不受激活包派生影响）。 */
+  async function defaultHome(): Promise<string> {
+    if (options.dshHome) return options.dshHome
+    const stored = options.readStoredSettings ? await options.readStoredSettings() : await options.readSettings()
+    return stored.dshHome
+  }
+
+  /** 某包真正存放 Profile/技能/预设的根目录：私有目录优先，缺省落回默认家目录。 */
+  async function homeOfRecord(record: Pick<PackRecord, 'homePath'>): Promise<string> {
+    return record.homePath ?? await defaultHome()
+  }
+
+  /** 递归统计目录占用字节（条目数封顶，异常目录不失控）。 */
+  async function directorySize(root: string, budget: { entries: number } = { entries: 400_000 }): Promise<number> {
+    if (budget.entries-- <= 0) return 0
+    let total = 0
+    let entries
+    try {
+      entries = await readdir(root, { withFileTypes: true })
+    } catch {
+      return 0
+    }
+    for (const entry of entries) {
+      if (budget.entries-- <= 0) break
+      const full = path.join(root, entry.name)
+      if (entry.isDirectory()) total += await directorySize(full, budget)
+      else {
+        try {
+          total += (await stat(full)).size
+        } catch { /* 竞态删除，忽略 */ }
+      }
+    }
+    return total
+  }
+
+  /** 新包骨架：私有家目录 + profiles/<id>（核心 bundle + 元数据）。 */
+  async function seedPackHome(home: string, packId: string, meta: { description?: string; dshVersion?: string | null }): Promise<void> {
+    await mkdir(path.join(home, 'profiles'), { recursive: true })
+    await ensureUnifiedProfile(home, packId, packId, { description: meta.description ?? '', dshVersion: meta.dshVersion ?? null, source: 'local' })
+  }
 
   async function resolveImportedProfileId(
     baseId: string,
@@ -239,6 +301,58 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       if (isSafeProfileName(candidate) && !occupied(candidate)) return candidate
     }
     throw new Error(`Profile「${baseId}」已存在，无法生成新的导入名称。`)
+  }
+
+  /**
+   * 导入前置供给（真隔离的关键一步）：先把新包写进注册表（带私有家目录）并**立即激活**——
+   * 派生后的 dshHome 即指向新包目录，后续所有安装动作（npm add、技能/预设落盘、快照）
+   * 自然写进新包，整条既有安装管线零改动。覆盖导入时沿用既有记录的 homePath。
+   */
+  async function provisionPackHome(params: {
+    packId: string
+    existing: PackRecord[]
+    meta: { name: string; description: string; version: string; dshVersion?: string | null; source: PackRecord['source'] }
+  }): Promise<string> {
+    const prior = params.existing.find(record => record.id === params.packId)
+    provisionedNewHome = !prior?.homePath
+    const homePath = prior?.homePath ?? path.join(packsRoot, params.packId)
+    if (params.meta.dshVersion && options.ensureDshVersionInstalled) {
+      await options.ensureDshVersionInstalled(params.meta.dshVersion)
+      const before = await options.readSettings()
+      if (before.dshVersion !== params.meta.dshVersion && options.selectDshVersion) {
+        try {
+          await options.selectDshVersion(params.meta.dshVersion)
+        } catch (error) {
+          log('error', `切换 DSH ${params.meta.dshVersion} 失败，导入继续使用当前版本：${asErrorMessage(error)}`)
+        }
+      }
+    }
+    await seedPackHome(homePath, params.packId, { description: params.meta.description, dshVersion: params.meta.dshVersion })
+    const now = new Date().toISOString()
+    await upsertPackRecord(options.registryPath, {
+      id: params.packId,
+      name: params.meta.name,
+      description: params.meta.description,
+      version: params.meta.version,
+      ...(params.meta.dshVersion ? { dshVersion: params.meta.dshVersion } : {}),
+      homePath,
+      source: params.meta.source,
+      installedAt: prior?.installedAt ?? now,
+      updatedAt: now,
+      state: 'partial',
+      plugins: prior?.plugins ?? [],
+      ...(prior?.skills ? { skills: prior.skills } : {}),
+      ...(prior?.presets ? { presets: prior.presets } : {}),
+      ...(prior?.applications ? { applications: prior.applications } : {}),
+    })
+    const settings = options.readStoredSettings ? await options.readStoredSettings() : await options.readSettings()
+    await options.saveSettings({
+      ...settings,
+      activePackId: params.packId,
+      profileName: params.packId,
+      ...(params.meta.dshVersion ? { dshVersion: params.meta.dshVersion } : {}),
+    })
+    return homePath
   }
 
   /** 离线导入的插件本体缓存，不与 DSH Profile 绑定。 */
@@ -404,6 +518,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
     active = true
     snapshot = null
     profileWasNew = false
+    provisionedNewHome = false
   }
 
   const log = (level: 'info' | 'error' | 'success', text: string): void => {
@@ -516,37 +631,12 @@ export function createPackManager(options: PackManagerOptions): PackManager {
   return {
     async listPacks() {
       const settings = await options.readSettings()
-      if (options.unifiedProfiles) {
-        const dshHome = await getDshHome()
-        const profileRoot = path.join(dshHome, 'profiles')
-        const names = await readdir(profileRoot, { withFileTypes: true }).catch(() => [])
-        const statuses: PackStatus[] = []
-        for (const entry of names) {
-          if (!entry.isDirectory() || !isSafeProfileName(entry.name)) continue
-          const profile = await options.installer.readProfile(dshHome, entry.name)
-          if (!profile.initialized) continue
-          const metadata = await readProfileMetadata(dshHome, entry.name)
-          const plugins = profile.plugins.filter(plugin => !plugin.builtin).map(plugin => ({ packageName: plugin.packageName, enabled: plugin.enabled, version: plugin.version }))
-          const missing = plugins.filter(plugin => !existsSync(path.join(dshHome, 'profiles', entry.name, 'node_modules', ...plugin.packageName.split('/'))))
-          statuses.push({
-            id: entry.name,
-            name: metadata.name,
-            description: metadata.description,
-            version: '1.0.0',
-            dshVersion: metadata.dshVersion,
-            source: metadata.source?.kind === 'import' && metadata.source.format === 'zip' ? 'zip' : metadata.source?.kind === 'import' && metadata.source.format === 'yaml' ? 'manifest' : 'created',
-            enabled: entry.name === settings.profileName,
-            state: missing.length > 0 ? 'partial' : 'complete',
-            plugins,
-            installedAt: metadata.createdAt,
-            updatedAt: metadata.updatedAt,
-          })
-        }
-        return statuses.sort((a, b) => a.name.localeCompare(b.name))
-      }
       const records = await readPackRegistry(options.registryPath)
       await Promise.all(records.map(record => writeRecordManifest(record).catch(() => undefined)))
-      return records.map(record => toPackStatus(record, options.unifiedProfiles ? settings.profileName : settings.activePackId))
+      // 注册表是包的唯一清单；插件启用集由包内写操作（toggle/add/remove）实时维护进记录。
+      return records
+        .map(record => toPackStatus(record, settings.activePackId))
+        .sort((a, b) => a.installedAt.localeCompare(b.installedAt))
     },
 
     isBusy: () => active,
@@ -809,16 +899,24 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         if (/\.ya?ml$/i.test(filePath)) {
           const manifest = parsePackManifest(await readFile(filePath, 'utf8'), { requireDshVersion: true })
           const existing = await readPackRegistry(options.registryPath)
-          const dshHome = await getDshHome()
+          const currentHome = await getDshHome()
           const packId = await resolveImportedProfileId(
             packProfileName(importOptions?.name ?? manifest.name),
-            dshHome,
+            currentHome,
             existing,
             importOptions,
           )
           const settings = await options.readSettings()
           const profileName = options.unifiedProfiles ? packId : settings.profileName
-          if (options.unifiedProfiles) await ensureUnifiedProfile(dshHome, profileName, settings.profileName, { description: manifest.description, dshVersion: manifest.dshVersion, source: 'yaml' })
+          let dshHome = currentHome
+          if (options.unifiedProfiles) {
+            dshHome = await provisionPackHome({
+              packId,
+              existing,
+              meta: { name: manifest.name, description: manifest.description, version: manifest.version, dshVersion: manifest.dshVersion, source: 'manifest' },
+            })
+            await ensureUnifiedProfile(dshHome, profileName, settings.profileName, { description: manifest.description, dshVersion: manifest.dshVersion, source: 'yaml' })
+          }
           const profileBeforeInstall = await options.installer.readProfile(dshHome, profileName)
           if (importOptions?.overwrite && options.unifiedProfiles) {
             snapshot = await createProfileSnapshot(dshHome, profileName, options.snapshotRoot)
@@ -864,6 +962,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
             description: manifest.description,
             version: manifest.version,
             dshVersion: manifest.dshVersion,
+            ...(options.unifiedProfiles ? { homePath: dshHome } : {}),
             source: 'manifest',
             installedAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -890,12 +989,20 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           const packName = (importOptions?.name ?? '').trim() || nameHint
           if (!packName) throw new Error('无法确定整合包名称，请在预览中手动命名。')
           const existing = await readPackRegistry(options.registryPath)
-          const dshHome = await getDshHome()
-          const packId = await resolveImportedProfileId(assertMeaningfulPackName(packName), dshHome, existing, importOptions)
+          const currentHome = await getDshHome()
+          const packId = await resolveImportedProfileId(assertMeaningfulPackName(packName), currentHome, existing, importOptions)
           const settings = await options.readSettings()
           const dshVersion = await resolvePackDshVersion(settings)
           const profileName = options.unifiedProfiles ? packId : settings.profileName
-          if (options.unifiedProfiles) await ensureUnifiedProfile(dshHome, profileName, settings.profileName, { description: `非标准整合包：${packName}`, dshVersion, source: 'zip' })
+          let dshHome = currentHome
+          if (options.unifiedProfiles) {
+            dshHome = await provisionPackHome({
+              packId,
+              existing,
+              meta: { name: packName, description: `非标准整合包：${packName}`, version: '1.0.0', dshVersion, source: 'raw' },
+            })
+            await ensureUnifiedProfile(dshHome, profileName, settings.profileName, { description: `非标准整合包：${packName}`, dshVersion, source: 'zip' })
+          }
           const profileBeforeInstall = await options.installer.readProfile(dshHome, profileName)
           // items 缺省 = 全装；插件名、技能名、预设名各自独立过滤（理论上可能撞名）。
           const wantedPlugins = scan.plugins.filter(plugin => !items || items.includes(plugin.packageName))
@@ -999,6 +1106,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
             description: `非标准整合包：扫描到 ${scan.plugins.length} 个插件、${scan.skills.length} 个技能${scan.presets.length > 0 ? `、${scan.presets.length} 个预设` : ''}。`,
             version: '1.0.0',
             dshVersion,
+            ...(options.unifiedProfiles ? { homePath: dshHome } : {}),
             source: 'raw',
             installedAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -1025,11 +1133,19 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           await validateFullArchive(filePath, manifest)
         }
         const existing = await readPackRegistry(options.registryPath)
-        const dshHome = await getDshHome()
-        const packId = await resolveImportedProfileId(packProfileName(manifest.name), dshHome, existing, importOptions)
+        const currentHome = await getDshHome()
+        const packId = await resolveImportedProfileId(packProfileName(manifest.name), currentHome, existing, importOptions)
         const settings = await options.readSettings()
         const profileName = options.unifiedProfiles ? packId : settings.profileName
-        if (options.unifiedProfiles) await ensureUnifiedProfile(dshHome, profileName, settings.profileName, { description: manifest.description, dshVersion: manifest.dshVersion, source: 'zip' })
+        let dshHome = currentHome
+        if (options.unifiedProfiles) {
+          dshHome = await provisionPackHome({
+            packId,
+            existing,
+            meta: { name: manifest.name, description: manifest.description, version: manifest.version, dshVersion: manifest.dshVersion, source: inspection.hasBodies ? 'zip' : 'manifest' },
+          })
+          await ensureUnifiedProfile(dshHome, profileName, settings.profileName, { description: manifest.description, dshVersion: manifest.dshVersion, source: 'zip' })
+        }
         const profileBeforeInstall = await options.installer.readProfile(dshHome, profileName)
 
         // 决定要安装的包名集合：显式 items 优先，否则有 body 按 body，否则按 manifest。
@@ -1230,6 +1346,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           description: manifest.description,
           version: manifest.version,
           dshVersion: manifest.dshVersion,
+          ...(options.unifiedProfiles ? { homePath: dshHome } : {}),
           source: inspection.hasBodies ? 'zip' : 'manifest',
           installedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -1294,27 +1411,11 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       active = true
       let exportDir: string | null = null
       try {
-        const dshHome = await getDshHome()
         const settings = await options.readSettings()
+        // 导出的读取根 = 该包的家目录（私有包用自己的目录，不再依赖当前激活包）。
+        const record = await findRecord(packId)
+        const dshHome = await homeOfRecord(record)
         const currentProfile = await options.installer.readProfile(dshHome, options.unifiedProfiles ? packId : settings.profileName)
-        let record: PackRecord
-        try {
-          record = await findRecord(packId)
-        } catch (error) {
-          if (!options.unifiedProfiles || settings.profileName !== packId) throw error
-          record = {
-            id: packId,
-            name: packId.replace(/^pack-/, ''),
-            description: '',
-            version: '1.0.0',
-            ...(settings.dshVersion ? { dshVersion: settings.dshVersion } : {}),
-            source: 'created',
-            installedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            state: 'complete',
-            plugins: currentProfile.plugins.filter(plugin => !plugin.builtin).map(plugin => ({ packageName: plugin.packageName, enabled: plugin.enabled })),
-          }
-        }
         const exportProfileName = options.unifiedProfiles ? packId : settings.profileName
         const receipts = (await readPluginReceipts(options.pluginReceiptsPath))
           .filter(item => item.profileName === exportProfileName && record.plugins.some(plugin => plugin.packageName === item.packageName))
@@ -1425,37 +1526,23 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       beginTask()
       try {
         const record = await findRecord(packId)
-        const settings = await options.readSettings()
-        if (options.unifiedProfiles) {
-          const dshHome = await getDshHome()
-          const profileDir = path.join(dshHome, 'profiles', packId)
-          if (!existsSync(profileDir)) throw new Error(`Profile「${packId}」不存在，请先导入或创建该 Profile。`)
-          const metadata = await readProfileMetadata(dshHome, packId)
-          return options.saveSettings({ ...settings, profileName: packId, dshVersion: metadata.dshVersion, activePackId: null })
+        const home = await homeOfRecord(record)
+        // 私有家目录缺骨架时（旧记录/手工清理过）补齐，保证切过去即可读写。
+        if (!existsSync(path.join(home, 'profiles', packId))) {
+          await seedPackHome(home, packId, { description: record.description, dshVersion: record.dshVersion })
         }
-        if (!settings.activePackId) await saveBaseline(await currentBaseline(settings))
-        await applyPluginSet(settings.profileName, record.plugins, record.plugins.map(item => item.packageName))
-        for (const skill of record.skills ?? []) await options.installer.toggleSkill(skill.name, skill.enabled)
-        for (const preset of record.presets ?? []) await options.installer.togglePreset(preset.name, preset.enabled)
-        if (options.applicationAddons.toggle) {
-          for (const addon of record.applications ?? []) await options.applicationAddons.toggle(addon.id, addon.enabled)
+        if (record.dshVersion && options.ensureDshVersionInstalled) {
+          await options.ensureDshVersionInstalled(record.dshVersion)
         }
-        return options.saveSettings({ ...settings, activePackId: packId })
-      } finally {
-        active = false
-      }
-    },
-
-    async deactivatePack() {
-      const reason = guarded()
-      if (reason) throw new Error(reason)
-      beginTask()
-      try {
-        const settings = await options.readSettings()
-        if (options.unifiedProfiles) return settings
-        if (!settings.activePackId) return settings
-        await restoreBaseline(settings)
-        return options.readSettings()
+        // 以「未派生的存储态」为底，绝不把旧包的派生家目录写回 settings.json。
+        const settings = options.readStoredSettings ? await options.readStoredSettings() : await options.readSettings()
+        let base = settings
+        if (record.dshVersion && record.dshVersion !== settings.dshVersion && options.selectDshVersion) {
+          await options.selectDshVersion(record.dshVersion)
+          const after = await options.readSettings()
+          base = { ...settings, dshVersion: after.dshVersion, launchExecutable: after.launchExecutable, launchArgs: after.launchArgs }
+        }
+        return options.saveSettings({ ...base, activePackId: packId, profileName: packId })
       } finally {
         active = false
       }
@@ -1463,29 +1550,31 @@ export function createPackManager(options: PackManagerOptions): PackManager {
 
     async removePack(packId) {
       const settings = await options.readSettings()
-      const reason = (options.unifiedProfiles ? settings.profileName === packId : settings.activePackId === packId)
-        ? guarded()
-        : guardPackStart({
-            isRuntimeRunning: () => false,
-            isInstallerBusy: options.isInstallerBusy,
-            isPackBusy: () => active,
-          })
+      if (settings.activePackId === packId || isSelectedProfile(settings, packId)) {
+        throw new Error('当前激活的整合包不能删除，请先切换到其它整合包。')
+      }
+      // 删除未激活的包不动当前环境，DSH 运行中也允许；只与安装器/打包任务互斥。
+      const reason = guardPackStart({
+        isRuntimeRunning: () => false,
+        isInstallerBusy: options.isInstallerBusy,
+        isPackBusy: () => active,
+      })
       if (reason) throw new Error(reason)
       beginTask()
       try {
         const record = await findRecord(packId)
-        if (options.unifiedProfiles) {
-          if (settings.profileName === packId) throw new Error('当前 Profile 不能删除，请先切换到其他 Profile。')
-          const dshHome = await getDshHome()
-          await rm(path.join(dshHome, 'profiles', packId), { recursive: true, force: true })
-          await rm(packBodiesDir(dshHome, packId), { recursive: true, force: true }).catch(() => undefined)
-          const profileReceipts = (await readPluginReceipts(options.pluginReceiptsPath)).filter(item => item.profileName === packId)
-          for (const receipt of profileReceipts) {
-            await removePluginReceipt(options.pluginReceiptsPath, packId, receipt.packageName)
-          }
+        const stored = options.readStoredSettings ? await options.readStoredSettings() : settings
+        if (record.homePath && !samePath(record.homePath, stored.dshHome)) {
+          // 私有家目录：整个环境连会话、登录、插件一并删除（共享的 DSH 版本二进制不动）。
+          await rm(record.homePath, { recursive: true, force: true })
+        } else {
+          const home = stored.dshHome
+          await rm(path.join(home, 'profiles', packId), { recursive: true, force: true })
+          await rm(packBodiesDir(home, packId), { recursive: true, force: true }).catch(() => undefined)
         }
-        if (isSelectedProfile(settings, packId)) {
-          await restoreBaseline(settings)
+        const profileReceipts = (await readPluginReceipts(options.pluginReceiptsPath)).filter(item => item.profileName === packId)
+        for (const receipt of profileReceipts) {
+          await removePluginReceipt(options.pluginReceiptsPath, packId, receipt.packageName)
         }
         await removePackRecord(options.registryPath, packId)
         await removePackManifest(manifestRoot, packId)
@@ -1500,6 +1589,93 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       }
     },
 
+    async ensurePackForVersion(version) {
+      const normalized = version.trim().replace(/^v/i, '')
+      const packId = packProfileName(normalized)
+      const existing = await readPackRegistry(options.registryPath)
+      const prior = existing.find(record => record.id === packId)
+      const settings = await options.readSettings()
+      if (prior) return toPackStatus(prior, settings.activePackId)
+      const homePath = path.join(packsRoot, packId)
+      await seedPackHome(homePath, packId, { dshVersion: normalized })
+      const now = new Date().toISOString()
+      const record: PackRecord = {
+        id: packId,
+        name: normalized,
+        description: '',
+        version: '1.0.0',
+        dshVersion: normalized,
+        homePath,
+        auto: true,
+        source: 'created',
+        installedAt: now,
+        updatedAt: now,
+        state: 'complete',
+        plugins: [],
+      }
+      await upsertPackRecord(options.registryPath, record)
+      await writeRecordManifest(record).catch(() => undefined)
+      options.onPackCreated?.(packId)
+      return toPackStatus(record, settings.activePackId)
+    },
+
+    async renamePack(packId, name) {
+      const trimmed = name.trim()
+      if (!trimmed) throw new Error('整合包名称不能为空。')
+      const record = await findRecord(packId)
+      const next: PackRecord = { ...record, name: trimmed, updatedAt: new Date().toISOString() }
+      await upsertPackRecord(options.registryPath, next)
+      return toPackStatus(next, (await options.readSettings()).activePackId)
+    },
+
+    async createBlankPack(request) {
+      const reason = guarded()
+      if (reason) throw new Error(reason)
+      beginTask()
+      try {
+        const name = request.name.trim()
+        const baseId = packProfileName(name)
+        const existing = await readPackRegistry(options.registryPath)
+        let packId = baseId
+        let suffix = 1
+        while (existing.some(record => record.id === packId)) {
+          suffix += 1
+          if (suffix > 999) throw new Error('同名整合包过多，请换一个名字。')
+          packId = `${baseId}-${suffix}`
+        }
+        if (request.dshVersion && options.ensureDshVersionInstalled) {
+          await options.ensureDshVersionInstalled(request.dshVersion)
+        }
+        const homePath = path.join(packsRoot, packId)
+        await seedPackHome(homePath, packId, { dshVersion: request.dshVersion })
+        const now = new Date().toISOString()
+        const record: PackRecord = {
+          id: packId,
+          name,
+          description: '',
+          version: '1.0.0',
+          ...(request.dshVersion ? { dshVersion: request.dshVersion } : {}),
+          homePath,
+          source: 'created',
+          installedAt: now,
+          updatedAt: now,
+          state: 'complete',
+          plugins: [],
+        }
+        await upsertPackRecord(options.registryPath, record)
+        await writeRecordManifest(record).catch(() => undefined)
+        options.onPackCreated?.(packId)
+        return toPackStatus(record, (await options.readSettings()).activePackId)
+      } finally {
+        active = false
+      }
+    },
+
+    async packDiskUsage(packId) {
+      const record = await findRecord(packId)
+      return directorySize(await homeOfRecord(record))
+    },
+
     async rollback() {
       const reason = guarded()
       if (reason) throw new Error(reason)
@@ -1507,13 +1683,25 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       active = true
       try {
         const result = await restoreProfileSnapshot(snapshot)
-        // 共享 Profile 模式下回滚只恢复清单文件，绝不删除当前 Profile 目录。
-        if (profileWasNew && snapshot.profileName !== (await options.readSettings()).profileName) {
+        const newPrivateHome = options.unifiedProfiles && provisionedNewHome
+          && snapshot.dshHome.startsWith(packsRoot + path.sep)
+        if (newPrivateHome) {
+          // 本次导入新建的私有家目录：整家删除 + 注销记录，环境当作从未存在。
+          await rm(snapshot.dshHome, { recursive: true, force: true }).catch(() => undefined)
+          await removePackRecord(options.registryPath, snapshot.profileName).catch(() => undefined)
+          await removePackManifest(manifestRoot, snapshot.profileName).catch(() => undefined)
+        } else if (profileWasNew && snapshot.profileName !== (await options.readSettings()).profileName) {
+          // 共享 Profile 模式下回滚只恢复清单文件，绝不删除当前 Profile 目录。
           await rm(path.join(snapshot.dshHome, 'profiles', snapshot.profileName), { recursive: true, force: true }).catch(() => undefined)
           await removePackRecord(options.registryPath, snapshot.profileName).catch(() => undefined)
         }
-        const settings = await options.readSettings()
-        await options.saveSettings({ ...settings, activePackId: null })
+        const stored = options.readStoredSettings ? await options.readStoredSettings() : await options.readSettings()
+        // 指针回退：激活包被回滚删除时，落回默认包 web（若注册表里存在），否则清空。
+        const records = await readPackRegistry(options.registryPath)
+        const fallbackId = stored.activePackId && records.some(record => record.id === stored.activePackId)
+          ? stored.activePackId
+          : records.some(record => record.id === DEFAULT_PROFILE_NAME) ? DEFAULT_PROFILE_NAME : null
+        await options.saveSettings({ ...stored, activePackId: fallbackId, profileName: fallbackId ?? stored.profileName })
         options.emitEvent({ kind: 'status', message: `已还原快照 ${snapshot.id}` })
         return { restored: result.restored, profileName: snapshot.profileName }
       } finally {

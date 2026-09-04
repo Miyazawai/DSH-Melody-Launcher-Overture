@@ -289,6 +289,8 @@ export interface RuntimeVersionServiceOptions {
   emitProgress: (progress: InstallProgress) => void
   githubFetch?: typeof fetch
   runCommand?: (executable: string, args: string[], options: Parameters<typeof runCommand>[2]) => Promise<CommandResult>
+  /** 一个 DSH 版本安装成功后回调（整合包模型：装版本 = 自动诞生一个以它命名的整合包）。 */
+  onDshVersionInstalled?: (version: string) => Promise<void>
 }
 
 export interface RuntimeVersionService {
@@ -570,6 +572,13 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
       const status = await getManagedDshStatus(root)
       if (!status.installed || !status.executable) throw new Error(`DSH ${normalized} 安装完成但未找到启动入口。`)
       await options.saveSettings({ ...settings, dshVersion: normalized, launchExecutable: executable, launchArgs: ['web'] })
+      if (options.onDshVersionInstalled) {
+        try {
+          await options.onDshVersionInstalled(normalized)
+        } catch (error) {
+          options.emitOutput('error', `DSH ${normalized} 已安装，但自动创建整合包失败：${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
       options.emitProgress(progressFor(normalized, `DSH ${normalized} 已安装`, 'complete', 100))
       return read(true)
     }).catch(error => {

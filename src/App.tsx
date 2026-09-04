@@ -162,7 +162,6 @@ function LauncherShell() {
                     onSkillInstalled={store.applyCatalogSkillInstall}
                     onProfileChanged={() => { void store.refreshProfile() }}
                     onActivatePack={store.activatePack}
-                    onDeactivatePack={store.deactivatePack}
                     onRemovePack={store.removePack}
                     onExportPack={store.exportPack}
                     onOpenDshFolder={() => void api.openDshFolder()}
