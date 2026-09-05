@@ -4,10 +4,11 @@
  * 一次性迁移（存量数据零搬迁）：
  *   1) 默认家目录收编为默认整合包 `web`（homePath 缺省 = 共用默认家目录）；
  *   2) 默认家目录里其它已存在的 Profile 注册为共用家目录的包（旧导入包）；
- *   3) 保证 activePackId 永远指向一个存在的包（与 profileName 同步）。
+ *   3) 保证 activePackId 指向一个存在的包（与 profileName 同步）。
  *
- * 每次启动同步（syncAutoPacksForVersions）：已安装的 DSH 版本若没有对应自动包就补发；
- * 用户删过的（deletedAutoPacks 墓碑）不再复活。
+ * 迁移只跑一次（packsV2Migrated）：之后注册表为空 = 用户删光了所有包的零包引导态，
+ * 迁移不得重建任何包。每次启动同步（syncAutoPacksForVersions）：已安装的 DSH 版本若没有
+ * 对应自动包就补发；用户删过的（deletedAutoPacks 墓碑）不再复活。
  */
 
 import { readdir } from 'node:fs/promises'
@@ -35,8 +36,8 @@ export async function migrateToPackHomesV2(deps: PackHomeMigrationDeps): Promise
   const settings = await deps.readStoredSettings()
   const now = new Date().toISOString()
   const records = await readPackRegistry(deps.registryPath)
-  // 已迁移且注册表仍在：不重复注册（尊重用户删包）。注册表丢失则自愈重建。
-  if (settings.packsV2Migrated && records.length > 0) return
+  // 已迁移就不再跑：注册表为空 = 用户删光了所有包（零包引导态），绝不能重建复活。
+  if (settings.packsV2Migrated) return
 
   // 1) 默认包：homePath 缺省（永远跟随用户可改的默认家目录）。
   if (!records.some(record => record.id === DEFAULT_PACK_ID)) {

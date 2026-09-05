@@ -5,7 +5,7 @@ import path from 'node:path'
 import AdmZip from 'adm-zip'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AppSettings, InstalledSkill, PackManifest, PackPluginEntry, ProfileState } from '../src/types'
-import { createPackManager, type PackInstallTarget } from '../electron/pack'
+import { assertActivePackForStart, createPackManager, type PackInstallTarget } from '../electron/pack'
 import { buildPackZip, inspectPackZip } from '../electron/pack-zip'
 import { readPackRegistry, upsertPackRecord, type PackRecord } from '../electron/pack-registry'
 import { recordPluginInstall, type PluginInstallReceipt } from '../electron/plugin-receipts'
@@ -798,7 +798,7 @@ describe('removePack runtime guard', () => {
     expect(store.current.profileName).toBe('pack-y')
   })
 
-  it('deleting the only active pack recreates an empty default web pack', async () => {
+  it('deleting the only active pack leaves zero packs and clears the pointer', async () => {
     const env = await makeEnv()
     const stub = makeInstallerStub()
     stub.readProfile.mockResolvedValue({ ...defaultProfile, plugins: [managedPlugin('alpha')] })
@@ -808,11 +808,62 @@ describe('removePack runtime guard', () => {
     await upsertPackRecord(env.registryPath, recordFor('pack-x', [{ packageName: 'alpha', enabled: true }]))
 
     await manager.removePack('pack-x')
-    const records = await readPackRegistry(env.registryPath)
-    expect(records.map(r => r.id)).toEqual(['web'])
-    expect(store.current.activePackId).toBe('web')
-    expect(store.current.profileName).toBe('web')
-    expect(existsSync(path.join(env.dshHome, 'profiles', 'web', 'package.json'))).toBe(true)
+    expect(await readPackRegistry(env.registryPath)).toEqual([])
+    expect(store.current.activePackId).toBeNull()
+    // 零包引导态：不再自动新建兜底 web 包。
+    expect(existsSync(path.join(env.dshHome, 'profiles', 'web'))).toBe(false)
+  })
+})
+
+describe('assertActivePackForStart', () => {
+  const base = defaultSettings({ homeDirectory: os.homedir(), documentsDirectory: os.homedir() })
+
+  it('零包状态拒绝启动并引导新建', () => {
+    expect(() => assertActivePackForStart({ ...base, activePackId: null })).toThrow('还没有整合包')
+    expect(() => assertActivePackForStart({ ...base, activePackId: 'web' })).not.toThrow()
+  })
+})
+
+describe('零包引导闭环（自动激活）', () => {
+  it('没有激活包时新建空白包自动成为当前包', async () => {
+    const env = await makeEnv()
+    const stub = makeInstallerStub()
+    stub.readProfile.mockResolvedValue(defaultProfile)
+    const store = makeSettings(env.dshHome, 'web')
+    const { manager } = makeManager(env, stub, store)
+
+    const created = await manager.createBlankPack({ name: 'Fresh Pack', dshVersion: null })
+    expect(created.enabled).toBe(true)
+    expect(store.current.activePackId).toBe(created.id)
+    expect(store.current.profileName).toBe(created.id)
+  })
+
+  it('已有激活包时新建空白包不抢当前', async () => {
+    const env = await makeEnv()
+    const stub = makeInstallerStub()
+    stub.readProfile.mockResolvedValue(defaultProfile)
+    const store = makeSettings(env.dshHome, 'web')
+    const { manager } = makeManager(env, stub, store)
+    await upsertPackRecord(env.registryPath, recordFor('pack-x'))
+    store.current.activePackId = 'pack-x'
+
+    const created = await manager.createBlankPack({ name: 'Fresh Pack', dshVersion: null })
+    expect(created.enabled).toBe(false)
+    expect(store.current.activePackId).toBe('pack-x')
+  })
+
+  it('没有激活包时装版本：新自动包成为当前包', async () => {
+    const env = await makeEnv()
+    const stub = makeInstallerStub()
+    stub.readProfile.mockResolvedValue(defaultProfile)
+    const store = makeSettings(env.dshHome, 'web')
+    const { manager } = makeManager(env, stub, store)
+
+    const created = await manager.ensurePackForVersion('0.1.2-rc.1')
+    expect(created?.enabled).toBe(true)
+    expect(created?.auto).toBe(true)
+    expect(store.current.activePackId).toBe(created?.id)
+    expect(store.current.profileName).toBe(created?.id)
   })
 })
 

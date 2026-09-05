@@ -385,24 +385,18 @@ describe('pack E2E · 标准包生命周期（真隔离）', () => {
     expect(inspection.hasBodies).toBe(true)
     expect(inspection.bodyPackageNames).toEqual(['alpha'])
 
-    // 删除激活中的包被拒绝；切到新建空白包后才可删。
-    // 删除激活中的包：允许；没有其它包时自动新建空白默认包 web 接住指针。
+    // 删除激活中的包：允许；没有其它包时进入零包引导态（指针置空，不自动新建兜底包）。
     const removed = await manager.removePack('pack-alpha-pack')
     expect(removed.removed).toBe(1)
     expect(existsSync(home)).toBe(false)
-    expect((await readPackRegistry(env.registryPath)).map(r => r.id)).toEqual(['web'])
-    expect(store.current.activePackId).toBe('web')
-    expect(store.current.profileName).toBe('web')
+    expect(await readPackRegistry(env.registryPath)).toEqual([])
+    expect(store.current.activePackId).toBeNull()
     expect((await readPluginReceipts(env.pluginReceiptsPath)).filter(r => r.profileName === 'pack-alpha-pack')).toEqual([])
 
-    // 激活包切换后删旧默认包：共用家目录的包只删自己的 Profile 目录。
+    // 零包状态下新建空白包：自动成为当前包（引导闭环），不再有兜底 web 包可删。
     const blank = await manager.createBlankPack({ name: 'Blank', dshVersion: null })
     expect(await packHome(env, blank.id)).toBe(path.join(env.packsRoot, blank.id))
-    await manager.activatePack(blank.id)
     expect(store.current.activePackId).toBe(blank.id)
-    await manager.removePack('web')
-    expect((await readPackRegistry(env.registryPath)).map(r => r.id)).toEqual([blank.id])
-    expect(existsSync(path.join(env.dshHome, 'profiles', 'web'))).toBe(false)
 
     // 回导导出的 zip：重建独立环境。
     const exportedPath = path.join(env.root, 'roundtrip.zip')
@@ -529,7 +523,7 @@ describe('pack E2E · 中途失败回滚', () => {
 // ===========================================================================
 
 describe('pack E2E · 版本自动包与空白包', () => {
-  it('ensurePackForVersion 幂等且不改激活指针；空白包私有家目录可读', async () => {
+  it('ensurePackForVersion 幂等；零包时装版本自动包直接激活；空白包私有家目录可读', async () => {
     const env = await makeEnv()
     const store = makeSettingsStore(env)
     const sim = createDshSimulator(store, env.pluginReceiptsPath)
@@ -542,16 +536,13 @@ describe('pack E2E · 版本自动包与空白包', () => {
     expect(first!.name).toBe('0.2.0-rc.1')
     const records = await readPackRegistry(env.registryPath)
     expect(records).toHaveLength(1)
-    // 不激活：默认家目录指针不变。
-    expect(store.current.activePackId).toBeNull()
+    // 零包状态装版本：新自动包直接成为当前包（引导闭环）。
+    expect(store.current.activePackId).toBe(first!.id)
+    expect(second!.enabled).toBe(true)
 
     const home = await packHome(env, first!.id)
     const profile = await sim.readProfile(home, first!.id)
     expect(profile.initialized).toBe(true)
-
-    // 激活自动包：指针切过去，家目录派生生效。
-    await manager.activatePack(first!.id)
-    expect(store.current.activePackId).toBe(first!.id)
     expect((await store.readSettings()).dshHome).toBe(home)
 
     // 重命名。

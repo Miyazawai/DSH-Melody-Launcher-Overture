@@ -70,15 +70,15 @@ describe('migrateToPackHomesV2', () => {
     expect(env.stored.packsV2Migrated).toBe(true)
   })
 
-  it('注册表丢失但已迁移标记在位：自愈重建', async () => {
+  it('零包引导态：已迁移且注册表为空时不重建任何包', async () => {
     const env = await fixture()
     await migrateToPackHomesV2(env.deps)
-    const { rm } = await import('node:fs/promises')
-    await rm(env.registryPath, { force: true })
+    // 模拟用户删光了所有包：注册表清空、指针置空。
+    await writeFile(env.registryPath, '[]', 'utf8')
+    await env.deps.saveSettings({ ...env.stored, activePackId: null })
     await migrateToPackHomesV2(env.deps)
-    const records = await readPackRegistry(env.registryPath)
-    expect(records.map(r => r.id).sort()).toContain('web')
-    expect(env.stored.packsV2Migrated).toBe(true)
+    expect(await readPackRegistry(env.registryPath)).toEqual([])
+    expect(env.stored.activePackId).toBeNull()
   })
 
   it('幂等：已迁移后不再动指针；重复执行不重复注册', async () => {

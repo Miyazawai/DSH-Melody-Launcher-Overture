@@ -200,6 +200,14 @@ function assertSafePackId(packId: string): void {
   if (typeof packId !== 'string' || !isSafeProfileName(packId)) throw new Error('整合包标识无效。')
 }
 
+/**
+ * 启动 DSH 前的守卫：零包状态（用户删光了整合包）没有可运行的环境，
+ * 明确报错引导去「整合包」页新建或导入，而不是拿默认家目录静默启动。
+ */
+export function assertActivePackForStart(settings: AppSettings): void {
+  if (!settings.activePackId) throw new Error('还没有整合包：先到「整合包」页新建或导入一个，再启动。')
+}
+
 export function createPackManager(options: PackManagerOptions): PackManager {
   let active = false
   let snapshot: ProfileSnapshot | null = null
@@ -587,6 +595,28 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       isInstallerBusy: options.isInstallerBusy,
       isPackBusy: () => active,
     })
+  }
+
+  /** 激活包的公共核心：补骨架 → 确保版本 → 以未派生存储态为底写指针三件套。 */
+  async function activatePackRecord(record: PackRecord): Promise<AppSettings> {
+    const packId = record.id
+    const home = await homeOfRecord(record)
+    // 私有家目录缺骨架时（旧记录/手工清理过）补齐，保证切过去即可读写。
+    if (!existsSync(path.join(home, 'profiles', packId))) {
+      await seedPackHome(home, packId, { description: record.description, dshVersion: record.dshVersion })
+    }
+    if (record.dshVersion && options.ensureDshVersionInstalled) {
+      await options.ensureDshVersionInstalled(record.dshVersion)
+    }
+    // 以「未派生的存储态」为底，绝不把旧包的派生家目录写回 settings.json。
+    const settings = options.readStoredSettings ? await options.readStoredSettings() : await options.readSettings()
+    let base = settings
+    if (record.dshVersion && record.dshVersion !== settings.dshVersion && options.selectDshVersion) {
+      await options.selectDshVersion(record.dshVersion)
+      const after = await options.readSettings()
+      base = { ...settings, dshVersion: after.dshVersion, launchExecutable: after.launchExecutable, launchArgs: after.launchArgs }
+    }
+    return options.saveSettings({ ...base, activePackId: packId, profileName: packId })
   }
 
   async function findRecord(packId: string): Promise<PackRecord> {
@@ -1525,24 +1555,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       if (reason) throw new Error(reason)
       beginTask()
       try {
-        const record = await findRecord(packId)
-        const home = await homeOfRecord(record)
-        // 私有家目录缺骨架时（旧记录/手工清理过）补齐，保证切过去即可读写。
-        if (!existsSync(path.join(home, 'profiles', packId))) {
-          await seedPackHome(home, packId, { description: record.description, dshVersion: record.dshVersion })
-        }
-        if (record.dshVersion && options.ensureDshVersionInstalled) {
-          await options.ensureDshVersionInstalled(record.dshVersion)
-        }
-        // 以「未派生的存储态」为底，绝不把旧包的派生家目录写回 settings.json。
-        const settings = options.readStoredSettings ? await options.readStoredSettings() : await options.readSettings()
-        let base = settings
-        if (record.dshVersion && record.dshVersion !== settings.dshVersion && options.selectDshVersion) {
-          await options.selectDshVersion(record.dshVersion)
-          const after = await options.readSettings()
-          base = { ...settings, dshVersion: after.dshVersion, launchExecutable: after.launchExecutable, launchArgs: after.launchArgs }
-        }
-        return options.saveSettings({ ...base, activePackId: packId, profileName: packId })
+        return await activatePackRecord(await findRecord(packId))
       } finally {
         active = false
       }
@@ -1584,32 +1597,18 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           nextSettings = { ...nextSettings, deletedAutoPacks: [...tombstones] }
         }
         if (wasActive) {
-          // 删掉了激活包：落到剩余里最近的包；一个不剩就新建空白默认包，环境指针永远有效。
+          // 删掉了激活包：落到剩余里最近的包；一个不剩就置空指针进入零包引导态
+          // （界面引导新建/导入，启动守卫拦住无包启动），不再自动新建兜底包。
           const remaining = await readPackRegistry(options.registryPath)
-          let successor = remaining.find(record2 => record2.id === DEFAULT_PROFILE_NAME) ?? remaining[remaining.length - 1] ?? null
-          if (!successor) {
-            const now = new Date().toISOString()
-            successor = {
-              id: DEFAULT_PROFILE_NAME,
-              name: DEFAULT_PROFILE_NAME,
-              description: '',
-              version: '1.0.0',
-              ...(nextSettings.dshVersion ? { dshVersion: nextSettings.dshVersion } : {}),
-              source: 'created' as const,
-              installedAt: now,
-              updatedAt: now,
-              state: 'complete' as const,
-              plugins: [],
-            }
-            await seedPackHome(await defaultHome(), successor.id, { dshVersion: successor.dshVersion ?? null })
-            await upsertPackRecord(options.registryPath, successor)
-          }
-          nextSettings = {
-            ...nextSettings,
-            activePackId: successor.id,
-            profileName: successor.id,
-            ...(successor.dshVersion ? { dshVersion: successor.dshVersion } : {}),
-          }
+          const successor = remaining.find(record2 => record2.id === DEFAULT_PROFILE_NAME) ?? remaining[remaining.length - 1] ?? null
+          nextSettings = successor
+            ? {
+                ...nextSettings,
+                activePackId: successor.id,
+                profileName: successor.id,
+                ...(successor.dshVersion ? { dshVersion: successor.dshVersion } : {}),
+              }
+            : { ...nextSettings, activePackId: null }
         }
         await options.saveSettings(nextSettings)
         return {
@@ -1650,7 +1649,12 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       await upsertPackRecord(options.registryPath, record)
       await writeRecordManifest(record).catch(() => undefined)
       options.onPackCreated?.(packId)
-      return toPackStatus(record, settings.activePackId)
+      let activeSettings = settings
+      if (!settings.activePackId) {
+        // 零包状态下装版本：新自动包直接成为当前包（「下载版本」引导的落点）。
+        activeSettings = await activatePackRecord(record)
+      }
+      return toPackStatus(record, activeSettings.activePackId)
     },
 
     async renamePack(packId, name) {
@@ -1699,7 +1703,12 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         await upsertPackRecord(options.registryPath, record)
         await writeRecordManifest(record).catch(() => undefined)
         options.onPackCreated?.(packId)
-        return toPackStatus(record, (await options.readSettings()).activePackId)
+        let activeSettings = await options.readSettings()
+        if (!activeSettings.activePackId) {
+          // 零包状态下新建：直接成为当前包（空态引导「新建整合包」的落点）。
+          activeSettings = await activatePackRecord(record)
+        }
+        return toPackStatus(record, activeSettings.activePackId)
       } finally {
         active = false
       }

@@ -17,7 +17,7 @@ import type { LauncherUpdater } from './launcher-update'
 import type { AiInstaller } from './ai-install'
 import { assertMeaningfulPackName } from './pack-manifest'
 import { MAX_RAW_ARCHIVE_BYTES } from './pack-scan'
-import type { PackManager } from './pack'
+import { assertActivePackForStart, type PackManager } from './pack'
 import type { PluginTrialManager } from './plugin-trial'
 import type { CatalogSyncService } from './catalog-sync'
 import type { DshMarketService } from './dsh-market'
@@ -1063,6 +1063,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   ipcMain.handle(IPC.runtimeState, () => runtime.state())
   ipcMain.handle(IPC.runtimeStart, async () => {
     assertProfileMutationAvailable()
+    // 零包状态（删光了整合包）没有可运行的环境，明确引导去「整合包」页。
+    assertActivePackForStart(await settings.read())
     // 先启动 DSH，避免网络或 GitHub PR 操作阻塞用户进入本地运行环境。
     const state = await runtime.start()
     // 共享索引提交只作为后台任务执行；失败不会影响本次 DSH 启动。
