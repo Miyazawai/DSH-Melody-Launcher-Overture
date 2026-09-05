@@ -767,7 +767,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     if (newsRefreshing) return
     newsRefreshing = true
     void fetchNewsFeed(githubAuth.fetch)
-      .then(items => newsStore.write({ version: 2, fetchedAt: Date.now(), items }))
+      .then(items => newsStore.write({ version: 3, fetchedAt: Date.now(), items }))
       .catch((cause: unknown) => console.error('[juya-news] background refresh failed', cause))
       .finally(() => { newsRefreshing = false })
   }
@@ -780,7 +780,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     }
     try {
       const items = await fetchNewsFeed(githubAuth.fetch, JUYA_NEWS_FEED_URL)
-      await newsStore.write({ version: 2, fetchedAt: Date.now(), items })
+      await newsStore.write({ version: 3, fetchedAt: Date.now(), items })
       return { status: 'ok' as const, items }
     } catch (cause) {
       return { status: 'error' as const, message: cause instanceof Error ? cause.message : '订阅源读取失败' }

@@ -279,8 +279,34 @@ function NewsCard() {
   )
   else {
     const today = result.items[0]
+    const sections = today?.sections ?? []
     const headlines = today?.headlines ?? []
     if (!today) body = <span className="widget-muted">今日暂无日报条目</span>
+    else if (sections.length > 0) body = (
+      <div className="widget-news-wrap">
+        <div className="widget-news-head">
+          <span>今日早报</span>
+          <small>{shortDate(today.pubDate) || today.title}</small>
+        </div>
+        <div className="widget-news-scroll">
+          {sections.map(section => (
+            <div key={section.title} className="widget-news-section">
+              <div className="widget-news-section-title">{section.title}</div>
+              <ul className="widget-news">
+                {section.items.map(headline => (
+                  <li key={headline.link}>
+                    <button type="button" onClick={() => void api.openExternal(headline.link)} title={headline.text}>
+                      <span className="widget-news-dot" aria-hidden="true" />
+                      <span className="widget-news-text">{headline.text}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
     else if (headlines.length === 0) body = (
       <div className="widget-inline-row">
         <p className="widget-news-summary">{digestText(today.summary) || today.title}</p>

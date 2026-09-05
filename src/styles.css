@@ -887,6 +887,32 @@ input:focus-visible {
 
 .widget-news-wrap { display: flex; min-height: 0; flex-direction: column; gap: 4px; }
 
+/* 全栏目速览：超出卡片高度时滚动，塞得下一期所有栏目。 */
+.widget-news-scroll {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 288px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+}
+
+.widget-news-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.widget-news-section-title {
+  padding: 0 6px;
+  color: var(--quiet);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}
+
 .widget-news-head {
   display: flex;
   align-items: baseline;
@@ -984,7 +1010,6 @@ input:focus-visible {
 }
 
 .home-version-button small {
-  margin-left: auto;
   color: var(--muted);
   font-size: 11px;
   font-weight: 500;
@@ -996,6 +1021,12 @@ input:focus-visible {
 
 .home-version-button strong {
   font-size: 13px;
+}
+
+.home-version-chevron {
+  margin-left: auto;
+  flex: none;
+  color: var(--muted);
 }
 
 @keyframes launcher-rise {

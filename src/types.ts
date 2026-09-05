@@ -378,6 +378,12 @@ export interface NewsHeadline {
   link: string
 }
 
+/** 日报当日页「概览」下的一个栏目（要闻/模型发布/开发生态…）与其速览条目。 */
+export interface NewsSection {
+  title: string
+  items: NewsHeadline[]
+}
+
 export interface NewsItem {
   title: string
   link: string
@@ -385,6 +391,8 @@ export interface NewsItem {
   summary: string
   /** 仅当日最新条目会尝试解析；页面结构变化时为空，渲染层回退摘要。 */
   headlines?: NewsHeadline[]
+  /** 当日页的全部速览栏目（要闻只是第一个）；渲染层分组滚动展示。 */
+  sections?: NewsSection[]
 }
 
 export type NewsFeedResult = { status: 'ok'; items: NewsItem[] } | { status: 'error'; message: string }

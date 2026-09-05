@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseDeepSeekBalance } from '../electron/deepseek-balance'
-import { NEWS_CACHE_TTL_MS, lookupNewsCache, parseHeadlinesFromPage, parseRssFeed } from '../electron/juya-news'
+import { NEWS_CACHE_TTL_MS, lookupNewsCache, parseHeadlinesFromPage, parseNewsSectionsFromPage, parseRssFeed } from '../electron/juya-news'
 
 describe('parseDeepSeekBalance', () => {
   it('解析现行官方格式（字符串金额转数字，赠金/充值分列）', () => {
@@ -116,23 +116,66 @@ describe('lookupNewsCache', () => {
 
   it('TTL 内 fresh、超时 stale、无文件/坏结构 miss', () => {
     expect(lookupNewsCache(null, 0).status).toBe('miss')
-    expect(lookupNewsCache({ version: 2, fetchedAt: 1000, items }, 1000 + NEWS_CACHE_TTL_MS - 1).status).toBe('fresh')
-    expect(lookupNewsCache({ version: 2, fetchedAt: 1000, items }, 1000 + NEWS_CACHE_TTL_MS + 1).status).toBe('stale')
-    expect(lookupNewsCache({ version: 2, fetchedAt: 'x', items } as never, 0).status).toBe('miss')
-    expect(lookupNewsCache({ version: 2, fetchedAt: 0, items: 'no' } as never, 0).status).toBe('miss')
+    expect(lookupNewsCache({ version: 3, fetchedAt: 1000, items }, 1000 + NEWS_CACHE_TTL_MS - 1).status).toBe('fresh')
+    expect(lookupNewsCache({ version: 3, fetchedAt: 1000, items }, 1000 + NEWS_CACHE_TTL_MS + 1).status).toBe('stale')
+    expect(lookupNewsCache({ version: 3, fetchedAt: 'x', items } as never, 0).status).toBe('miss')
+    expect(lookupNewsCache({ version: 3, fetchedAt: 0, items: 'no' } as never, 0).status).toBe('miss')
   })
 
-  it('旧 version 1 缓存（无 headlines 字段）视为 miss 强制重拉', () => {
-    expect(lookupNewsCache({ version: 1, fetchedAt: 1000, items } as never, 1000).status).toBe('miss')
+  it('旧 version 2 缓存（无 sections 字段）视为 miss 强制重拉', () => {
+    expect(lookupNewsCache({ version: 2, fetchedAt: 1000, items } as never, 1000).status).toBe('miss')
   })
 
   it('headlines 字段透传并过滤非法项', () => {
     const withHeadlines = {
-      version: 2 as const,
+      version: 3 as const,
       fetchedAt: 1000,
       items: [{ ...items[0], headlines: [{ text: 'a', link: 'https://x' }, { text: 1 }, null] }],
     }
     const result = lookupNewsCache(withHeadlines as never, 1000)
     expect(result.items[0]?.headlines).toEqual([{ text: 'a', link: 'https://x' }])
+  })
+
+  it('sections 字段透传、过滤非法栏目并剔除空栏目', () => {
+    const withSections = {
+      version: 3 as const,
+      fetchedAt: 1000,
+      items: [{
+        ...items[0],
+        sections: [
+          { title: '要闻', items: [{ text: 'a', link: 'https://x' }, { text: 2 }] },
+          { title: '空栏目', items: [] },
+          null,
+        ],
+      }],
+    }
+    const result = lookupNewsCache(withSections as never, 1000)
+    expect(result.items[0]?.sections).toEqual([{ title: '要闻', items: [{ text: 'a', link: 'https://x' }] }])
+  })
+})
+
+describe('parseNewsSectionsFromPage', () => {
+  const ISSUE_PAGE = `<html><body>
+<h2>概览</h2>
+<h3>要闻</h3>
+<ul><li>OpenAI 发布 GPT-6 Astra <a href="https://openai.com/index/gpt-6-astra/">↗</a> <code>#1</code></li></ul>
+<h3>模型发布</h3>
+<ul><li>Meta 开源 4000 亿参数多语言模型 <a href="https://example.com/meta">↗</a> <code>#2</code></li></ul>
+<h3>空栏目</h3>
+<p>本期无内容。</p>
+<h2>要闻</h2>
+<p>正文详述，不应被当作速览栏目重复收录。</p>
+</body></html>`
+
+  it('按 h3 栏目分组收集速览条目，空栏目跳过', () => {
+    const sections = parseNewsSectionsFromPage(ISSUE_PAGE)
+    expect(sections.map(section => section.title)).toEqual(['要闻', '模型发布'])
+    expect(sections[0]?.items).toEqual([{ text: 'OpenAI 发布 GPT-6 Astra', link: 'https://openai.com/index/gpt-6-astra/' }])
+    expect(sections[1]?.items).toEqual([{ text: 'Meta 开源 4000 亿参数多语言模型', link: 'https://example.com/meta' }])
+  })
+
+  it('空页返回空表', () => {
+    expect(parseNewsSectionsFromPage('<html>nothing</html>')).toEqual([])
+    expect(parseNewsSectionsFromPage('')).toEqual([])
   })
 })

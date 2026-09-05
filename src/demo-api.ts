@@ -1288,6 +1288,54 @@ export const demoApi: LauncherApi = {
             { text: '智谱 GLM Coding Plan 推出夜间畅用活动', link: 'https://example.com/glm-night' },
             { text: 'Qoder 国际版宣布 Efficient 模型层级即日起对所有订阅用户免费', link: 'https://example.com/qoder-efficient' },
           ],
+          sections: [
+            {
+              title: '要闻',
+              items: [
+                { text: 'OpenAI 发布 GPT-6 Astra', link: 'https://openai.com/index/gpt-6-astra/' },
+                { text: 'OpenAI Astra 访问补偿政策：按天发放 banked reset', link: 'https://x.com/thsottiaux/status/2095651088502591861' },
+                { text: '英伟达宣布以约129亿美元收购Hugging Face', link: 'https://blogs.nvidia.com/blog/nvidia-to-acquire-hugging-face/' },
+              ],
+            },
+            {
+              title: '模型发布',
+              items: [
+                { text: 'Meta 开源 4000 亿参数多语言模型，权重与训练代码同步释出', link: 'https://example.com/section-meta' },
+                { text: '智谱 GLM-5.3 Flash 上线，延迟与价格同步下调', link: 'https://example.com/section-glm' },
+              ],
+            },
+            {
+              title: '开发生态',
+              items: [
+                { text: 'Qoder 国际版宣布 Efficient 模型层级即日起对所有订阅用户免费', link: 'https://example.com/qoder-efficient' },
+                { text: 'Cursor 发布 Tab 边预测边跳转的智能回跳', link: 'https://example.com/section-cursor' },
+              ],
+            },
+            {
+              title: '产品应用',
+              items: [
+                { text: '智谱 GLM Coding Plan 推出夜间畅用活动', link: 'https://example.com/glm-night' },
+              ],
+            },
+            {
+              title: '技术与洞察',
+              items: [
+                { text: '长上下文 RAG 的分块策略实测：语义分块胜过固定窗口', link: 'https://example.com/section-rag' },
+              ],
+            },
+            {
+              title: '行业动态',
+              items: [
+                { text: '英伟达宣布以约129亿美元收购Hugging Face', link: 'https://blogs.nvidia.com/blog/nvidia-to-acquire-hugging-face/' },
+              ],
+            },
+            {
+              title: '前瞻与传闻',
+              items: [
+                { text: '传 OpenAI 下季度推出自带虚拟员工的团队套餐', link: 'https://example.com/section-rumor' },
+              ],
+            },
+          ],
         },
         { title: 'OpenAI 推出 Agent 编排框架，支持跨会话记忆', link: 'https://example.com/2', pubDate: 'Thu, 03 Sep 2026 07:40:00 GMT', summary: '框架主打多智能体协作与工具调用的持久化状态管理。' },
         { title: 'Anthropic 公布 Claude 技能生态年度报告', link: 'https://example.com/3', pubDate: 'Thu, 03 Sep 2026 07:20:00 GMT', summary: '社区技能仓库数量同比增长 4 倍，文档处理类下载量居首。' },
