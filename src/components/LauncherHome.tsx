@@ -108,9 +108,12 @@ export function LauncherHome({
           </button>
         </div>
         <button type="button" className="launcher-utility-button home-version-button" onClick={onVersionSelect} title={activePack ? '切换到其它整合包' : '创建或导入整合包'}>
-          <span className="home-version-head"><Package size={16} /><strong>{activePack ? '切换整合包' : '新建整合包'}</strong></span>
-          <small>{activePack ? `当前：${activePack.name}${activePack.dshVersion ? ` · DSH ${activePack.dshVersion}` : ''}` : '还没有整合包，点击创建或导入'}</small>
-          <ChevronRight size={15} className="home-version-chevron" />
+          <Package size={20} className="home-version-icon" />
+          <span className="home-version-copy">
+            <small>{activePack ? '当前整合包' : '还没有整合包'}</small>
+            <strong>{activePack ? `${activePack.name}${activePack.dshVersion ? ` · DSH ${activePack.dshVersion}` : ''}` : '新建整合包'}</strong>
+          </span>
+          <ChevronRight size={16} className="home-version-chevron" />
         </button>
         </div>
       </section>

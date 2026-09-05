@@ -991,36 +991,47 @@ input:focus-visible {
   gap: 12px;
 }
 
+/* 与上方启动大按钮同构：图标 + 两行堆叠文字（灰标签/主文），最右箭头。 */
 .home-version-button {
   width: 100%;
-  min-height: 44px;
+  min-height: 56px;
   flex-direction: row;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
-  padding: 8px 14px;
+  gap: 11px;
+  padding: 0 14px;
 }
 
-.home-version-head {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
+.home-version-icon {
   flex: none;
+  color: var(--accent);
 }
 
-.home-version-button small {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 500;
-  white-space: nowrap;
+.home-version-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.home-version-copy small {
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 320px;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 600;
 }
 
-.home-version-button strong {
-  font-size: 13px;
+.home-version-copy strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  line-height: 17px;
 }
 
 .home-version-chevron {
