@@ -170,8 +170,16 @@ function LauncherShell() {
                     onTogglePlugin={store.togglePlugin}
                     onToggleSkill={store.toggleSkill}
                     onTogglePreset={store.togglePreset}
-                    onSkillInstalled={store.applyCatalogSkillInstall}
-                    onProfileChanged={() => { void store.refreshProfile() }}
+                    onSkillInstalled={result => {
+                      store.applyCatalogSkillInstall(result)
+                      // 包行计数是实时探测家目录的：装完技能刷一次让计数立刻可见。
+                      void store.refreshPacks()
+                    }}
+                    onProfileChanged={() => {
+                      void store.refreshProfile()
+                      // 插件安装/启停只写包家目录，包行计数实时探测自家目录：一并刷新。
+                      void store.refreshPacks()
+                    }}
                     onActivatePack={store.activatePack}
                     onRenamePack={store.renamePack}
                     onCreateBlankPack={(name, dshVersion) => store.createBlankPack({ name, dshVersion })}

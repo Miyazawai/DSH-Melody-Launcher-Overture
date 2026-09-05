@@ -912,7 +912,7 @@ function SettingsPacks({
           <button type="button" className="primary-command" onClick={onImport} disabled={busy}><Download size={15} />导入整合包</button>
         </div>
       </div>
-      <div className="settings-hint">每个整合包是一套真隔离环境（DSH 版本 + 插件 + 技能 + 预设 + 配置 + 会话），互不串扰；下载 DSH 版本会自动生成对应整合包，导入时缺少的版本也会自动下载。</div>
+      <div className="settings-hint">每个整合包是一套真隔离环境（DSH 版本 + 插件 + 技能 + 预设 + 配置 + 会话），互不串扰；整合包只由新建或导入产生，缺少的 DSH 版本会自动下载。</div>
       {creating && (
         <div className="settings-pack-create">
           <input
@@ -922,13 +922,14 @@ function SettingsPacks({
             onChange={event => setNewName(event.target.value)}
           />
           <select className="settings-pack-version-select" value={newVersion} onChange={event => setNewVersion(event.target.value)}>
-            <option value="">跟随当前版本</option>
-            {dshInstalledVersions.map(version => <option key={version} value={version}>DSH {version}</option>)}
+            {dshInstalledVersions.length === 0
+              ? <option value="" disabled>暂无已安装版本</option>
+              : dshInstalledVersions.map(version => <option key={version} value={version}>DSH {version}</option>)}
           </select>
           <button
             type="button"
             className="primary-command"
-            disabled={busy || newName.trim() === ''}
+            disabled={busy || newName.trim() === '' || newVersion === ''}
             onClick={() => { void onCreateBlank(newName.trim(), newVersion || null).then(ok => { if (ok) setCreating(false) }) }}
           >创建</button>
           <button type="button" className="secondary-button" onClick={() => setCreating(false)}>取消</button>
@@ -936,7 +937,7 @@ function SettingsPacks({
       )}
       {creating && dshInstalledVersions.length === 0 && (
         <div className="settings-pack-create-hint">
-          <span>还没有已安装的 DSH 版本：可以先创建，之后再下载。</span>
+          <span>还没有已安装的 DSH 版本，先去下载一个，再创建整合包。</span>
           <button type="button" className="secondary-button" onClick={() => onNavigateTab('versions')}>去下载版本</button>
         </div>
       )}
@@ -948,13 +949,13 @@ function SettingsPacks({
           <ol className="packs-onboarding-steps">
             <li>
               <span className="packs-onboarding-step-no">1</span>
-              <span className="packs-onboarding-step-text">新建一个整合包（没有激活包时会自动启用）</span>
-              <button type="button" className="primary-command" onClick={openCreateForm} disabled={busy}>新建整合包</button>
+              <span className="packs-onboarding-step-text">下载 DSH 版本{dshInstalledVersions.length > 0 ? `（已有 ${dshInstalledVersions.length} 个）` : ''}</span>
+              <button type="button" className="secondary-button" onClick={() => onNavigateTab('versions')}>去下载 →</button>
             </li>
             <li>
               <span className="packs-onboarding-step-no">2</span>
-              <span className="packs-onboarding-step-text">下载 DSH 版本{dshInstalledVersions.length > 0 ? `（已有 ${dshInstalledVersions.length} 个）` : ''}</span>
-              <button type="button" className="secondary-button" onClick={() => onNavigateTab('versions')}>去下载 →</button>
+              <span className="packs-onboarding-step-text">新建一个整合包并选择这个版本（没有激活包时会自动启用）</span>
+              <button type="button" className="primary-command" onClick={openCreateForm} disabled={busy}>新建整合包</button>
             </li>
             <li>
               <span className="packs-onboarding-step-no">3</span>
@@ -1005,7 +1006,6 @@ function SettingsPacks({
                   <span className="settings-pack-title-line">
                     <strong>{pack.name}</strong>
                     <span className="settings-pack-badge">v{pack.version}</span>
-                    {pack.auto && <span className="settings-pack-badge auto">自动</span>}
                     <button type="button" className="icon-button settings-pack-edit" onClick={() => setRenaming({ id: pack.id, value: pack.name })} title="重命名" aria-label="重命名"><Pencil size={13} /></button>
                   </span>
                 )}

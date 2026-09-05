@@ -330,7 +330,6 @@ let demoPacks: PackStatus[] = [
     dshVersion: '0.1.0-rc.7',
     source: 'created',
     enabled: false,
-    auto: true,
     state: 'complete',
     plugins: [],
     installedAt: '2026-08-12T12:00:00Z',

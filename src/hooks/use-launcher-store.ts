@@ -89,6 +89,10 @@ export function useLauncherStore() {
   const [processLogCount, setProcessLogCount] = useState(0)
   const progressLogBuckets = useRef<Record<string, { phase: InstallProgress['phase']; bucket: number; message: string }>>({})
   const catalogProgressLogState = useRef<Record<string, string>>({})
+  // 安装进度事件在 npm 下载/落盘阶段可能高频到达，每次都 setState 会引发全应用
+  // 重渲染风暴（输入框都跟着卡）。按时间窗合帧：120ms 内只渲染最后一帧；
+  // 完成/出错立即透传。定时器在卸载时清理。
+  const installProgressFrame = useRef<{ latest: InstallProgress | null; lastFlushAt: number; timer: number | null }>({ latest: null, lastFlushAt: 0, timer: null })
   const [selectedPlugin, setSelectedPlugin] = useState<string | null>(null)
   const [packs, setPacks] = useState<PackStatus[]>([])
   const [profiles, setProfiles] = useState<ProfileSummary[]>([])
@@ -203,7 +207,32 @@ export function useLauncherStore() {
       .catch(() => { /* 主进程已把网络失败转换为 error 状态 */ })
 
     const handleInstallProgress = (progress: InstallProgress) => {
-        setInstallProgress(progress)
+        const frame = installProgressFrame.current
+        if (progress.phase === 'complete' || progress.phase === 'error' || progress.phase !== frame.latest?.phase) {
+          // 终态与阶段切换立即渲染；挂起的尾随帧一并作废。
+          if (frame.timer != null) {
+            window.clearTimeout(frame.timer)
+            frame.timer = null
+          }
+          frame.latest = progress
+          frame.lastFlushAt = Date.now()
+          setInstallProgress(progress)
+        } else {
+          frame.latest = progress
+          const elapsed = Date.now() - frame.lastFlushAt
+          if (elapsed >= 120) {
+            frame.lastFlushAt = Date.now()
+            setInstallProgress(progress)
+          } else if (frame.timer == null) {
+            frame.timer = window.setTimeout(() => {
+              frame.timer = null
+              if (frame.latest) {
+                frame.lastFlushAt = Date.now()
+                setInstallProgress(frame.latest)
+              }
+            }, 120 - elapsed)
+          }
+        }
         const key = `${progress.kind}:${progress.repository}`
         const bucket = Math.floor(progress.percent / 10)
         const previous = progressLogBuckets.current[key]
@@ -279,6 +308,10 @@ export function useLauncherStore() {
       disposed = true
       window.removeEventListener('focus', onWindowFocus)
       unsubscribers.forEach(unsubscribe => unsubscribe())
+      if (installProgressFrame.current.timer != null) {
+        window.clearTimeout(installProgressFrame.current.timer)
+        installProgressFrame.current.timer = null
+      }
     }
   }, [api, showToast])
 
