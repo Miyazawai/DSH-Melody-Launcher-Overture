@@ -76,14 +76,21 @@ export function withDshWebPort(executable: string, args: string[], port: number)
 }
 
 /**
- * 整合包的 Profile 名不一定是 DSH 默认的 `web`：不带 `--profile` 时 DSH Web
- * 会打开默认 profile，包家目录里只有 `profiles/<包id>`，看起来就是空环境。
- * 默认 `web` 不注入（保持旧启动行为）；用户已自带 --profile 时不覆盖。
+ * 整合包的 profile 名不是默认 `web` 时，把 `web` 子命令别名换成显式的
+ * `--profile <名>` 前缀：`web` 是 `--profile web` 的硬编码别名，不接受父级
+ * `--profile`（实测报 "web takes none of parent --profile"，进程即刻退出）。
+ * `dsh --profile <名> --no-open --port N` 以该 profile 启动同一个 web 应用；
+ * 用户参数里已自带 --profile 时不覆盖。默认 web 保持原样不动。
  */
 export function withDshProfile(args: string[], profileName: string | null | undefined): string[] {
   if (!profileName || profileName === 'web') return [...args]
-  if (args.some((value, index) => value === '--profile')) return [...args]
-  return [...args, '--profile', profileName]
+  if (args.includes('--profile')) return [...args]
+  // npx 形态（--yes <pkg> web）下 --profile 必须落在包名之后、npx 旗标之后：
+  // 直接用 web 子命令 token 的位置做替换点。
+  const webIndex = args.findIndex((value, index) =>
+    value === 'web' && (index === 0 || args[index - 1] === DSH_PACKAGE_NAME))
+  if (webIndex === -1) return ['--profile', profileName, ...args]
+  return [...args.slice(0, webIndex), '--profile', profileName, ...args.slice(webIndex + 1)]
 }
 
 export async function isLoopbackPortAvailable(port: number): Promise<boolean> {

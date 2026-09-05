@@ -93,6 +93,8 @@ export function useLauncherStore() {
   // 重渲染风暴（输入框都跟着卡）。按时间窗合帧：120ms 内只渲染最后一帧；
   // 完成/出错立即透传。定时器在卸载时清理。
   const installProgressFrame = useRef<{ latest: InstallProgress | null; lastFlushAt: number; timer: number | null }>({ latest: null, lastFlushAt: 0, timer: null })
+  // 已提示过的运行时失败时间戳（同一失败只弹一次 toast）。
+  const runtimeFailureToastedAt = useRef<string | null>(null)
   const [selectedPlugin, setSelectedPlugin] = useState<string | null>(null)
   const [packs, setPacks] = useState<PackStatus[]>([])
   const [profiles, setProfiles] = useState<ProfileSummary[]>([])
@@ -275,7 +277,19 @@ export function useLauncherStore() {
         appendRuntimeLog(output)
         setProcessLogCount(current => current + 1)
       }),
-      api.onRuntimeState(setRuntime),
+      api.onRuntimeState(state => {
+        setRuntime(state)
+        // 非正常退出（如启动参数被 DSH 拒绝）主进程会记诊断；日志抽屉已移除，
+        // 这里用 toast 把原因递到用户眼前，避免「启动一会就停了」无从查起。
+        const failure = state.lastFailure
+        if (failure && failure.failedAt !== runtimeFailureToastedAt.current) {
+          runtimeFailureToastedAt.current = failure.failedAt
+          const lines = failure.diagnostics.split('\n').map(line => line.trim()).filter(Boolean)
+          const reason = lines.find(line => !line.startsWith('启动命令') && !line.startsWith('工作目录') && !line.startsWith('退出代码'))
+            ?? '进程没有输出诊断信息'
+          showToast({ kind: 'error', message: `DSH 异常退出：${reason}`.slice(0, 220) })
+        }
+      }),
       api.onInstallProgress(handleInstallProgress),
       api.onCatalogAnalysisProgress(handleCatalogAnalysisProgress),
       api.onDshMarketProgress(progress => {

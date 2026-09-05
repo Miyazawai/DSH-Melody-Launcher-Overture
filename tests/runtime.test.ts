@@ -123,9 +123,14 @@ describe('DSH Web 端口', () => {
     ])
   })
 
-  it('整合包 profile 非默认 web 时给启动参数追加 --profile', () => {
+  it('整合包 profile 非默认 web 时把 web 别名换成 --profile 前缀', () => {
+    // web 子命令是 --profile web 的硬编码别名，不接受父级 --profile；
+    // 必须去掉 web、把 --profile 放在最前（DSH 全局参数在子命令位之前）。
     expect(withDshProfile(['web', '--no-open', '--port', '3082'], 'test')).toEqual([
-      'web', '--no-open', '--port', '3082', '--profile', 'test',
+      '--profile', 'test', '--no-open', '--port', '3082',
+    ])
+    expect(withDshProfile(['--yes', '@deepseek-ai/dsh', 'web'], 'test')).toEqual([
+      '--yes', '@deepseek-ai/dsh', '--profile', 'test',
     ])
     // 默认 web 不注入，保持旧启动行为。
     expect(withDshProfile(['web'], 'web')).toEqual(['web'])
