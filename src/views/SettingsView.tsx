@@ -274,7 +274,7 @@ function SettingsVersions({
               title={item.version}
               subtitle={item.source === 'legacy' ? '旧目录' : undefined}
               enabled={item.selected}
-              selected
+              selected={item.selected}
               busy={busy}
               onRemove={item.removable ? () => { void onRemove(item.version) } : undefined}
             />
@@ -299,7 +299,7 @@ function SettingsVersions({
             {!dshProgress.indeterminate && dshProgress.percent > 0 && <strong>{dshProgress.percent}%</strong>}
           </div>
         )}
-        <div className="settings-hint">点「下载」直接安装该版本；完成后会自动设为当前使用，并生成一个同名整合包。</div>
+        <div className="settings-hint">点「下载」安装该版本并生成一个同名整合包；到整合包页切换即可使用，不会动当前环境。</div>
         {stable.length === 0 && prerelease.length === 0 && <div className="settings-empty">registry 里没有更多可下载的版本。</div>}
         <VersionGroup
           title="稳定版"
@@ -307,6 +307,7 @@ function SettingsVersions({
           expanded={expandedGroup === 'stable'}
           onToggle={() => setExpandedGroup(value => value === 'stable' ? null : 'stable')}
           busy={busy || dshProgress !== null}
+          installedVersions={installedVersions}
           onInstall={onInstall}
         />
         <VersionGroup
@@ -315,6 +316,7 @@ function SettingsVersions({
           expanded={expandedGroup === 'prerelease'}
           onToggle={() => setExpandedGroup(value => value === 'prerelease' ? null : 'prerelease')}
           busy={busy || dshProgress !== null}
+          installedVersions={installedVersions}
           onInstall={onInstall}
         />
       </section>
@@ -322,13 +324,14 @@ function SettingsVersions({
   )
 }
 
-/** 可下载版本分组：默认只露 5 条，组内可展开，避免长列表堆在一起。 */
+/** 可下载版本分组：默认只露 5 条，组内可展开；已安装的保留在列表里标「已安装」，最新发行版标「最新版」。 */
 function VersionGroup({
   title,
   candidates,
   expanded,
   onToggle,
   busy,
+  installedVersions,
   onInstall,
 }: {
   title: string
@@ -336,6 +339,7 @@ function VersionGroup({
   expanded: boolean
   onToggle: () => void
   busy: boolean
+  installedVersions: ReadonlySet<string>
   onInstall: (version: string) => Promise<boolean>
 }) {
   if (candidates.length === 0) return null
@@ -349,19 +353,27 @@ function VersionGroup({
         )}
       </div>
       <div className="settings-list">
-        {shown.map(candidate => (
-          <div key={candidate.version} className="settings-row">
-            <div className="settings-row-copy">
-              <strong>{candidate.version}</strong>
-              <span>{[candidate.label, candidate.date ? candidate.date.slice(0, 10) : null, candidate.prerelease ? '预发布' : null].filter(Boolean).join(' · ') || 'npm registry'}</span>
+        {shown.map(candidate => {
+          const installed = installedVersions.has(candidate.version)
+          return (
+            <div key={candidate.version} className={`settings-row ${installed ? 'installed' : ''}`}>
+              <div className="settings-row-copy">
+                <strong>
+                  {candidate.version}
+                  {candidate.label === 'latest' && <span className="settings-row-badge latest">最新版</span>}
+                </strong>
+                <span>{[candidate.label === 'latest' ? null : candidate.label, candidate.date ? candidate.date.slice(0, 10) : null, candidate.prerelease ? '预发布' : null].filter(Boolean).join(' · ') || 'npm registry'}</span>
+              </div>
+              <div className="settings-row-actions">
+                {installed
+                  ? <span className="settings-row-badge"><Check size={12} />已安装</span>
+                  : <button type="button" className="secondary-button" disabled={busy} onClick={() => { void onInstall(candidate.version) }}>
+                    {busy ? <LoaderCircle size={13} className="spin" /> : <Download size={13} />}下载
+                  </button>}
+              </div>
             </div>
-            <div className="settings-row-actions">
-              <button type="button" className="secondary-button" disabled={busy} onClick={() => { void onInstall(candidate.version) }}>
-                {busy ? <LoaderCircle size={13} className="spin" /> : <Download size={13} />}下载
-              </button>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

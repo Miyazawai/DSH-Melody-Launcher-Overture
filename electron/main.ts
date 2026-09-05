@@ -30,7 +30,7 @@ import {
 } from './node-runtime'
 import { createProxyAwareFetch } from './network'
 import { createPackManager, type InstallInstaller, type PackInstallTarget, type PackManager } from './pack'
-import { migrateToPackHomesV2 } from './pack-migration'
+import { migrateToPackHomesV2, syncAutoPacksForVersions, type PackHomeMigrationDeps } from './pack-migration'
 import { readPackRegistry } from './pack-registry'
 import { createPluginTrialManager, type PluginTrialManager } from './plugin-trial'
 import { readPluginReceipts, recordPluginInstall } from './plugin-receipts'
@@ -598,7 +598,7 @@ function createServices(): Services {
     const result = await consolidatePluginPool(current.dshHome)
     if (result.dependencies > 0) events.output('plugin', 'info', `已将 ${result.dependencies} 个 Profile 插件依赖归并到共享插件池。`)
   }).then(async () => {
-    await migrateToPackHomesV2({
+    const packSyncDeps: PackHomeMigrationDeps = {
       registryPath: packsJsonPath,
       packsRoot,
       readStoredSettings: () => settings.readStored(),
@@ -606,7 +606,10 @@ function createServices(): Services {
       listManagedDshVersions: findManagedDshVersions,
       ensurePackForVersion: version => packManager.ensurePackForVersion(version),
       isRuntimeRunning: () => runtime.isRunning(),
-    })
+    }
+    await migrateToPackHomesV2(packSyncDeps)
+    // 每次启动都同步：已装版本 ↔ 自动整合包（用户删过的有墓碑，不复活）。
+    await syncAutoPacksForVersions(packSyncDeps)
   }).catch(error => events.output('plugin', 'error', `旧整合包/插件池迁移失败：${error instanceof Error ? error.message : String(error)}`))
 
   return { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager: packManager!, githubAuth, applicationAddons, catalogSync, dshMarket, recommendedWebUi, runtimeVersions, profiles: profileService, profilePoolReady }

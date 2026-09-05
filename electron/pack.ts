@@ -1578,6 +1578,13 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         }
         await removePackRecord(options.registryPath, packId)
         await removePackManifest(manifestRoot, packId)
+        if (record.auto) {
+          // 自动包被用户删除：立墓碑，启动同步不再为该版本补发。
+          const after = options.readStoredSettings ? await options.readStoredSettings() : await options.readSettings()
+          const tombstones = new Set(after.deletedAutoPacks ?? [])
+          tombstones.add(packId)
+          await options.saveSettings({ ...after, deletedAutoPacks: [...tombstones] })
+        }
         return {
           removed: record.plugins.length
             + (record.presets?.length ?? 0)

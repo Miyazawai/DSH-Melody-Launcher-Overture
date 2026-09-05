@@ -126,6 +126,10 @@ function LauncherShell() {
                     pluginCount={profile.dependencyCount}
                     skillCount={store.installedSkills.length}
                     presetCount={store.installedPresets.length}
+                    activePack={(() => {
+                      const pack = store.packs.find(item => item.id === settings.activePackId)
+                      return pack ? { name: pack.name, dshVersion: pack.dshVersion } : null
+                    })()}
                     onToggleRuntime={toggleRuntime}
                     onVersionSelect={() => navigation.goHome('packs')}
                     onUpdateDsh={() => { void store.updateDsh() }}

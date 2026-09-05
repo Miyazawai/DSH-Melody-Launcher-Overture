@@ -177,12 +177,12 @@ describe('formatInstalls', () => {
 describe('partitionDshVersions', () => {
   const candidate = (version: string, prerelease: boolean) => ({ version, label: null, lts: null, date: null, prerelease })
 
-  it('剔除已安装版本，并按预发布标记分组', () => {
+  it('已安装版本保留在列表中，按预发布标记分组', () => {
     const grouped = partitionDshVersions(
       [candidate('0.1.0', false), candidate('0.1.1-rc.2', true), candidate('0.0.9', false)],
       new Set(['0.1.0']),
     )
-    expect(grouped.stable.map(item => item.version)).toEqual(['0.0.9'])
+    expect(grouped.stable.map(item => item.version)).toEqual(['0.1.0', '0.0.9'])
     expect(grouped.prerelease.map(item => item.version)).toEqual(['0.1.1-rc.2'])
   })
 })

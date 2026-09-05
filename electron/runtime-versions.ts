@@ -401,7 +401,7 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
           executable: item.executable,
           source: item.source,
           selected: item.version === inferredDsh,
-          removable: item.source === 'launcher' && item.version !== inferredDsh && !options.isRuntimeRunning(),
+          removable: item.version !== inferredDsh && !options.isRuntimeRunning(),
         })),
         ...(systemDsh ? [{
           version: systemDsh.version,
@@ -571,7 +571,11 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
       const executable = managedDshExecutable(root)
       const status = await getManagedDshStatus(root)
       if (!status.installed || !status.executable) throw new Error(`DSH ${normalized} 安装完成但未找到启动入口。`)
-      await options.saveSettings({ ...settings, dshVersion: normalized, launchExecutable: executable, launchArgs: ['web'] })
+      // 已有激活整合包绑着某个版本时，下载新版本不抢「当前」——去整合包页切过去才算换环境。
+      const adoptAsCurrent = !settings.activePackId || !settings.dshVersion
+      await options.saveSettings(adoptAsCurrent
+        ? { ...settings, dshVersion: normalized, launchExecutable: executable, launchArgs: ['web'] }
+        : settings)
       if (options.onDshVersionInstalled) {
         try {
           await options.onDshVersionInstalled(normalized)
@@ -604,10 +608,18 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
     const normalized = normalizeDshVersion(version)
     const settings = await options.readSettings()
     const item = (await findManagedDshVersions(settings.dshInstallPath)).find(entry => entry.version === normalized)
-    if (!item || item.source !== 'launcher') throw new Error('只能删除启动器托管的 DSH 版本。')
+    if (!item) throw new Error('只能删除启动器托管的 DSH 版本。')
     const launchMatches = item.executable.toLowerCase() === settings.launchExecutable.toLowerCase()
-    if (settings.dshVersion === normalized || launchMatches) throw new Error('当前 DSH 版本不能删除，请先切换到其他版本。')
-    await rm(item.root, { recursive: true, force: true })
+    if (settings.dshVersion === normalized || launchMatches) throw new Error('当前 DSH 版本不能删除，请先在整合包页切换到其它环境。')
+    if (item.source === 'legacy') {
+      // 旧目录布局的单安装：本体文件就在 runtimeRoot 下，但 versions/ 里可能有新版本，只清旧布局的文件。
+      await rm(path.join(item.root, 'node_modules'), { recursive: true, force: true })
+      for (const file of ['package.json', 'package-lock.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml']) {
+        await rm(path.join(item.root, file), { force: true }).catch(() => undefined)
+      }
+    } else {
+      await rm(item.root, { recursive: true, force: true })
+    }
     return read()
   }
 

@@ -252,15 +252,15 @@ export function skillInstallRequestFor(entry: SkillMarketEntry): SkillInstallReq
   }
 }
 
-/** 可下载版本分组：剔除已安装，按预发布标记拆成稳定/预发布两组（各自保持 registry 顺序）。 */
+/** 可下载版本分组：按预发布标记拆成稳定/预发布两组（各自保持 registry 顺序）。
+ * 已安装的版本保留在列表里由界面标「已安装」，不再剔除。 */
 export function partitionDshVersions(
   candidates: RuntimeVersionCandidate[],
-  installedVersions: ReadonlySet<string>,
+  _installedVersions: ReadonlySet<string>,
 ): { stable: RuntimeVersionCandidate[]; prerelease: RuntimeVersionCandidate[] } {
   const stable: RuntimeVersionCandidate[] = []
   const prerelease: RuntimeVersionCandidate[] = []
   for (const candidate of candidates) {
-    if (installedVersions.has(candidate.version)) continue
     if (candidate.prerelease) prerelease.push(candidate)
     else stable.push(candidate)
   }

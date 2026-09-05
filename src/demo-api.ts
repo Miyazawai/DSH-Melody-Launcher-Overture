@@ -58,7 +58,7 @@ let demoSettings: AppSettings = {
   webPort: 3080,
   openAfterLaunch: true,
   uiTheme: 'deepseek',
-  dshVersion: null,
+  dshVersion: '0.1.0-rc.7',
   nodeVersion: null,
 }
 
@@ -202,7 +202,10 @@ const demoNodeCandidates: RuntimeVersionCandidate[] = [
   { version: 'v24.19.0', label: 'Krypton', lts: 'Krypton', date: null, prerelease: false },
   { version: 'v22.19.0', label: 'Jod', lts: 'Jod', date: null, prerelease: false },
 ]
-let demoDshVersions: RuntimeEnvironmentState['dshInstalled'] = []
+let demoDshVersions: RuntimeEnvironmentState['dshInstalled'] = [
+  { version: '0.1.0-rc.7', root: 'C:\\Users\\demo\\AppData\\Roaming\\dsh-launcher\\dsh-runtime\\versions\\0.1.0-rc.7', executable: 'C:\\Users\\demo\\AppData\\Roaming\\dsh-launcher\\dsh-runtime\\versions\\0.1.0-rc.7\\node_modules\\.bin\\dsh.cmd', source: 'launcher', selected: true, removable: false },
+  { version: '0.1.0-rc.6', root: 'C:\\Users\\demo\\.dsh-runtime', executable: 'C:\\Users\\demo\\.dsh-runtime\\node_modules\\.bin\\dsh.cmd', source: 'legacy', selected: false, removable: true },
+]
 let demoNodeVersions: RuntimeEnvironmentState['nodeInstalled'] = [
   { version: 'system', root: 'C:\\Program Files\\nodejs', executable: 'C:\\Program Files\\nodejs\\node.exe', source: 'system', selected: true, removable: false },
 ]
@@ -704,7 +707,10 @@ export const demoApi: LauncherApi = {
     const item = { version: normalized, root: `${demoSettings.dshInstallPath}\\versions\\${normalized}`, executable: `${demoSettings.dshInstallPath}\\versions\\${normalized}\\node_modules\\.bin\\dsh.cmd`, source: 'launcher' as const, selected: true, removable: false }
     demoDshVersions = demoDshVersions.map(entry => ({ ...entry, selected: false, removable: true })).filter(entry => entry.version !== normalized)
     demoDshVersions.push(item)
-    demoSettings = { ...demoSettings, dshVersion: normalized, launchExecutable: item.executable, launchArgs: ['web'] }
+    // 与主进程一致：已有激活包绑版本时，下载新版本不抢「当前」。
+    if (!demoSettings.activePackId || !demoSettings.dshVersion) {
+      demoSettings = { ...demoSettings, dshVersion: normalized, launchExecutable: item.executable, launchArgs: ['web'] }
+    }
     demoDshInstallation = { installed: true, version: normalized, executable: item.executable, source: 'launcher' }
     return demoApi.readRuntimeEnvironment()
   },

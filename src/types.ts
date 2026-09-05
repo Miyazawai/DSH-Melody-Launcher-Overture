@@ -16,6 +16,8 @@ export interface AppSettings {
   activePackId?: string | null
   /** 一次性迁移「整合包=私有家目录」是否已执行。 */
   packsV2Migrated?: boolean
+  /** 用户删掉的自动整合包 id 墓碑：启动同步已装版本时不再复活。 */
+  deletedAutoPacks?: string[]
   workspace: string
   launchExecutable: string
   launchArgs: string[]

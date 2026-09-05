@@ -969,6 +969,28 @@ input:focus-visible {
   width: 100%;
 }
 
+.home-version-button > span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+}
+
+.home-version-button small {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+.home-version-button strong {
+  font-size: 12.5px;
+}
+
 @keyframes launcher-rise {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: none; }
@@ -7959,6 +7981,19 @@ input:focus-visible {
   color: var(--accent);
   font-size: 12px;
   font-weight: 700;
+}
+
+.settings-row-badge.latest {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  font-size: 10.5px;
+  vertical-align: 2px;
+}
+
+.settings-row.installed {
+  opacity: 0.72;
 }
 
 .settings-empty {

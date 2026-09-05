@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AppSettings } from '../src/types'
-import { migrateToPackHomesV2 } from '../electron/pack-migration'
+import { migrateToPackHomesV2, syncAutoPacksForVersions } from '../electron/pack-migration'
 import { readPackRegistry, upsertPackRecord, type PackRecord } from '../electron/pack-registry'
 import { defaultSettings } from '../electron/settings'
 
@@ -55,19 +55,16 @@ async function fixture() {
 }
 
 describe('migrateToPackHomesV2', () => {
-  it('收编默认包与存量 Profile，补发版本自动包，指针落到 web', async () => {
+  it('收编默认包与存量 Profile，指针落到 web（版本自动包由启动同步负责）', async () => {
     const env = await fixture()
     await migrateToPackHomesV2(env.deps)
     const records = await readPackRegistry(env.registryPath)
     const ids = records.map(record => record.id).sort()
-    expect(ids).toEqual(['0.1.0-rc.7'.replace('0.1.0-rc.7', 'pack-0.1.0-rc.7'), 'pack-0.1.2-rc.1', 'pack-legacy-import', 'web'].sort())
+    expect(ids).toEqual(['pack-legacy-import', 'web'])
     const web = records.find(record => record.id === 'web')!
     expect(web.homePath).toBeUndefined() // 默认包共用可改的默认家目录
     const legacy = records.find(record => record.id === 'pack-legacy-import')!
     expect(legacy.homePath).toBeUndefined()
-    const auto = records.find(record => record.id === 'pack-0.1.2-rc.1')!
-    expect(auto.auto).toBe(true)
-    expect(auto.homePath).toBe(path.join(env.packsRoot, 'pack-0.1.2-rc.1'))
     expect(env.stored.activePackId).toBe('web')
     expect(env.stored.profileName).toBe('web')
     expect(env.stored.packsV2Migrated).toBe(true)
@@ -107,5 +104,34 @@ describe('migrateToPackHomesV2', () => {
       readStoredSettings: async () => ({ ...env.stored, activePackId: 'pack-ghost', profileName: 'pack-ghost' }),
     })
     expect(env.stored.activePackId).toBe('web')
+  })
+})
+
+describe('syncAutoPacksForVersions（每次启动）', () => {
+  it('为已装版本补发自动包；注册表已有则跳过', async () => {
+    const env = await fixture()
+    await migrateToPackHomesV2(env.deps)
+    await syncAutoPacksForVersions(env.deps)
+    let records = await readPackRegistry(env.registryPath)
+    expect(records.map(r => r.id).sort()).toEqual(['pack-0.1.0-rc.7', 'pack-0.1.2-rc.1', 'pack-legacy-import', 'web'])
+    expect(records.find(r => r.id === 'pack-0.1.2-rc.1')!.auto).toBe(true)
+    await syncAutoPacksForVersions(env.deps)
+    records = await readPackRegistry(env.registryPath)
+    expect(records).toHaveLength(4)
+  })
+
+  it('用户删过的自动包立墓碑后不再复活', async () => {
+    const env = await fixture()
+    await migrateToPackHomesV2(env.deps)
+    await syncAutoPacksForVersions(env.deps)
+    // 模拟删除 pack-0.1.2-rc.1 并立墓碑。
+    const { removePackRecord } = await import('../electron/pack-registry')
+    await removePackRecord(env.registryPath, 'pack-0.1.2-rc.1')
+    const current = await env.deps.readStoredSettings()
+    await env.deps.saveSettings({ ...current, deletedAutoPacks: ['pack-0.1.2-rc.1'] })
+    await syncAutoPacksForVersions(env.deps)
+    const records = await readPackRegistry(env.registryPath)
+    expect(records.map(r => r.id)).not.toContain('pack-0.1.2-rc.1')
+    expect(records.map(r => r.id)).toContain('pack-0.1.0-rc.7')
   })
 })

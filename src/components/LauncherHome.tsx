@@ -22,6 +22,8 @@ interface LauncherHomeProps {
   pluginCount: number
   skillCount: number
   presetCount: number
+  /** 当前激活整合包（名称 + 绑定 DSH 版本），显示在「切换整合包」入口上。 */
+  activePack: { name: string; dshVersion: string | null } | null
   onToggleRuntime: () => void
   onVersionSelect: () => void
   onUpdateDsh: () => void
@@ -43,6 +45,7 @@ export function LauncherHome({
   pluginCount,
   skillCount,
   presetCount,
+  activePack,
   onToggleRuntime,
   onVersionSelect,
   onUpdateDsh,
@@ -101,7 +104,13 @@ export function LauncherHome({
             </span>
           </button>
         </div>
-        <button type="button" className="launcher-utility-button home-version-button" onClick={onVersionSelect} title="切换到其它整合包"><Package size={16} /><span>切换整合包</span></button>
+        <button type="button" className="launcher-utility-button home-version-button" onClick={onVersionSelect} title="切换到其它整合包">
+          <Package size={16} />
+          <span>
+            <small>当前整合包：{activePack ? activePack.name : '未选择'}{activePack?.dshVersion ? ` · DSH ${activePack.dshVersion}` : ''}</small>
+            <strong>切换整合包</strong>
+          </span>
+        </button>
         </div>
       </section>
     </div>
