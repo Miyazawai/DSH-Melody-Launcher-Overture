@@ -58,7 +58,9 @@ import {
 } from './pack-orchestration'
 import { readPluginReceipts, removePluginReceipt, type PluginInstallReceipt } from './plugin-receipts'
 import { readPresetReceipts, type PresetInstallReceipt } from './preset-receipts'
+import { readInstalledPresets } from './preset-install'
 import { readSkillReceipts, type SkillInstallReceipt } from './skill-receipts'
+import { readInstalledSkills } from './skill-format'
 import { createProfileSnapshot, restoreProfileSnapshot, type ProfileSnapshot } from './ai-install'
 import { isSafePackageName, isSafeProfileName, reorderPlugins } from './profile'
 import { samePath } from './settings'
@@ -132,7 +134,7 @@ export interface PackManagerOptions {
   ensureDshVersionInstalled?: (version: string) => Promise<void>
   /** 把启动可执行文件切到某个已安装的托管 DSH 版本。 */
   selectDshVersion?: (version: string) => Promise<void>
-  /** DSH 版本安装成功后回调（自动补发同名整合包）。 */
+  /** 包创建（新建/导入）后回调（刷新列表等）。 */
   onPackCreated?: (packId: string) => void
 }
 
@@ -145,8 +147,6 @@ export interface PackManager {
   exportPack(packId: string, mode?: ProfileExportMode): Promise<{ zipPath: string; fileName: string }>
   activatePack(packId: string): Promise<AppSettings>
   removePack(packId: string): Promise<{ removed: number }>
-  /** 为某 DSH 版本幂等补发自动整合包（已存在则原样返回）。 */
-  ensurePackForVersion(version: string): Promise<PackStatus | null>
   renamePack(packId: string, name: string): Promise<PackStatus>
   /** 新建空白整合包：私有家目录 + 选定 DSH 版本，不自动激活。 */
   createBlankPack(request: { name: string; dshVersion: string | null }): Promise<PackStatus>
@@ -658,15 +658,51 @@ export function createPackManager(options: PackManagerOptions): PackManager {
     return installed.map(packageName => ({ packageName, enabled: true }))
   }
 
+  /**
+   * 实时探测包家目录里的资源计数。注册表记录只在包级写操作（add/toggle/remove）
+   * 时维护，市场/npm 安装、技能与预设安装只写家目录不写记录——列表计数必须
+   * 以家目录为准，否则装完插件/技能后行上永远是 0。探测失败回落记录数组。
+   */
+  async function probePackResources(record: PackRecord): Promise<Pick<PackStatus, 'plugins' | 'skills' | 'presets'>> {
+    const fallback = {
+      plugins: record.plugins.map(plugin => ({ packageName: plugin.packageName, enabled: plugin.enabled, version: plugin.version })),
+      ...(record.skills ? { skills: record.skills.map(skill => ({ ...skill })) } : {}),
+      ...(record.presets ? { presets: record.presets.map(preset => ({ ...preset })) } : {}),
+    }
+    try {
+      const home = await homeOfRecord(record)
+      const [profile, skills, presets] = await Promise.all([
+        options.installer.readProfile(home, record.id).catch(() => null),
+        readInstalledSkills(home).catch(() => null),
+        readInstalledPresets(home).catch(() => null),
+      ])
+      if (profile) {
+        fallback.plugins = profile.plugins
+          .filter(plugin => !plugin.builtin)
+          .map(plugin => ({ packageName: plugin.packageName, enabled: plugin.enabled, version: plugin.version }))
+      }
+      if (skills) {
+        fallback.skills = skills.map(skill => ({ name: skill.name, format: skill.format, enabled: skill.enabled, description: skill.description }))
+      }
+      if (presets) {
+        fallback.presets = presets.map(preset => ({ name: preset.name, enabled: preset.enabled }))
+      }
+    } catch {
+      // 家目录不可读（如迁移中的半成品包）时用记录数组兜底。
+    }
+    return fallback
+  }
+
   return {
     async listPacks() {
       const settings = await options.readSettings()
       const records = await readPackRegistry(options.registryPath)
       await Promise.all(records.map(record => writeRecordManifest(record).catch(() => undefined)))
-      // 注册表是包的唯一清单；插件启用集由包内写操作（toggle/add/remove）实时维护进记录。
-      return records
-        .map(record => toPackStatus(record, settings.activePackId))
-        .sort((a, b) => a.installedAt.localeCompare(b.installedAt))
+      const statuses = await Promise.all(records.map(async record => {
+        const status = toPackStatus(record, settings.activePackId)
+        return { ...status, ...(await probePackResources(record)) }
+      }))
+      return statuses.sort((a, b) => a.installedAt.localeCompare(b.installedAt))
     },
 
     isBusy: () => active,
@@ -1590,12 +1626,6 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         await removePackRecord(options.registryPath, packId)
         await removePackManifest(manifestRoot, packId)
         let nextSettings = stored
-        if (record.auto) {
-          // 自动包被用户删除：立墓碑，启动同步不再为该版本补发。
-          const tombstones = new Set(stored.deletedAutoPacks ?? [])
-          tombstones.add(packId)
-          nextSettings = { ...nextSettings, deletedAutoPacks: [...tombstones] }
-        }
         if (wasActive) {
           // 删掉了激活包：落到剩余里最近的包；一个不剩就置空指针进入零包引导态
           // （界面引导新建/导入，启动守卫拦住无包启动），不再自动新建兜底包。
@@ -1620,41 +1650,6 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       } finally {
         active = false
       }
-    },
-
-    async ensurePackForVersion(version) {
-      const normalized = version.trim().replace(/^v/i, '')
-      const packId = packProfileName(normalized)
-      const existing = await readPackRegistry(options.registryPath)
-      const prior = existing.find(record => record.id === packId)
-      const settings = await options.readSettings()
-      if (prior) return toPackStatus(prior, settings.activePackId)
-      const homePath = path.join(packsRoot, packId)
-      await seedPackHome(homePath, packId, { dshVersion: normalized })
-      const now = new Date().toISOString()
-      const record: PackRecord = {
-        id: packId,
-        name: normalized,
-        description: '',
-        version: '1.0.0',
-        dshVersion: normalized,
-        homePath,
-        auto: true,
-        source: 'created',
-        installedAt: now,
-        updatedAt: now,
-        state: 'complete',
-        plugins: [],
-      }
-      await upsertPackRecord(options.registryPath, record)
-      await writeRecordManifest(record).catch(() => undefined)
-      options.onPackCreated?.(packId)
-      let activeSettings = settings
-      if (!settings.activePackId) {
-        // 零包状态下装版本：新自动包直接成为当前包（「下载版本」引导的落点）。
-        activeSettings = await activatePackRecord(record)
-      }
-      return toPackStatus(record, activeSettings.activePackId)
     },
 
     async renamePack(packId, name) {

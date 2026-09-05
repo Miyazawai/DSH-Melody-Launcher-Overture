@@ -12,6 +12,7 @@ import {
   findAvailableWebPort,
   isDshWebLaunch,
   runtimeEnvironment,
+  withDshProfile,
   withDshWebPort,
 } from '../electron/runtime'
 import type { ApplicationLaunchPlan } from '../electron/application-addons'
@@ -120,6 +121,18 @@ describe('DSH Web 端口', () => {
     expect(withDshWebPort('npx', ['--yes', '@deepseek-ai/dsh', 'web', '--port=4000'], 3083)).toEqual([
       '--yes', '@deepseek-ai/dsh', 'web', '--no-open', '--port', '3083',
     ])
+  })
+
+  it('整合包 profile 非默认 web 时给启动参数追加 --profile', () => {
+    expect(withDshProfile(['web', '--no-open', '--port', '3082'], 'test')).toEqual([
+      'web', '--no-open', '--port', '3082', '--profile', 'test',
+    ])
+    // 默认 web 不注入，保持旧启动行为。
+    expect(withDshProfile(['web'], 'web')).toEqual(['web'])
+    expect(withDshProfile(['web'], null)).toEqual(['web'])
+    expect(withDshProfile(['web'], undefined)).toEqual(['web'])
+    // 用户已自带 --profile 时不覆盖。
+    expect(withDshProfile(['web', '--profile', 'custom'], 'test')).toEqual(['web', '--profile', 'custom'])
   })
 
   it('首选端口占用时选择后续端口', async () => {

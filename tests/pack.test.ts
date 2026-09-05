@@ -851,20 +851,6 @@ describe('零包引导闭环（自动激活）', () => {
     expect(created.enabled).toBe(false)
     expect(store.current.activePackId).toBe('pack-x')
   })
-
-  it('没有激活包时装版本：新自动包成为当前包', async () => {
-    const env = await makeEnv()
-    const stub = makeInstallerStub()
-    stub.readProfile.mockResolvedValue(defaultProfile)
-    const store = makeSettings(env.dshHome, 'web')
-    const { manager } = makeManager(env, stub, store)
-
-    const created = await manager.ensurePackForVersion('0.1.2-rc.1')
-    expect(created?.enabled).toBe(true)
-    expect(created?.auto).toBe(true)
-    expect(store.current.activePackId).toBe(created?.id)
-    expect(store.current.profileName).toBe(created?.id)
-  })
 })
 
 // ---------------------------------------------------------------------------

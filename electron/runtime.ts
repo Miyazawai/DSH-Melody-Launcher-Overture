@@ -75,6 +75,17 @@ export function withDshWebPort(executable: string, args: string[], port: number)
   return [...next, '--port', String(port)]
 }
 
+/**
+ * 整合包的 Profile 名不一定是 DSH 默认的 `web`：不带 `--profile` 时 DSH Web
+ * 会打开默认 profile，包家目录里只有 `profiles/<包id>`，看起来就是空环境。
+ * 默认 `web` 不注入（保持旧启动行为）；用户已自带 --profile 时不覆盖。
+ */
+export function withDshProfile(args: string[], profileName: string | null | undefined): string[] {
+  if (!profileName || profileName === 'web') return [...args]
+  if (args.some((value, index) => value === '--profile')) return [...args]
+  return [...args, '--profile', profileName]
+}
+
 export async function isLoopbackPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const server = createServer()
@@ -271,6 +282,7 @@ export function createRuntimeController(options: RuntimeControllerOptions): Runt
       }
       port = selectedPort
       launchArgs = withDshWebPort(executable, launchArgs, selectedPort)
+      launchArgs = withDshProfile(launchArgs, settings.profileName)
       if (selectedPort === settings.webPort) {
         options.emitOutput('info', `Web 端口：${selectedPort}`)
       } else {

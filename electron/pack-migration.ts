@@ -1,31 +1,25 @@
 /**
- * 「整合包 = 真隔离环境」迁移与启动同步。
+ * 「整合包 = 真隔离环境」一次性迁移。
  *
- * 一次性迁移（存量数据零搬迁）：
  *   1) 默认家目录收编为默认整合包 `web`（homePath 缺省 = 共用默认家目录）；
  *   2) 默认家目录里其它已存在的 Profile 注册为共用家目录的包（旧导入包）；
  *   3) 保证 activePackId 指向一个存在的包（与 profileName 同步）。
  *
  * 迁移只跑一次（packsV2Migrated）：之后注册表为空 = 用户删光了所有包的零包引导态，
- * 迁移不得重建任何包。每次启动同步（syncAutoPacksForVersions）：已安装的 DSH 版本若没有
- * 对应自动包就补发；用户删过的（deletedAutoPacks 墓碑）不再复活。
+ * 迁移不得重建任何包。整合包只由「新建 / 导入」产生，下载 DSH 版本不再自动建包。
  */
 
 import { readdir } from 'node:fs/promises'
 import path from 'node:path'
 import type { AppSettings } from '../src/types'
-import { packProfileName } from './pack-manifest'
 import { isSafeProfileName } from './profile'
 import { readProfileMetadata } from './profile-service'
 import { readPackRegistry, upsertPackRecord } from './pack-registry'
 
 export interface PackHomeMigrationDeps {
   registryPath: string
-  packsRoot: string
   readStoredSettings: () => Promise<AppSettings>
   saveSettings: (settings: AppSettings) => Promise<AppSettings>
-  listManagedDshVersions: (runtimeRoot: string) => Promise<Array<{ version: string }>>
-  ensurePackForVersion: (version: string) => Promise<unknown>
   isRuntimeRunning: () => boolean
 }
 
@@ -83,28 +77,4 @@ export async function migrateToPackHomesV2(deps: PackHomeMigrationDeps): Promise
   const wanted = settings.activePackId ?? settings.profileName
   const activeId = finalRecords.some(record => record.id === wanted) ? wanted : DEFAULT_PACK_ID
   await deps.saveSettings({ ...settings, activePackId: activeId, profileName: activeId, packsV2Migrated: true })
-}
-
-/**
- * 启动同步：每个已安装的托管 DSH 版本都应有对应的自动整合包；缺失则补发。
- * 用户删过的自动包（deletedAutoPacks 墓碑）不再复活。幂等、开销极小，每次启动都跑。
- */
-export async function syncAutoPacksForVersions(deps: PackHomeMigrationDeps): Promise<void> {
-  const settings = await deps.readStoredSettings()
-  const versions = await deps.listManagedDshVersions(settings.dshInstallPath).catch(() => [])
-  if (versions.length === 0) return
-  const records = await readPackRegistry(deps.registryPath)
-  const known = new Set(records.map(record => record.id))
-  const tombstones = new Set(settings.deletedAutoPacks ?? [])
-  for (const item of versions) {
-    let id: string
-    try {
-      id = packProfileName(item.version)
-    } catch {
-      continue
-    }
-    if (known.has(id) || tombstones.has(id)) continue
-    await deps.ensurePackForVersion(item.version).catch(() => undefined)
-    known.add(id)
-  }
 }

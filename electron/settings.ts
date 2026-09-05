@@ -37,7 +37,6 @@ export function defaultSettings(input: DefaultSettingsInput): AppSettings {
     profileName: DEFAULT_PROFILE_NAME,
     activePackId: null,
     packsV2Migrated: false,
-    deletedAutoPacks: [],
     workspace: input.documentsDirectory,
     launchExecutable: input.systemNpx ?? (platform === 'win32' ? 'npx.cmd' : 'npx'),
     launchArgs: ['--yes', DSH_PACKAGE_NAME, 'web'],
@@ -127,7 +126,6 @@ export function validateSettings(input: AppSettings): AppSettings {
     // 整合包是真隔离环境的唯一实体：activePackId 与 profileName 同步指向当前激活包 id。
     activePackId: typeof input.activePackId === 'string' && input.activePackId ? input.activePackId : null,
     packsV2Migrated: Boolean(input.packsV2Migrated),
-    deletedAutoPacks: Array.isArray(input.deletedAutoPacks) ? input.deletedAutoPacks.filter((value): value is string => typeof value === 'string' && value !== '') : [],
     workspace: input.workspace,
     launchExecutable: input.launchExecutable.trim(),
     launchArgs: input.launchArgs,
@@ -154,7 +152,6 @@ export function mergeStoredSettings(defaults: AppSettings, stored: Partial<AppSe
     nodeVersion: stored.nodeVersion == null ? null : validRuntimeVersion(stored.nodeVersion) ? stored.nodeVersion.trim() : null,
     activePackId: typeof stored.activePackId === 'string' && stored.activePackId ? stored.activePackId : null,
     packsV2Migrated: Boolean(stored.packsV2Migrated),
-    deletedAutoPacks: Array.isArray(stored.deletedAutoPacks) ? stored.deletedAutoPacks.filter((value): value is string => typeof value === 'string' && value !== '') : [],
     dshInstallPath: typeof stored.dshInstallPath === 'string' && path.isAbsolute(stored.dshInstallPath)
       ? stored.dshInstallPath
       : defaults.dshInstallPath,

@@ -1,5 +1,6 @@
 /**
- * packsV2 一次性迁移：默认包收编、存量 Profile 注册、已装版本补发自动包、激活指针兜底。
+ * packsV2 一次性迁移：默认包收编、存量 Profile 注册、激活指针兜底。
+ * 整合包只由「新建 / 导入」产生；下载 DSH 版本不再自动建包，也没有启动补发同步。
  */
 
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -7,8 +8,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AppSettings } from '../src/types'
-import { migrateToPackHomesV2, syncAutoPacksForVersions } from '../electron/pack-migration'
-import { readPackRegistry, upsertPackRecord, type PackRecord } from '../electron/pack-registry'
+import { migrateToPackHomesV2 } from '../electron/pack-migration'
+import { readPackRegistry } from '../electron/pack-registry'
 import { defaultSettings } from '../electron/settings'
 
 const temporaryRoots: string[] = []
@@ -32,30 +33,17 @@ async function fixture() {
     activePackId: null,
   }
   const registryPath = path.join(root, 'packs.json')
-  const packsRoot = path.join(root, 'dsh-packs')
   const deps = {
     registryPath,
-    packsRoot,
     readStoredSettings: async () => stored,
     saveSettings: async (next: AppSettings) => { stored = next; return next },
-    listManagedDshVersions: async () => [{ version: '0.1.2-rc.1' }, { version: '0.1.0-rc.7' }],
-    ensurePackForVersion: async (version: string): Promise<void> => {
-      const id = `pack-${version}`
-      const records = await readPackRegistry(registryPath)
-      if (records.some(record => record.id === id)) return
-      const homePath = path.join(packsRoot, id)
-      await mkdir(homePath, { recursive: true })
-      const now = new Date().toISOString()
-      const record: PackRecord = { id, name: version, description: '', version: '1.0.0', dshVersion: version, homePath, auto: true, source: 'created', installedAt: now, updatedAt: now, state: 'complete', plugins: [] }
-      await upsertPackRecord(registryPath, record)
-    },
     isRuntimeRunning: () => false,
   }
-  return { root, dshHome, packsRoot, registryPath, deps, get stored() { return stored } }
+  return { root, dshHome, registryPath, deps, get stored() { return stored } }
 }
 
 describe('migrateToPackHomesV2', () => {
-  it('收编默认包与存量 Profile，指针落到 web（版本自动包由启动同步负责）', async () => {
+  it('收编默认包与存量 Profile，指针落到 web', async () => {
     const env = await fixture()
     await migrateToPackHomesV2(env.deps)
     const records = await readPackRegistry(env.registryPath)
@@ -104,34 +92,5 @@ describe('migrateToPackHomesV2', () => {
       readStoredSettings: async () => ({ ...env.stored, activePackId: 'pack-ghost', profileName: 'pack-ghost' }),
     })
     expect(env.stored.activePackId).toBe('web')
-  })
-})
-
-describe('syncAutoPacksForVersions（每次启动）', () => {
-  it('为已装版本补发自动包；注册表已有则跳过', async () => {
-    const env = await fixture()
-    await migrateToPackHomesV2(env.deps)
-    await syncAutoPacksForVersions(env.deps)
-    let records = await readPackRegistry(env.registryPath)
-    expect(records.map(r => r.id).sort()).toEqual(['pack-0.1.0-rc.7', 'pack-0.1.2-rc.1', 'pack-legacy-import', 'web'])
-    expect(records.find(r => r.id === 'pack-0.1.2-rc.1')!.auto).toBe(true)
-    await syncAutoPacksForVersions(env.deps)
-    records = await readPackRegistry(env.registryPath)
-    expect(records).toHaveLength(4)
-  })
-
-  it('用户删过的自动包立墓碑后不再复活', async () => {
-    const env = await fixture()
-    await migrateToPackHomesV2(env.deps)
-    await syncAutoPacksForVersions(env.deps)
-    // 模拟删除 pack-0.1.2-rc.1 并立墓碑。
-    const { removePackRecord } = await import('../electron/pack-registry')
-    await removePackRecord(env.registryPath, 'pack-0.1.2-rc.1')
-    const current = await env.deps.readStoredSettings()
-    await env.deps.saveSettings({ ...current, deletedAutoPacks: ['pack-0.1.2-rc.1'] })
-    await syncAutoPacksForVersions(env.deps)
-    const records = await readPackRegistry(env.registryPath)
-    expect(records.map(r => r.id)).not.toContain('pack-0.1.2-rc.1')
-    expect(records.map(r => r.id)).toContain('pack-0.1.0-rc.7')
   })
 })

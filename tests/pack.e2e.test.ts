@@ -519,36 +519,35 @@ describe('pack E2E · 中途失败回滚', () => {
 })
 
 // ===========================================================================
-// 场景 D：自动包与手动空白包
+// 场景 D：包计数实时化（注册表不记市场安装，列表以家目录为准）
 // ===========================================================================
 
-describe('pack E2E · 版本自动包与空白包', () => {
-  it('ensurePackForVersion 幂等；零包时装版本自动包直接激活；空白包私有家目录可读', async () => {
+describe('pack E2E · 包计数实时化', () => {
+  it('listPacks 的插件/技能计数实时反映包家目录（市场安装不写注册表也能看到）', async () => {
     const env = await makeEnv()
     const store = makeSettingsStore(env)
     const sim = createDshSimulator(store, env.pluginReceiptsPath)
     const { manager } = makeManager(env, sim, store)
 
-    const first = await manager.ensurePackForVersion('0.2.0-rc.1')
-    const second = await manager.ensurePackForVersion('0.2.0-rc.1')
-    expect(second!.id).toBe(first!.id)
-    expect(first!.auto).toBe(true)
-    expect(first!.name).toBe('0.2.0-rc.1')
+    // 零包状态新建：自动激活，私有家目录就位。
+    const blank = await manager.createBlankPack({ name: 'Live', dshVersion: null })
+    const home = await packHome(env, blank.id)
+
+    // 模拟市场/npm 安装：只写家目录（profile manifest + skills/），不写注册表记录。
+    await sim.installPluginTarget({ profileName: blank.id, packageName: 'alpha', source: 'npm', version: '1.2.3', repository: 'demo/owner' } as never, undefined)
+    const skillSource = path.join(home, '.skill-src', 'my-skill')
+    await mkdir(skillSource, { recursive: true })
+    await writeFile(path.join(skillSource, 'SKILL.md'), SKILL_DOC)
+    await sim.installSkillLocal(home, { name: 'my-skill', format: 'bundle', sourceDir: skillSource })
+
+    // 注册表记录仍是空骨架，但列表计数以家目录为准。
     const records = await readPackRegistry(env.registryPath)
-    expect(records).toHaveLength(1)
-    // 零包状态装版本：新自动包直接成为当前包（引导闭环）。
-    expect(store.current.activePackId).toBe(first!.id)
-    expect(second!.enabled).toBe(true)
-
-    const home = await packHome(env, first!.id)
-    const profile = await sim.readProfile(home, first!.id)
-    expect(profile.initialized).toBe(true)
-    expect((await store.readSettings()).dshHome).toBe(home)
-
-    // 重命名。
-    const renamed = await manager.renamePack(first!.id, '我的实验包')
-    expect(renamed.name).toBe('我的实验包')
-    expect((await manager.listPacks())[0].name).toBe('我的实验包')
+    expect(records[0].plugins).toEqual([])
+    const status = (await manager.listPacks()).find(pack => pack.id === blank.id)
+    expect(status?.plugins.map(plugin => plugin.packageName)).toEqual(['alpha'])
+    expect(status?.plugins[0]?.enabled).toBe(true)
+    expect(status?.skills?.map(skill => skill.name)).toEqual(['my-skill'])
+    expect(status?.skills?.[0]?.enabled).toBe(true)
   })
 })
 

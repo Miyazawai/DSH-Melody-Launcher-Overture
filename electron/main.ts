@@ -30,7 +30,7 @@ import {
 } from './node-runtime'
 import { createProxyAwareFetch } from './network'
 import { createPackManager, type InstallInstaller, type PackInstallTarget, type PackManager } from './pack'
-import { migrateToPackHomesV2, syncAutoPacksForVersions, type PackHomeMigrationDeps } from './pack-migration'
+import { migrateToPackHomesV2 } from './pack-migration'
 import { readPackRegistry } from './pack-registry'
 import { createPluginTrialManager, type PluginTrialManager } from './plugin-trial'
 import { readPluginReceipts, recordPluginInstall } from './plugin-receipts'
@@ -345,10 +345,7 @@ function createServices(): Services {
     emitOutput: (level, text) => events.output('plugin', level, text),
     emitProgress: progress => events.installProgress(progress),
     githubFetch: githubAuth.fetch,
-    // 装一个 DSH 版本 = 自动诞生一个以它命名的整合包（幂等；packManager 此时尚未赋值，闭包延后取用）。
-    onDshVersionInstalled: async version => {
-      await packManager?.ensurePackForVersion(version)
-    },
+    // 装一个 DSH 版本只下载版本本体；整合包仅由「新建 / 导入」产生。
   })
 
   applicationAddons = createApplicationAddonManager({
@@ -598,18 +595,12 @@ function createServices(): Services {
     const result = await consolidatePluginPool(current.dshHome)
     if (result.dependencies > 0) events.output('plugin', 'info', `已将 ${result.dependencies} 个 Profile 插件依赖归并到共享插件池。`)
   }).then(async () => {
-    const packSyncDeps: PackHomeMigrationDeps = {
+    await migrateToPackHomesV2({
       registryPath: packsJsonPath,
-      packsRoot,
       readStoredSettings: () => settings.readStored(),
       saveSettings: next => settings.save(next),
-      listManagedDshVersions: findManagedDshVersions,
-      ensurePackForVersion: version => packManager.ensurePackForVersion(version),
       isRuntimeRunning: () => runtime.isRunning(),
-    }
-    await migrateToPackHomesV2(packSyncDeps)
-    // 每次启动都同步：已装版本 ↔ 自动整合包（用户删过的有墓碑，不复活）。
-    await syncAutoPacksForVersions(packSyncDeps)
+    })
   }).catch(error => events.output('plugin', 'error', `旧整合包/插件池迁移失败：${error instanceof Error ? error.message : String(error)}`))
 
   return { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager: packManager!, githubAuth, applicationAddons, catalogSync, dshMarket, recommendedWebUi, runtimeVersions, profiles: profileService, profilePoolReady }
