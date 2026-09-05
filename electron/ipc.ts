@@ -991,7 +991,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   })
 
   ipcMain.handle(IPC.packsRemove, async (_event, packId: string) => {
-    assertProfileMutationAvailable()
+    // 守卫在 pack.ts 内分级：删未激活的包运行中也允许，删激活包要求先停 DSH。
     if (!isSafeProfileName(packId)) throw new Error('整合包标识无效。')
     return packManager.removePack(packId)
   })

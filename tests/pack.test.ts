@@ -768,7 +768,7 @@ describe('removePack runtime guard', () => {
     expect(await readPackRegistry(env.registryPath)).toEqual([])
   })
 
-  it('blocks deleting the active pack regardless of runtime state', async () => {
+  it('blocks deleting the active pack while DSH runtime is running', async () => {
     const env = await makeEnv()
     const stub = makeInstallerStub()
     stub.readProfile.mockResolvedValue({ ...defaultProfile, plugins: [managedPlugin('alpha')] })
@@ -777,8 +777,42 @@ describe('removePack runtime guard', () => {
     const { manager } = makeManager(env, stub, store, { isRuntimeRunning: () => true })
     await upsertPackRecord(env.registryPath, recordFor('pack-x', [{ packageName: 'alpha', enabled: true }]))
 
-    await expect(manager.removePack('pack-x')).rejects.toThrow('当前激活的整合包不能删除')
+    await expect(manager.removePack('pack-x')).rejects.toThrow('DSH 运行时正在运行')
     expect(await readPackRegistry(env.registryPath)).toHaveLength(1)
+  })
+
+  it('deleting the active pack falls back to another pack', async () => {
+    const env = await makeEnv()
+    const stub = makeInstallerStub()
+    stub.readProfile.mockResolvedValue({ ...defaultProfile, plugins: [managedPlugin('alpha')] })
+    const store = makeSettings(env.dshHome, 'web')
+    store.current.activePackId = 'pack-x'
+    const { manager } = makeManager(env, stub, store)
+    await upsertPackRecord(env.registryPath, recordFor('pack-x', [{ packageName: 'alpha', enabled: true }]))
+    await upsertPackRecord(env.registryPath, recordFor('pack-y'))
+
+    await manager.removePack('pack-x')
+    const records = await readPackRegistry(env.registryPath)
+    expect(records.map(r => r.id)).toEqual(['pack-y'])
+    expect(store.current.activePackId).toBe('pack-y')
+    expect(store.current.profileName).toBe('pack-y')
+  })
+
+  it('deleting the only active pack recreates an empty default web pack', async () => {
+    const env = await makeEnv()
+    const stub = makeInstallerStub()
+    stub.readProfile.mockResolvedValue({ ...defaultProfile, plugins: [managedPlugin('alpha')] })
+    const store = makeSettings(env.dshHome, 'web')
+    store.current.activePackId = 'pack-x'
+    const { manager } = makeManager(env, stub, store)
+    await upsertPackRecord(env.registryPath, recordFor('pack-x', [{ packageName: 'alpha', enabled: true }]))
+
+    await manager.removePack('pack-x')
+    const records = await readPackRegistry(env.registryPath)
+    expect(records.map(r => r.id)).toEqual(['web'])
+    expect(store.current.activePackId).toBe('web')
+    expect(store.current.profileName).toBe('web')
+    expect(existsSync(path.join(env.dshHome, 'profiles', 'web', 'package.json'))).toBe(true)
   })
 })
 

@@ -823,11 +823,13 @@ export function useLauncherStore() {
   const removePack = useCallback(async (packId: string): Promise<boolean> => {
     const next = await run(`pack-remove:${packId}`, async () => {
       const result = await api.removePack(packId)
-      await refreshPacks()
+      // 删的可能是激活包：主进程已把指针落到别的包/新建默认包，全量刷新环境读数。
+      setSettings(await api.getSettings())
+      await Promise.all([refreshPacks(), refreshProfile(), refreshSecondaryResources()])
       return result
-    }, { success: result => `已删除 ${result.removed} 个整合包。` })
+    }, { success: '整合包及其环境数据已删除。' })
     return next !== undefined
-  }, [api, refreshPacks, run])
+  }, [api, refreshPacks, refreshProfile, refreshSecondaryResources, run, setSettings])
 
   const exportPack = useCallback(async (packId: string): Promise<string | null> => {
     const path = await run(`pack-export:${packId}`, () => api.exportPack(packId))

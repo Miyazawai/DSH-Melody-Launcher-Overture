@@ -1656,6 +1656,21 @@ export const demoApi: LauncherApi = {
   removePack: async packId => {
     const before = demoPacks.length
     demoPacks = demoPacks.filter(item => item.id !== packId)
+    if (demoSettings.activePackId === packId) {
+      // 与主进程一致：删掉激活包后落到剩余包；一个不剩就新建空白默认包 web。
+      if (demoPacks.length === 0) {
+        const now = new Date().toISOString()
+        demoPacks = [{
+          id: 'web', name: 'web', description: '', version: '1.0.0', dshVersion: demoSettings.dshVersion ?? null,
+          source: 'created', enabled: true, state: 'complete', plugins: [], installedAt: now, updatedAt: now,
+        }]
+        demoSettings = { ...demoSettings, activePackId: 'web', profileName: 'web' }
+      } else {
+        const next = demoPacks.find(item => item.id === 'web') ?? demoPacks[demoPacks.length - 1]
+        demoPacks = demoPacks.map(item => ({ ...item, enabled: item.id === next.id }))
+        demoSettings = { ...demoSettings, activePackId: next.id, profileName: next.id }
+      }
+    }
     return { removed: before - demoPacks.length }
   },
   rollbackPack: async () => ({ restored: 1, profileName: demoSettings.profileName }),

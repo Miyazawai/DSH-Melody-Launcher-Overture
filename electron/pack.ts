@@ -1550,12 +1550,10 @@ export function createPackManager(options: PackManagerOptions): PackManager {
 
     async removePack(packId) {
       const settings = await options.readSettings()
-      if (settings.activePackId === packId || isSelectedProfile(settings, packId)) {
-        throw new Error('当前激活的整合包不能删除，请先切换到其它整合包。')
-      }
-      // 删除未激活的包不动当前环境，DSH 运行中也允许；只与安装器/打包任务互斥。
+      const wasActive = settings.activePackId === packId || isSelectedProfile(settings, packId)
+      // 删除未激活的包不动当前环境，DSH 运行中也允许；删激活包必须先停 DSH（它就是当前环境）。
       const reason = guardPackStart({
-        isRuntimeRunning: () => false,
+        isRuntimeRunning: () => wasActive && options.isRuntimeRunning(),
         isInstallerBusy: options.isInstallerBusy,
         isPackBusy: () => active,
       })
@@ -1578,13 +1576,42 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         }
         await removePackRecord(options.registryPath, packId)
         await removePackManifest(manifestRoot, packId)
+        let nextSettings = stored
         if (record.auto) {
           // 自动包被用户删除：立墓碑，启动同步不再为该版本补发。
-          const after = options.readStoredSettings ? await options.readStoredSettings() : await options.readSettings()
-          const tombstones = new Set(after.deletedAutoPacks ?? [])
+          const tombstones = new Set(stored.deletedAutoPacks ?? [])
           tombstones.add(packId)
-          await options.saveSettings({ ...after, deletedAutoPacks: [...tombstones] })
+          nextSettings = { ...nextSettings, deletedAutoPacks: [...tombstones] }
         }
+        if (wasActive) {
+          // 删掉了激活包：落到剩余里最近的包；一个不剩就新建空白默认包，环境指针永远有效。
+          const remaining = await readPackRegistry(options.registryPath)
+          let successor = remaining.find(record2 => record2.id === DEFAULT_PROFILE_NAME) ?? remaining[remaining.length - 1] ?? null
+          if (!successor) {
+            const now = new Date().toISOString()
+            successor = {
+              id: DEFAULT_PROFILE_NAME,
+              name: DEFAULT_PROFILE_NAME,
+              description: '',
+              version: '1.0.0',
+              ...(nextSettings.dshVersion ? { dshVersion: nextSettings.dshVersion } : {}),
+              source: 'created' as const,
+              installedAt: now,
+              updatedAt: now,
+              state: 'complete' as const,
+              plugins: [],
+            }
+            await seedPackHome(await defaultHome(), successor.id, { dshVersion: successor.dshVersion ?? null })
+            await upsertPackRecord(options.registryPath, successor)
+          }
+          nextSettings = {
+            ...nextSettings,
+            activePackId: successor.id,
+            profileName: successor.id,
+            ...(successor.dshVersion ? { dshVersion: successor.dshVersion } : {}),
+          }
+        }
+        await options.saveSettings(nextSettings)
         return {
           removed: record.plugins.length
             + (record.presets?.length ?? 0)

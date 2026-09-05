@@ -201,7 +201,7 @@ export function SettingsPanels({
               onActivate={id => { void onActivatePack(id) }}
               onRename={async (id, name) => onRenamePack(id, name)}
               onExport={id => { void onExportPack(id) }}
-              onRemove={id => { void onRemovePack(id) }}
+              onRemove={onRemovePack}
               onDiskUsage={onPackDiskUsage}
             />
           )}
@@ -241,6 +241,7 @@ function SettingsVersions({
   refreshLocked: boolean
 }) {
   const [expandedGroup, setExpandedGroup] = useState<'stable' | 'prerelease' | null>(null)
+  const [removingVersion, setRemovingVersion] = useState<string | null>(null)
   const dshProgress = installProgress && installProgress.kind === 'dsh'
     && installProgress.phase !== 'complete' && installProgress.phase !== 'error'
     ? installProgress : null
@@ -267,6 +268,13 @@ function SettingsVersions({
           <strong>{environment.dshSelectedVersion ?? '未绑定'}</strong>
         </div>
         <div className="settings-hint">本页只负责版本的下载与删除；切换环境请到「整合包」页（每个 DSH 版本对应一个自动整合包）。</div>
+        {removingVersion && (
+          <div className="settings-progress">
+            <LoaderCircle size={14} className="spin" />
+            <span>正在卸载 {removingVersion}（清理版本目录里的依赖文件）…</span>
+            <div className="settings-progress-track indeterminate" />
+          </div>
+        )}
         <div className="settings-list">
           {environment.dshInstalled.map(item => (
             <ResourceRow
@@ -275,12 +283,14 @@ function SettingsVersions({
               subtitle={item.source === 'legacy' ? '旧目录' : undefined}
               enabled={item.selected}
               selected={item.selected}
-              busy={busy}
+              busy={busy || removingVersion !== null}
               onRemove={item.removable ? () => {
                 const warning = item.selected
-                  ? `「${item.version}」是当前整合包在用的版本。卸载后整合包会暂时无法启动 DSH（下次启动会提示重新下载）。确定卸载？`
+                  ? `「${item.version}」是当前整合包在用的版本，卸载后会自动切换到其它已装版本。确定卸载？`
                   : `确定卸载 DSH ${item.version}？`
-                if (window.confirm(warning)) void onRemove(item.version)
+                if (!window.confirm(warning)) return
+                setRemovingVersion(item.version)
+                void onRemove(item.version).finally(() => setRemovingVersion(null))
               } : undefined}
             />
           ))}
@@ -854,18 +864,28 @@ function SettingsPacks({
   onActivate: (packId: string) => void
   onRename: (packId: string, name: string) => Promise<boolean>
   onExport: (packId: string) => void
-  onRemove: (packId: string) => void
+  onRemove: (packId: string) => Promise<boolean>
   onDiskUsage: (packId: string) => Promise<number>
 }) {
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [newVersion, setNewVersion] = useState<string>('')
+  const [removing, setRemoving] = useState<string | null>(null)
 
   const confirmRemove = async (pack: PackStatus) => {
     const bytes = await onDiskUsage(pack.id).catch(() => 0)
     const size = bytes > 0 ? `（占用 ${formatBytes(bytes)}）` : ''
-    if (window.confirm(`确定删除整合包「${pack.name}」${size}吗？\n它的插件、技能、预设、配置与会话会一并删除；共享的 DSH 版本保留。`)) onRemove(pack.id)
+    const activeNote = activePack?.id === pack.id
+      ? '\n这是当前激活的整合包：删除后会自动切换到其它环境（没有其它包时新建一个空白环境）。'
+      : ''
+    if (!window.confirm(`确定删除整合包「${pack.name}」${size}吗？\n它的插件、技能、预设、配置与会话会一并删除，不可恢复；共享的 DSH 版本保留。${activeNote}`)) return
+    setRemoving(pack.id)
+    try {
+      await onRemove(pack.id)
+    } finally {
+      setRemoving(null)
+    }
   }
 
   return (
@@ -943,15 +963,24 @@ function SettingsPacks({
                 </span>
               </div>
               <div className="settings-pack-actions">
-                {isActive
-                  ? <span className="settings-pack-active"><Check size={13} />当前使用</span>
-                  : pack.state === 'complete'
-                    ? <button type="button" className="secondary-button" disabled={busy} onClick={() => onActivate(pack.id)}>切换</button>
-                    : pack.state === 'partial'
-                      ? <button type="button" className="secondary-button" disabled={busy} onClick={() => onActivate(pack.id)} title="重新进入该包环境">继续</button>
-                      : <span className="settings-pack-state">未完成安装</span>}
-                <button type="button" className="secondary-button" disabled={busy} onClick={() => onExport(pack.id)} title="导出为压缩包（不含会话与登录）">导出</button>
-                <button type="button" className="icon-button" disabled={busy || isActive} onClick={() => { void confirmRemove(pack) }} title={isActive ? '激活中的整合包不能删除' : '删除整合包（连同环境数据）'} aria-label="删除整合包"><Trash2 size={15} /></button>
+                {removing === pack.id ? (
+                  <span className="settings-pack-removing">
+                    <LoaderCircle size={13} className="spin" />删除中
+                    <span className="settings-progress-track indeterminate" aria-hidden="true" />
+                  </span>
+                ) : (
+                  <>
+                    {isActive
+                      ? <span className="settings-pack-active"><Check size={13} />当前使用</span>
+                      : pack.state === 'complete'
+                        ? <button type="button" className="secondary-button" disabled={busy} onClick={() => onActivate(pack.id)}>切换</button>
+                        : pack.state === 'partial'
+                          ? <button type="button" className="secondary-button" disabled={busy} onClick={() => onActivate(pack.id)} title="重新进入该包环境">继续</button>
+                          : <span className="settings-pack-state">未完成安装</span>}
+                    <button type="button" className="secondary-button" disabled={busy} onClick={() => onExport(pack.id)} title="导出为压缩包（不含会话与登录）">导出</button>
+                    <button type="button" className="icon-button" disabled={busy} onClick={() => { void confirmRemove(pack) }} title="删除整合包（连同环境数据）" aria-label="删除整合包"><Trash2 size={15} /></button>
+                  </>
+                )}
               </div>
             </div>
           )

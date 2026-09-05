@@ -386,16 +386,23 @@ describe('pack E2E · 标准包生命周期（真隔离）', () => {
     expect(inspection.bodyPackageNames).toEqual(['alpha'])
 
     // 删除激活中的包被拒绝；切到新建空白包后才可删。
-    await expect(manager.removePack('pack-alpha-pack')).rejects.toThrow('当前激活的整合包不能删除')
+    // 删除激活中的包：允许；没有其它包时自动新建空白默认包 web 接住指针。
+    const removed = await manager.removePack('pack-alpha-pack')
+    expect(removed.removed).toBe(1)
+    expect(existsSync(home)).toBe(false)
+    expect((await readPackRegistry(env.registryPath)).map(r => r.id)).toEqual(['web'])
+    expect(store.current.activePackId).toBe('web')
+    expect(store.current.profileName).toBe('web')
+    expect((await readPluginReceipts(env.pluginReceiptsPath)).filter(r => r.profileName === 'pack-alpha-pack')).toEqual([])
+
+    // 激活包切换后删旧默认包：共用家目录的包只删自己的 Profile 目录。
     const blank = await manager.createBlankPack({ name: 'Blank', dshVersion: null })
     expect(await packHome(env, blank.id)).toBe(path.join(env.packsRoot, blank.id))
     await manager.activatePack(blank.id)
     expect(store.current.activePackId).toBe(blank.id)
-    const removed = await manager.removePack('pack-alpha-pack')
-    expect(removed.removed).toBe(1)
-    expect(existsSync(home)).toBe(false)
+    await manager.removePack('web')
     expect((await readPackRegistry(env.registryPath)).map(r => r.id)).toEqual([blank.id])
-    expect((await readPluginReceipts(env.pluginReceiptsPath)).filter(r => r.profileName === 'pack-alpha-pack')).toEqual([])
+    expect(existsSync(path.join(env.dshHome, 'profiles', 'web'))).toBe(false)
 
     // 回导导出的 zip：重建独立环境。
     const exportedPath = path.join(env.root, 'roundtrip.zip')
