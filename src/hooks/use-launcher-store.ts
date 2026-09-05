@@ -814,11 +814,13 @@ export function useLauncherStore() {
   const createBlankPack = useCallback(async (request: { name: string; dshVersion: string | null }): Promise<PackStatus | undefined> => {
     const pack = await run('pack-create-blank', async () => {
       const created = await api.createBlankPack(request)
-      await refreshPacks()
+      // 零包状态下新建会自动激活（主进程写指针）：同步 settings 与环境读数。
+      setSettings(await api.getSettings())
+      await Promise.all([refreshPacks(), refreshProfile(), refreshSecondaryResources()])
       return created
     }, { success: `整合包「${request.name}」已创建。` })
     return pack
-  }, [api, refreshPacks, run])
+  }, [api, refreshPacks, refreshProfile, refreshSecondaryResources, run, setSettings])
 
   const removePack = useCallback(async (packId: string): Promise<boolean> => {
     const next = await run(`pack-remove:${packId}`, async () => {

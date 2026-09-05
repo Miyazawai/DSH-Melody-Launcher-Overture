@@ -159,8 +159,11 @@ function LauncherShell() {
                     onImportPack={() => void handlePackImport()}
                     onInstallDshVersion={async version => {
                       const ok = await store.installDshVersion(version)
-                      // 装版本会自动补发同名整合包（主进程回调），刷新列表让新包立刻可见。
-                      if (ok) await store.refreshPacks()
+                      // 装版本会自动补发同名整合包（零包时还会自动激活成为当前包），
+                      // 刷新包列表与 Profile/插件/技能读数让新环境立刻可见。
+                      if (ok) {
+                        await Promise.all([store.refreshPacks(), store.refreshProfile(), store.refreshSecondaryResources()])
+                      }
                       return ok
                     }}
                     onRemoveDshVersion={store.removeDshVersion}
@@ -178,6 +181,7 @@ function LauncherShell() {
                     onOpenDshFolder={() => void api.openDshFolder()}
                     onOpenPluginFolder={packageName => { void api.openProfilePluginFolder(packageName) }}
                     onOpenPath={targetPath => { void api.openPath(targetPath) }}
+                    onNavigateTab={navigation.goHome}
                   />
                 )}
               </div>

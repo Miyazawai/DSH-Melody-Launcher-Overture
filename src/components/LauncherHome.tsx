@@ -54,6 +54,8 @@ export function LauncherHome({
   onOpenSettings,
 }: LauncherHomeProps) {
   const needsInstallation = !dshInstallation.installed && !activeRuntimeReplacement
+  // 零包引导态：没有激活包（通常是删光了整合包）时，首页两个按钮都指向整合包页引导新建。
+  const noPack = !activePack && !runtime.running && !busy
 
   return (
     <div className="launcher-home">
@@ -94,19 +96,20 @@ export function LauncherHome({
           <button
             type="button"
             className={`launcher-start-button ${runtime.running ? 'stop' : ''}`}
-            onClick={onToggleRuntime}
+            onClick={noPack ? onVersionSelect : onToggleRuntime}
             disabled={busy}
+            title={noPack ? '先到「整合包」页新建或导入一个整合包' : undefined}
           >
-            {busy ? <LoaderCircle className="spin" size={24} /> : runtime.running ? <CircleStop size={24} /> : needsInstallation ? <Download size={24} /> : <Play size={25} fill="currentColor" />}
+            {busy ? <LoaderCircle className="spin" size={24} /> : noPack ? <Package size={24} /> : runtime.running ? <CircleStop size={24} /> : needsInstallation ? <Download size={24} /> : <Play size={25} fill="currentColor" />}
             <span>
-              <small>{busy ? (installingDsh ? installProgress?.message ?? '正在准备本地 DSH' : runtime.running ? '正在停止本地服务' : '正在启动本地工作台') : runtime.running ? '结束本地服务' : needsInstallation ? '首次使用需要完成本地部署' : activeRuntimeReplacement ? '由应用加载项托管 DSH' : '启动本地工作台'}</small>
-              <strong>{runtime.running ? `停止 ${runtime.applicationAddonName ?? 'DSH'}` : installingDsh ? installProgress?.indeterminate ? '安装进行中' : `安装 DSH ${installProgress?.percent ?? 0}%` : needsInstallation ? '下载安装 DSH' : busy ? '请稍候…' : activeRuntimeReplacement ? `启动 ${activeRuntimeReplacement.name}` : '启动 DSH'}</strong>
+              <small>{busy ? (installingDsh ? installProgress?.message ?? '正在准备本地 DSH' : runtime.running ? '正在停止本地服务' : '正在启动本地工作台') : noPack ? '先创建一个整合包环境' : runtime.running ? '结束本地服务' : needsInstallation ? '首次使用需要完成本地部署' : activeRuntimeReplacement ? '由应用加载项托管 DSH' : '启动本地工作台'}</small>
+              <strong>{runtime.running ? `停止 ${runtime.applicationAddonName ?? 'DSH'}` : noPack ? '新建整合包' : installingDsh ? installProgress?.indeterminate ? '安装进行中' : `安装 DSH ${installProgress?.percent ?? 0}%` : needsInstallation ? '下载安装 DSH' : busy ? '请稍候…' : activeRuntimeReplacement ? `启动 ${activeRuntimeReplacement.name}` : '启动 DSH'}</strong>
             </span>
           </button>
         </div>
-        <button type="button" className="launcher-utility-button home-version-button" onClick={onVersionSelect} title="切换到其它整合包">
-          <span className="home-version-head"><Package size={16} /><strong>切换整合包</strong></span>
-          <small>当前：{activePack ? activePack.name : '未选择'}{activePack?.dshVersion ? ` · DSH ${activePack.dshVersion}` : ''}</small>
+        <button type="button" className="launcher-utility-button home-version-button" onClick={onVersionSelect} title={activePack ? '切换到其它整合包' : '创建或导入整合包'}>
+          <span className="home-version-head"><Package size={16} /><strong>{activePack ? '切换整合包' : '新建整合包'}</strong></span>
+          <small>{activePack ? `当前：${activePack.name}${activePack.dshVersion ? ` · DSH ${activePack.dshVersion}` : ''}` : '还没有整合包，点击创建或导入'}</small>
         </button>
         </div>
       </section>

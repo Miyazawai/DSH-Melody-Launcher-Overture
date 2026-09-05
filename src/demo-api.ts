@@ -1646,6 +1646,12 @@ export const demoApi: LauncherApi = {
       updatedAt: now,
     }
     demoPacks = [...demoPacks, pack]
+    // 与主进程一致：零包状态下新建的包直接成为当前包（空态引导闭环）。
+    if (!demoSettings.activePackId) {
+      demoPacks = demoPacks.map(item => ({ ...item, enabled: item.id === id }))
+      demoSettings = { ...demoSettings, activePackId: id, profileName: id }
+      return { ...pack, enabled: true }
+    }
     return pack
   },
   packDiskUsage: async packId => {
@@ -1657,14 +1663,9 @@ export const demoApi: LauncherApi = {
     const before = demoPacks.length
     demoPacks = demoPacks.filter(item => item.id !== packId)
     if (demoSettings.activePackId === packId) {
-      // 与主进程一致：删掉激活包后落到剩余包；一个不剩就新建空白默认包 web。
+      // 与主进程一致：删掉激活包后落到剩余包；一个不剩就进入零包引导态（指针置空）。
       if (demoPacks.length === 0) {
-        const now = new Date().toISOString()
-        demoPacks = [{
-          id: 'web', name: 'web', description: '', version: '1.0.0', dshVersion: demoSettings.dshVersion ?? null,
-          source: 'created', enabled: true, state: 'complete', plugins: [], installedAt: now, updatedAt: now,
-        }]
-        demoSettings = { ...demoSettings, activePackId: 'web', profileName: 'web' }
+        demoSettings = { ...demoSettings, activePackId: null }
       } else {
         const next = demoPacks.find(item => item.id === 'web') ?? demoPacks[demoPacks.length - 1]
         demoPacks = demoPacks.map(item => ({ ...item, enabled: item.id === next.id }))

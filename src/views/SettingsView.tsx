@@ -95,6 +95,8 @@ interface SettingsPanelsProps {
   onOpenDshFolder: () => void
   onOpenPluginFolder: (packageName: string) => void
   onOpenPath: (targetPath: string) => void
+  /** 跳转到一级导航的某个 tab（零包引导用：去版本页下载 / 插件技能页安装）。 */
+  onNavigateTab: (tab: HomeTab) => void
 }
 
 export function SettingsPanels({
@@ -127,6 +129,7 @@ export function SettingsPanels({
   onOpenDshFolder,
   onOpenPluginFolder,
   onOpenPath,
+  onNavigateTab,
 }: SettingsPanelsProps) {
   const activePack = useMemo(() => {
     const direct = packs.find(pack => pack.id === settings.profileName)
@@ -203,6 +206,7 @@ export function SettingsPanels({
               onExport={id => { void onExportPack(id) }}
               onRemove={onRemovePack}
               onDiskUsage={onPackDiskUsage}
+              onNavigateTab={onNavigateTab}
             />
           )}
       </main>
@@ -853,6 +857,7 @@ function SettingsPacks({
   onExport,
   onRemove,
   onDiskUsage,
+  onNavigateTab,
 }: {
   packs: PackStatus[]
   activePack: PackStatus | null
@@ -866,6 +871,7 @@ function SettingsPacks({
   onExport: (packId: string) => void
   onRemove: (packId: string) => Promise<boolean>
   onDiskUsage: (packId: string) => Promise<number>
+  onNavigateTab: (tab: HomeTab) => void
 }) {
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null)
   const [creating, setCreating] = useState(false)
@@ -873,11 +879,19 @@ function SettingsPacks({
   const [newVersion, setNewVersion] = useState<string>('')
   const [removing, setRemoving] = useState<string | null>(null)
 
+  const openCreateForm = () => {
+    setCreating(true)
+    setNewName('')
+    setNewVersion(dshInstalledVersions.at(-1) ?? '')
+  }
+
   const confirmRemove = async (pack: PackStatus) => {
     const bytes = await onDiskUsage(pack.id).catch(() => 0)
     const size = bytes > 0 ? `（占用 ${formatBytes(bytes)}）` : ''
     const activeNote = activePack?.id === pack.id
-      ? '\n这是当前激活的整合包：删除后会自动切换到其它环境（没有其它包时新建一个空白环境）。'
+      ? (packs.length === 1
+        ? '\n这是最后一个整合包：删除后启动器会引导你重新创建。'
+        : '\n这是当前激活的整合包：删除后会自动切换到其它环境。')
       : ''
     if (!window.confirm(`确定删除整合包「${pack.name}」${size}吗？\n它的插件、技能、预设、配置与会话会一并删除，不可恢复；共享的 DSH 版本保留。${activeNote}`)) return
     setRemoving(pack.id)
@@ -894,7 +908,7 @@ function SettingsPacks({
         <div className="settings-panel-title"><Package size={17} /><span>整合包</span>{packs.length > 0 && <span className="settings-count">{packs.length}</span>}</div>
         <div className="settings-market-heading-actions">
           <PanelRefresh onClick={onRefresh} disabled={busy} />
-          <button type="button" className="secondary-button" onClick={() => { setCreating(v => !v); setNewName(''); setNewVersion(dshInstalledVersions.at(-1) ?? '') }} disabled={busy}>新建整合包</button>
+          <button type="button" className="secondary-button" onClick={() => { creating ? setCreating(false) : openCreateForm() }} disabled={busy}>新建整合包</button>
           <button type="button" className="primary-command" onClick={onImport} disabled={busy}><Download size={15} />导入整合包</button>
         </div>
       </div>
@@ -920,7 +934,46 @@ function SettingsPacks({
           <button type="button" className="secondary-button" onClick={() => setCreating(false)}>取消</button>
         </div>
       )}
-      {packs.length === 0 && !creating && <div className="settings-empty">还没有任何整合包；可导入他人分享的 .zip，或点「新建整合包」。</div>}
+      {creating && dshInstalledVersions.length === 0 && (
+        <div className="settings-pack-create-hint">
+          <span>还没有已安装的 DSH 版本：可以先创建，之后再下载。</span>
+          <button type="button" className="secondary-button" onClick={() => onNavigateTab('versions')}>去下载版本</button>
+        </div>
+      )}
+      {packs.length === 0 && !creating && (
+        <div className="packs-onboarding">
+          <div className="packs-onboarding-icon"><Package size={26} /></div>
+          <h3>还没有任何整合包</h3>
+          <p>三步搭好你的第一套环境：</p>
+          <ol className="packs-onboarding-steps">
+            <li>
+              <span className="packs-onboarding-step-no">1</span>
+              <span className="packs-onboarding-step-text">新建一个整合包（没有激活包时会自动启用）</span>
+              <button type="button" className="primary-command" onClick={openCreateForm} disabled={busy}>新建整合包</button>
+            </li>
+            <li>
+              <span className="packs-onboarding-step-no">2</span>
+              <span className="packs-onboarding-step-text">下载 DSH 版本{dshInstalledVersions.length > 0 ? `（已有 ${dshInstalledVersions.length} 个）` : ''}</span>
+              <button type="button" className="secondary-button" onClick={() => onNavigateTab('versions')}>去下载 →</button>
+            </li>
+            <li>
+              <span className="packs-onboarding-step-no">3</span>
+              <span className="packs-onboarding-step-text">到插件 / 技能页安装扩展</span>
+              <span className="packs-onboarding-step-links">
+                <button type="button" className="secondary-button" onClick={() => onNavigateTab('plugins')}>插件</button>
+                <button type="button" className="secondary-button" onClick={() => onNavigateTab('skills')}>技能</button>
+              </span>
+            </li>
+          </ol>
+          <p className="packs-onboarding-foot">也可以导入他人分享的 .zip 整合包，缺少的版本会自动下载。</p>
+        </div>
+      )}
+      {activePack && !activePack.dshVersion && packs.length > 0 && (
+        <div className="settings-pack-create-hint">
+          <span>当前整合包「{activePack.name}」还没有绑定 DSH 版本，启动前请先下载一个版本。</span>
+          <button type="button" className="secondary-button" onClick={() => onNavigateTab('versions')}>去下载版本</button>
+        </div>
+      )}
       <div className="settings-list">
         {packs.map(pack => {
           const isActive = activePack?.id === pack.id
