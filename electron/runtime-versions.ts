@@ -401,7 +401,7 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
           executable: item.executable,
           source: item.source,
           selected: item.version === inferredDsh,
-          removable: item.version !== inferredDsh && !options.isRuntimeRunning(),
+          removable: !options.isRuntimeRunning(),
         })),
         ...(systemDsh ? [{
           version: systemDsh.version,
@@ -607,10 +607,10 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
     if (options.isRuntimeRunning()) throw new Error('请先停止 DSH，再删除版本。')
     const normalized = normalizeDshVersion(version)
     const settings = await options.readSettings()
-    const item = (await findManagedDshVersions(settings.dshInstallPath)).find(entry => entry.version === normalized)
+    const allVersions = await findManagedDshVersions(settings.dshInstallPath)
+    const item = allVersions.find(entry => entry.version === normalized)
     if (!item) throw new Error('只能删除启动器托管的 DSH 版本。')
-    const launchMatches = item.executable.toLowerCase() === settings.launchExecutable.toLowerCase()
-    if (settings.dshVersion === normalized || launchMatches) throw new Error('当前 DSH 版本不能删除，请先在整合包页切换到其它环境。')
+    const wasCurrent = settings.dshVersion === normalized || item.executable.toLowerCase() === settings.launchExecutable.toLowerCase()
     if (item.source === 'legacy') {
       // 旧目录布局的单安装：本体文件就在 runtimeRoot 下，但 versions/ 里可能有新版本，只清旧布局的文件。
       await rm(path.join(item.root, 'node_modules'), { recursive: true, force: true })
@@ -619,6 +619,14 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
       }
     } else {
       await rm(item.root, { recursive: true, force: true })
+    }
+    if (wasCurrent) {
+      // 卸载的是当前整合包在用的版本：自动落到剩余的最新托管版本；没有剩余就清空选择（UI 回到「下载安装 DSH」引导）。
+      const remaining = (await findManagedDshVersions(settings.dshInstallPath)).filter(entry => entry.source === 'launcher')
+      const fallback = remaining.at(-1) ?? null
+      await options.saveSettings(fallback
+        ? { ...settings, dshVersion: fallback.version, launchExecutable: fallback.executable, launchArgs: ['web'] }
+        : { ...settings, dshVersion: null })
     }
     return read()
   }

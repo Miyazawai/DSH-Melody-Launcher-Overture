@@ -105,10 +105,10 @@ export function LauncherHome({
           </button>
         </div>
         <button type="button" className="launcher-utility-button home-version-button" onClick={onVersionSelect} title="切换到其它整合包">
-          <Package size={16} />
+          <Package size={17} />
           <span>
-            <small>当前整合包：{activePack ? activePack.name : '未选择'}{activePack?.dshVersion ? ` · DSH ${activePack.dshVersion}` : ''}</small>
             <strong>切换整合包</strong>
+            <small>当前：{activePack ? activePack.name : '未选择'}{activePack?.dshVersion ? ` · DSH ${activePack.dshVersion}` : ''}</small>
           </span>
         </button>
         </div>

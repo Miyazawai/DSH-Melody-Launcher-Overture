@@ -19,12 +19,7 @@ const MAX_ARCHIVE_FILES = 12_000
 /** DSH agent-preset 的清单文件：目录存在此文件即视为已安装该预设。 */
 const PRESET_MANIFEST = 'preset.yml'
 
-/**
- * 枚举 DSH 安装包内置的 agent preset：`<packageRoot>/config/agent-presets/<name>/preset.yml`。
- * 内置预设由 DSH 自身管理（启动器只读展示），清单损坏的单个目录会被跳过。
- */
-export async function readBuiltinAgentPresets(packageRoot: string): Promise<BuiltinAgentPreset[]> {
-  const root = path.join(packageRoot, 'config', 'agent-presets')
+async function scanPresetEntries(root: string): Promise<BuiltinAgentPreset[]> {
   let entries: Dirent[]
   try {
     entries = await readdir(root, { withFileTypes: true })
@@ -49,6 +44,39 @@ export async function readBuiltinAgentPresets(packageRoot: string): Promise<Buil
     }
   }
   return presets.sort((left, right) => (left.order ?? 999) - (right.order ?? 999) || left.name.localeCompare(right.name))
+}
+
+/**
+ * 内置预设目录的候选布局：
+ *  - 旧版 DSH：`<packageRoot>/config/agent-presets`
+ *  - 新版 DSH（0.1.2 起）：预设拆进独立包 `@deepseek-ai/dsh-agent-presets/presets`；
+ *    pnpm 隔离布局下真实路径在 `<版本根>/node_modules/.pnpm/@deepseek-ai+dsh-agent-pres<hash>/node_modules/...`。
+ */
+export async function builtinAgentPresetsDirs(packageRoot: string): Promise<string[]> {
+  const dirs = [
+    path.join(packageRoot, 'config', 'agent-presets'),
+    path.join(packageRoot, 'node_modules', '@deepseek-ai', 'dsh-agent-presets', 'presets'),
+  ]
+  const versionRoot = path.resolve(packageRoot, '..', '..', '..')
+  const pnpmRoot = path.join(versionRoot, 'node_modules', '.pnpm')
+  const entries = await readdir(pnpmRoot, { withFileTypes: true }).catch(() => [])
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('@deepseek-ai+dsh-agent-pres')) continue
+    dirs.push(path.join(pnpmRoot, entry.name, 'node_modules', '@deepseek-ai', 'dsh-agent-presets', 'presets'))
+  }
+  return dirs
+}
+
+/**
+ * 枚举 DSH 安装包内置的 agent preset（启动器只读展示）。
+ * 依次尝试各候选布局目录，取第一个非空结果。
+ */
+export async function readBuiltinAgentPresets(packageRoot: string): Promise<BuiltinAgentPreset[]> {
+  for (const dir of await builtinAgentPresetsDirs(packageRoot)) {
+    const presets = await scanPresetEntries(dir)
+    if (presets.length > 0) return presets
+  }
+  return []
 }
 
 export interface PresetInstallProgress {

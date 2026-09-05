@@ -276,7 +276,12 @@ function SettingsVersions({
               enabled={item.selected}
               selected={item.selected}
               busy={busy}
-              onRemove={item.removable ? () => { void onRemove(item.version) } : undefined}
+              onRemove={item.removable ? () => {
+                const warning = item.selected
+                  ? `「${item.version}」是当前整合包在用的版本。卸载后整合包会暂时无法启动 DSH（下次启动会提示重新下载）。确定卸载？`
+                  : `确定卸载 DSH ${item.version}？`
+                if (window.confirm(warning)) void onRemove(item.version)
+              } : undefined}
             />
           ))}
           {environment.dshInstalled.length === 0 && (
@@ -881,9 +886,8 @@ function SettingsPacks({
             placeholder="整合包名称（字母/数字/-_）"
             value={newName}
             onChange={event => setNewName(event.target.value)}
-            disabled={busy}
           />
-          <select className="settings-pack-version-select" value={newVersion} onChange={event => setNewVersion(event.target.value)} disabled={busy}>
+          <select className="settings-pack-version-select" value={newVersion} onChange={event => setNewVersion(event.target.value)}>
             <option value="">跟随当前版本</option>
             {dshInstalledVersions.map(version => <option key={version} value={version}>DSH {version}</option>)}
           </select>
@@ -893,7 +897,7 @@ function SettingsPacks({
             disabled={busy || newName.trim() === ''}
             onClick={() => { void onCreateBlank(newName.trim(), newVersion || null).then(ok => { if (ok) setCreating(false) }) }}
           >创建</button>
-          <button type="button" className="secondary-button" disabled={busy} onClick={() => setCreating(false)}>取消</button>
+          <button type="button" className="secondary-button" onClick={() => setCreating(false)}>取消</button>
         </div>
       )}
       {packs.length === 0 && !creating && <div className="settings-empty">还没有任何整合包；可导入他人分享的 .zip，或点「新建整合包」。</div>}

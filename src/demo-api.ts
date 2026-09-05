@@ -203,7 +203,7 @@ const demoNodeCandidates: RuntimeVersionCandidate[] = [
   { version: 'v22.19.0', label: 'Jod', lts: 'Jod', date: null, prerelease: false },
 ]
 let demoDshVersions: RuntimeEnvironmentState['dshInstalled'] = [
-  { version: '0.1.0-rc.7', root: 'C:\\Users\\demo\\AppData\\Roaming\\dsh-launcher\\dsh-runtime\\versions\\0.1.0-rc.7', executable: 'C:\\Users\\demo\\AppData\\Roaming\\dsh-launcher\\dsh-runtime\\versions\\0.1.0-rc.7\\node_modules\\.bin\\dsh.cmd', source: 'launcher', selected: true, removable: false },
+  { version: '0.1.0-rc.7', root: 'C:\\Users\\demo\\AppData\\Roaming\\dsh-launcher\\dsh-runtime\\versions\\0.1.0-rc.7', executable: 'C:\\Users\\demo\\AppData\\Roaming\\dsh-launcher\\dsh-runtime\\versions\\0.1.0-rc.7\\node_modules\\.bin\\dsh.cmd', source: 'launcher', selected: true, removable: true },
   { version: '0.1.0-rc.6', root: 'C:\\Users\\demo\\.dsh-runtime', executable: 'C:\\Users\\demo\\.dsh-runtime\\node_modules\\.bin\\dsh.cmd', source: 'legacy', selected: false, removable: true },
 ]
 let demoNodeVersions: RuntimeEnvironmentState['nodeInstalled'] = [
@@ -704,7 +704,7 @@ export const demoApi: LauncherApi = {
   }),
   installDshVersion: async version => {
     const normalized = version.replace(/^v/i, '')
-    const item = { version: normalized, root: `${demoSettings.dshInstallPath}\\versions\\${normalized}`, executable: `${demoSettings.dshInstallPath}\\versions\\${normalized}\\node_modules\\.bin\\dsh.cmd`, source: 'launcher' as const, selected: true, removable: false }
+    const item = { version: normalized, root: `${demoSettings.dshInstallPath}\\versions\\${normalized}`, executable: `${demoSettings.dshInstallPath}\\versions\\${normalized}\\node_modules\\.bin\\dsh.cmd`, source: 'launcher' as const, selected: true, removable: true }
     demoDshVersions = demoDshVersions.map(entry => ({ ...entry, selected: false, removable: true })).filter(entry => entry.version !== normalized)
     demoDshVersions.push(item)
     // 与主进程一致：已有激活包绑版本时，下载新版本不抢「当前」。
@@ -722,8 +722,20 @@ export const demoApi: LauncherApi = {
     return demoApi.readRuntimeEnvironment()
   },
   removeDshVersion: async version => {
-    if (demoSettings.dshVersion === version.replace(/^v/i, '')) throw new Error('当前 DSH 版本不能删除。')
-    demoDshVersions = demoDshVersions.filter(entry => entry.version !== version.replace(/^v/i, ''))
+    const normalized = version.replace(/^v/i, '')
+    const wasCurrent = demoSettings.dshVersion === normalized
+    demoDshVersions = demoDshVersions.filter(entry => entry.version !== normalized)
+    if (wasCurrent) {
+      // 与主进程一致：卸载当前版本后自动落到剩余最新托管版本，没有就清空。
+      const fallback = [...demoDshVersions].reverse().find(entry => entry.source === 'launcher') ?? null
+      demoDshVersions = demoDshVersions.map(entry => ({ ...entry, selected: entry.version === fallback?.version, removable: true }))
+      demoSettings = fallback
+        ? { ...demoSettings, dshVersion: fallback.version, launchExecutable: fallback.executable, launchArgs: ['web'] }
+        : { ...demoSettings, dshVersion: null }
+      demoDshInstallation = fallback
+        ? { installed: true, version: fallback.version, executable: fallback.executable, source: 'launcher' }
+        : { installed: false, version: null, executable: null, source: null }
+    }
     return demoApi.readRuntimeEnvironment()
   },
   installNodeVersion: async version => {

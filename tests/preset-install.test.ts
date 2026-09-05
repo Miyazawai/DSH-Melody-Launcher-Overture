@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import AdmZip from 'adm-zip'
 import { afterEach, describe, expect, it } from 'vitest'
-import { installPresetFromDirectory, installPresetFromRepository, readInstalledPresets, toggleInstalledPreset, uninstallInstalledPreset } from '../electron/preset-install'
+import { installPresetFromDirectory, installPresetFromRepository, readBuiltinAgentPresets, readInstalledPresets, toggleInstalledPreset, uninstallInstalledPreset } from '../electron/preset-install'
 import { readPresetReceipts, recordPresetInstall } from '../electron/preset-receipts'
 import type { PresetInstallTarget } from '../src/types'
 
@@ -226,4 +226,30 @@ it('uninstallInstalledPreset 未知或非法预设名报错', async () => {
   await expect(uninstallInstalledPreset(dshHome, 'not-installed', receiptsPath)).rejects.toThrow('未找到本地预设')
   await expect(uninstallInstalledPreset(dshHome, 'Bad_Name', receiptsPath)).rejects.toThrow('预设名称无效')
   expect((await readInstalledPresets(dshHome)).map(preset => preset.name)).toEqual(['router-standard'])
+})
+
+describe('内置预设布局探测（新版 DSH 拆包）', () => {
+  it('旧布局 config/agent-presets 仍可枚举', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'preset-old-'))
+    temporaryRoots.push(root)
+    const pkg = path.join(root, 'node_modules', '@deepseek-ai', 'dsh')
+    await mkdir(path.join(pkg, 'config', 'agent-presets', 'standard'), { recursive: true })
+    await writeFile(path.join(pkg, 'config', 'agent-presets', 'standard', 'preset.yml'), 'name: 标准\n', 'utf8')
+    const presets = await readBuiltinAgentPresets(pkg)
+    expect(presets.map(p => p.name)).toEqual(['standard'])
+  })
+
+  it('新布局：.pnpm 下的 dsh-agent-presets/presets 能被找到', async () => {
+    const versionRoot = await mkdtemp(path.join(os.tmpdir(), 'preset-new-'))
+    temporaryRoots.push(versionRoot)
+    const pkg = path.join(versionRoot, 'node_modules', '@deepseek-ai', 'dsh')
+    await mkdir(pkg, { recursive: true })
+    const presetsDir = path.join(versionRoot, 'node_modules', '.pnpm', '@deepseek-ai+dsh-agent-pres_abc123', 'node_modules', '@deepseek-ai', 'dsh-agent-presets', 'presets')
+    for (const name of ['standard', 'cordis']) {
+      await mkdir(path.join(presetsDir, name), { recursive: true })
+      await writeFile(path.join(presetsDir, name, 'preset.yml'), `name: ${name}\n`, 'utf8')
+    }
+    const presets = await readBuiltinAgentPresets(pkg)
+    expect(presets.map(p => p.name).sort()).toEqual(['cordis', 'standard'])
+  })
 })
