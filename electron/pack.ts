@@ -1483,19 +1483,27 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         const dshHome = await homeOfRecord(record)
         const currentProfile = await options.installer.readProfile(dshHome, options.unifiedProfiles ? packId : settings.profileName)
         const exportProfileName = options.unifiedProfiles ? packId : settings.profileName
-        const receipts = (await readPluginReceipts(options.pluginReceiptsPath))
-          .filter(item => item.profileName === exportProfileName && record.plugins.some(plugin => plugin.packageName === item.packageName))
+        // 按「包名优先、profile 偏好」取 receipt：避免装好后切过激活包导致
+        // profileName 不一致、receipt 全被过滤掉、导出的 manifest 变成空壳。
+        const allReceipts = await readPluginReceipts(options.pluginReceiptsPath)
+        const receiptByName = new Map<string, PluginInstallReceipt>()
+        for (const item of allReceipts) {
+          const existing = receiptByName.get(item.packageName)
+          if (!existing || item.profileName === exportProfileName) receiptByName.set(item.packageName, item)
+        }
+        const allPresetReceipts = await readPresetReceipts(options.presetReceiptsPath)
+        const presetReceiptByName = new Map(allPresetReceipts.map(item => [item.name, item]))
         const presetNames = new Set((record.presets ?? []).map(preset => preset.name))
-        const presetReceipts = (await readPresetReceipts(options.presetReceiptsPath))
-          .filter(item => presetNames.has(item.name))
+        const presetReceipts = [...presetNames].map(name => presetReceiptByName.get(name)).filter(<T>(r: T | undefined): r is T => r !== undefined)
+        const allSkillReceipts = await readSkillReceipts(options.skillReceiptsPath)
+        const skillReceiptByName = new Map(allSkillReceipts.map(item => [item.name, item]))
         const skillNames = new Set((record.skills ?? []).map(skill => skill.name))
-        const skillReceipts = (await readSkillReceipts(options.skillReceiptsPath))
-          .filter(item => skillNames.has(item.name))
+        const skillReceipts = [...skillNames].map(name => skillReceiptByName.get(name)).filter(<T>(r: T | undefined): r is T => r !== undefined)
         const applicationIds = new Set((record.applications ?? []).map(addon => addon.id))
         const applicationAddons = (await options.applicationAddons.list())
           .filter(addon => applicationIds.has(addon.id))
         const orderedReceipts = record.plugins
-          .map(plugin => receipts.find(receipt => receipt.packageName === plugin.packageName))
+          .map(plugin => receiptByName.get(plugin.packageName))
           .filter((receipt): receipt is PluginInstallReceipt => receipt !== undefined)
         const dshVersion = isValidPackDshVersion(record.dshVersion)
           ? normalizePackDshVersion(record.dshVersion)

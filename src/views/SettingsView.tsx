@@ -484,6 +484,7 @@ function SettingsSkillsTab({
   refreshLocked: boolean
   onOpenPath: (targetPath: string) => void
 }) {
+  const store = useLauncherStore()
   const [subView, setSubView] = useState<'installed' | 'market'>('installed')
   return (
     <div className="settings-stack">
@@ -506,6 +507,7 @@ function SettingsSkillsTab({
               subtitle={skill.description || skill.path}
               enabled={skill.enabled}
               busy={busy}
+              working={store.busy === skill.name}
               onToggle={enabled => onToggleSkill(skill, enabled)}
               onOpenFolder={() => onOpenPath(skill.path)}
             />
@@ -543,6 +545,7 @@ function SettingsPresetsTab({
   refreshLocked: boolean
 }) {
   const api = useLauncherApi()
+  const store = useLauncherStore()
   const [builtin, setBuiltin] = useState<BuiltinAgentPreset[] | null>(null)
   useEffect(() => {
     let alive = true
@@ -588,6 +591,7 @@ function SettingsPresetsTab({
             subtitle={preset.enabled ? preset.path : `已停用（${preset.path}）`}
             enabled={preset.enabled}
             busy={busy}
+            working={store.busy === preset.name}
             onToggle={enabled => onTogglePreset(preset, enabled)}
             onOpenFolder={() => onOpenPath(preset.path)}
           />
