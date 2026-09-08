@@ -70,7 +70,13 @@ async function writeCredentialDocument(dshHome: string, content: string): Promis
 }
 
 export async function getDeepSeekCredentialStatus(dshHome: string): Promise<CredentialStatus> {
-  return { configured: await hasCredential(dshHome, DEEPSEEK_CREDENTIAL) }
+  try {
+    return { configured: await hasCredential(dshHome, DEEPSEEK_CREDENTIAL) }
+  } catch (error) {
+    // 凭据文件里若残留无效条目（旧版本/手工编辑污染），不向界面抛出异常，
+    // 而是把状态降级为未配置并附上原因，避免启动器每次启动都打错误 toast。
+    return { configured: false, parseError: error instanceof Error ? error.message : 'DSH 凭据文件读取失败。' }
+  }
 }
 
 export async function readCredential(dshHome: string, name: string): Promise<string | null> {

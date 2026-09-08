@@ -1,6 +1,7 @@
 import { Check, ExternalLink, LoaderCircle, RefreshCw, Search, Star, Store, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useLauncherApi } from '../api/client'
+import { useLauncherStore } from '../hooks/use-launcher-store'
 import { PageHeading } from '../components/PageHeading'
 import { SkeletonCards } from '../components/Skeleton'
 import { formatStars } from '../lib/format'
@@ -55,6 +56,12 @@ export function DshMarketView({ onProfileChanged, embedded = false }: DshMarketV
     void load()
     return api.onDshMarketProgress(setProgress)
   }, [])
+
+  // 激活 Profile（对应"激活整合包"）变化时——新建/删除/切换整合包——重新拉一次安装态，
+  // 避免出现「整合包已删但 DSH Market 还显示已启用」的错觉。
+  const store = useLauncherStore()
+  const activeProfileName = store.settings?.profileName ?? null
+  useEffect(() => { void load() }, [activeProfileName])
 
   const visible = useMemo(() => {
     const list = (catalog?.plugins ?? []).filter(plugin => {

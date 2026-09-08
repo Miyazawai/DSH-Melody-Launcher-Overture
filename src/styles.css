@@ -542,6 +542,15 @@ input:focus-visible {
   letter-spacing: 0.14em;
 }
 
+.home-brand-name .home-brand-overture {
+  display: block;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  margin-top: 1px;
+}
+
 .home-brand-tagline {
   margin: -4px 0 0;
   color: var(--quiet);

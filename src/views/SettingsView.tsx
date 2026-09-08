@@ -21,7 +21,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react'
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLauncherApi } from '../api/client'
 import { formatBytes } from '../lib/format'
 import { SkeletonStrip } from '../components/Skeleton'
@@ -878,11 +878,14 @@ function SettingsPacks({
   const [newName, setNewName] = useState('')
   const [newVersion, setNewVersion] = useState<string>('')
   const [removing, setRemoving] = useState<string | null>(null)
+  const createNameInputRef = useRef<HTMLInputElement>(null)
 
   const openCreateForm = () => {
     setCreating(true)
     setNewName('')
     setNewVersion(dshInstalledVersions.at(-1) ?? '')
+    // 表单一打开就把焦点放进来，省得用户先点一下；同时把光标定到尾部（如果未来想加默认值）。
+    requestAnimationFrame(() => createNameInputRef.current?.focus())
   }
 
   const confirmRemove = async (pack: PackStatus) => {
@@ -916,9 +919,11 @@ function SettingsPacks({
       {creating && (
         <div className="settings-pack-create">
           <input
+            ref={createNameInputRef}
             className="settings-pack-name-input"
             placeholder="整合包名称（字母/数字/-_）"
             value={newName}
+            autoFocus
             onChange={event => setNewName(event.target.value)}
           />
           <select className="settings-pack-version-select" value={newVersion} onChange={event => setNewVersion(event.target.value)}>

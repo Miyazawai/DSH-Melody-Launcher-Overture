@@ -50,6 +50,8 @@ export interface RecommendedWebUiStatus {
 
 export interface CredentialStatus {
   configured: boolean
+  /** 凭据文件解析失败时的具体原因（不抛异常、状态降级为未配置）。 */
+  parseError?: string
 }
 
 export type CustomApiProtocol = 'openai-completions' | 'openai-responses' | 'anthropic-messages'

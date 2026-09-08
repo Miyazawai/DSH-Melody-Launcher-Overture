@@ -64,7 +64,8 @@ export function LauncherHome({
           <img className="home-brand-logo" src="/launcher-logo.png" alt="" width={112} height={112} draggable={false} />
           <h1 className="home-brand-name">
             <strong>DSH</strong>
-            <span>Melody Launcher: Overture</span>
+            <span>Melody Launcher</span>
+            <small className="home-brand-overture">Overture</small>
           </h1>
           <p className="home-brand-tagline">DSH 旋律启动器 · 序曲</p>
         </div>
