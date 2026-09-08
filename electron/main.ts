@@ -658,7 +658,8 @@ function createServices(): Services {
         })
         if (result.exitCode !== 0) throw new Error(`离线依赖入库失败（代码 ${result.exitCode}）`)
       }
-      const install = await runCommand(pnpmRuntime.executable, ['install', '--offline'], {
+      // prefer-offline：store 里有的直接用，个别缺失的包联网补齐（比 --offline 全有全无更稳）。
+      const install = await runCommand(pnpmRuntime.executable, ['install', '--prefer-offline'], {
         cwd: profileDir,
         env: environment,
         onOutput: (text, level) => onOutput(text),

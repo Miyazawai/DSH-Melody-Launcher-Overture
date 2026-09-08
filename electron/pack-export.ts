@@ -80,8 +80,8 @@ export async function buildPackExportToFile(
 // pnpm store 后配合 lockfile 即可完全离线安装（pnpm install --offline）。
 
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { readdir, readFile, mkdir } from 'node:fs/promises'
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
+import { readdir, readFile, mkdir, rm } from 'node:fs/promises'
 
 export interface DependencyTarballCollection {
   /** tarball 输出目录；null 表示收集失败（导入将回退在线安装）。 */
@@ -109,7 +109,7 @@ export function findNpmCli(nodeExecutable: string): string | null {
 
 function packOnce(nodeExecutable: string, npmCli: string, packageDir: string, destination: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(nodeExecutable, [npmCli, 'pack', packageDir, '--pack-destination', destination, '--silent'], {
+    const child = spawn(nodeExecutable, [npmCli, 'pack', packageDir, '--pack-destination', destination, '--ignore-scripts', '--silent'], {
       windowsHide: true,
     })
     let stderrText = ''
@@ -188,20 +188,38 @@ export async function collectDependencyTarballs(
   let done = 0
   const concurrency = Math.max(1, Math.min(options.concurrency ?? 4, 8))
   let cursor = 0
-  const workers = Array.from({ length: Math.min(concurrency, targets.length) }, async () => {
+  const workers = Array.from({ length: Math.min(concurrency, targets.length) }, async (_, workerIndex) => {
+    // 每个 worker 独立输出目录：多进程同时 pack 到同一目录会因 npm 内部临时文件竞争而随机失败。
+    const workerDir = path.join(outputDir, `w${workerIndex}`)
+    mkdirSync(workerDir, { recursive: true })
     while (cursor < targets.length) {
       const target = targets[cursor]
       cursor += 1
-      try {
-        await packOnce(options.nodeExecutable, npmCli, target.packageDir, outputDir)
-      } catch {
-        failed.push(`${target.name}@${target.version}`)
+      let ok = false
+      for (let attempt = 0; attempt < 3 && !ok; attempt += 1) {
+        try {
+          await packOnce(options.nodeExecutable, npmCli, target.packageDir, workerDir)
+          ok = true
+        } catch {
+          if (attempt === 2) failed.push(`${target.name}@${target.version}`)
+        }
+      }
+      if (ok) {
+        for (const file of readdirSync(workerDir)) {
+          if (!file.endsWith('.tgz')) continue
+          const from = path.join(workerDir, file)
+          const to = path.join(outputDir, file)
+          if (!existsSync(to)) renameSync(from, to)
+          else rmSync(from, { force: true })
+        }
       }
       done += 1
       options.onProgress?.(done, targets.length, target.name)
     }
+    await rm(workerDir, { recursive: true, force: true }).catch(() => undefined)
   })
   await Promise.all(workers)
-  if (failed.length > 0) return { tarballDir: null, lockfileText, total: targets.length, failed }
-  return { tarballDir: outputDir, lockfileText, total: targets.length, failed }
+  // 部分失败可容忍：失败名单随结果返回，导入端用 --prefer-offline 对缺失依赖自动联网补齐。
+  const hasOutput = failed.length < targets.length
+  return { tarballDir: hasOutput ? outputDir : null, lockfileText, total: targets.length, failed }
 }
