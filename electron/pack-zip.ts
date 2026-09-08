@@ -15,7 +15,7 @@ import * as yauzl from 'yauzl'
 import * as yazl from 'yazl'
 import type { PackManifest } from '../src/types'
 import { isSafePackageName } from './profile'
-import { PACK_MANIFEST_FILENAME, PROFILE_MANIFEST_FILENAME, parsePackManifest, serializePackManifest } from './pack-manifest'
+import { PACK_MANIFEST_FILENAME, parsePackManifest, serializePackManifest } from './pack-manifest'
 import { LAUNCHER_CONFIG_FILENAME } from './pack-launcher-config'
 
 export interface PackZipLimits {
@@ -91,7 +91,7 @@ function computeStripRoot(entries: ReadonlyArray<{ entryName: string; isDirector
   }
   if (firstSegments.size !== 1) return null
   const only = [...firstSegments][0]
-  if (only !== PACK_MANIFEST_FILENAME && only !== PROFILE_MANIFEST_FILENAME && !only.startsWith(PLUGIN_BODIES_PREFIX)) return only
+  if (only !== PACK_MANIFEST_FILENAME && !only.startsWith(PLUGIN_BODIES_PREFIX)) return only
   return null
 }
 
@@ -132,7 +132,7 @@ export function findManifestInArchive(buffer: Uint8Array): string | null {
     const safe = safeArchivePath(entry.entryName)
     if (!safe) continue
     const rel = relForEntry(safe, stripRoot)
-    if (rel === PACK_MANIFEST_FILENAME || rel === PROFILE_MANIFEST_FILENAME) return entry.getData().toString('utf8')
+    if (rel === PACK_MANIFEST_FILENAME) return entry.getData().toString('utf8')
   }
   return null
 }
@@ -188,7 +188,7 @@ export function inspectPackZip(buffer: Uint8Array, limits: PackZipLimits = DEFAU
     const safe = safeArchivePath(entry.entryName)
     if (!safe) continue
     const rel = relForEntry(safe, stripRoot)
-    if (rel === PACK_MANIFEST_FILENAME || rel === PROFILE_MANIFEST_FILENAME) {
+    if (rel === PACK_MANIFEST_FILENAME) {
       manifestText = entry.getData().toString('utf8')
       break
     }
@@ -518,7 +518,7 @@ export async function findManifestInArchiveFromPath(filePath: string): Promise<s
       const safe = safeArchivePath(entry.entryName)
       if (!safe) continue
       const rel = relForEntry(safe, handle.stripRoot)
-      if (rel === PACK_MANIFEST_FILENAME || rel === PROFILE_MANIFEST_FILENAME) {
+      if (rel === PACK_MANIFEST_FILENAME) {
         const data = await handle.readEntryData(entry, MAX_MANIFEST_BYTES)
         return data.toString('utf8')
       }
@@ -562,7 +562,7 @@ export async function inspectPackZipFromPath(
       const safe = safeArchivePath(entry.entryName)
       if (!safe) continue
       const rel = relForEntry(safe, handle.stripRoot)
-      if (rel === PACK_MANIFEST_FILENAME || rel === PROFILE_MANIFEST_FILENAME) {
+      if (rel === PACK_MANIFEST_FILENAME) {
         const data = await handle.readEntryData(entry, MAX_MANIFEST_BYTES)
         manifestText = data.toString('utf8')
         break
