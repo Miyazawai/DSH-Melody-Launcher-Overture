@@ -82,6 +82,7 @@ interface SettingsPanelsProps {
   onInstallDshVersion: (version: string) => Promise<boolean>
   onRemoveDshVersion: (version: string) => Promise<boolean>
   onTogglePlugin: (plugin: ManagedPlugin, enabled: boolean) => Promise<boolean>
+  onUninstallPlugin: (plugin: ManagedPlugin) => Promise<boolean>
   onToggleSkill: (skill: InstalledSkill, enabled: boolean) => void
   onTogglePreset: (preset: InstalledPreset, enabled: boolean) => void
   onSkillInstalled: (result: SkillInstallResult) => void
@@ -116,6 +117,7 @@ export function SettingsPanels({
   onInstallDshVersion,
   onRemoveDshVersion,
   onTogglePlugin,
+  onUninstallPlugin,
   onToggleSkill,
   onTogglePreset,
   onSkillInstalled,
@@ -160,6 +162,7 @@ export function SettingsPanels({
               profile={profile}
               busy={locked}
               onTogglePlugin={onTogglePlugin}
+              onUninstallPlugin={onUninstallPlugin}
               onOpenPluginFolder={onOpenPluginFolder}
               onProfileChanged={onProfileChanged}
               onRefresh={onRefresh}
@@ -402,6 +405,7 @@ function SettingsPluginsTab({
   profile,
   busy,
   onTogglePlugin,
+  onUninstallPlugin,
   onOpenPluginFolder,
   onProfileChanged,
   onRefresh,
@@ -410,6 +414,7 @@ function SettingsPluginsTab({
   profile: ProfileState
   busy: boolean
   onTogglePlugin: (plugin: ManagedPlugin, enabled: boolean) => Promise<boolean>
+  onUninstallPlugin: (plugin: ManagedPlugin) => Promise<boolean>
   onOpenPluginFolder: (packageName: string) => void
   onProfileChanged: () => void
   onRefresh: () => void
@@ -440,6 +445,7 @@ function SettingsPluginsTab({
                 enabled={plugin.enabled}
                 busy={busy}
                 onToggle={enabled => { void onTogglePlugin(plugin, enabled) }}
+                onRemove={!plugin.locked ? () => { void onUninstallPlugin(plugin) } : undefined}
                 onOpenFolder={plugin.builtin ? undefined : () => onOpenPluginFolder(plugin.packageName)}
               />
             ))}

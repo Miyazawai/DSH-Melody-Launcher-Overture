@@ -175,6 +175,7 @@ function LauncherShell() {
                     }}
                     onRemoveDshVersion={store.removeDshVersion}
                     onTogglePlugin={store.togglePlugin}
+                    onUninstallPlugin={async plugin => { await store.uninstallPlugin(plugin); return true }}
                     onToggleSkill={store.toggleSkill}
                     onTogglePreset={store.togglePreset}
                     onSkillInstalled={result => {
