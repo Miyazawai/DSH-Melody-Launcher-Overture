@@ -132,7 +132,7 @@ npm run package:win   # 打包 Windows 便携 exe
 
 > [!TIP]
 > **发版**：推 `v*` 标签即可触发 CI 自动打包并把便携 exe 挂到 Release：
-> `git tag -a v0.4.2 -m "v0.4.2" && git push origin v0.4.2`
+> `git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0`
 > 版本号与 `package.json` 的 `version` 保持一致，exe 文件名由它决定。
 
 ## 数据与配置
