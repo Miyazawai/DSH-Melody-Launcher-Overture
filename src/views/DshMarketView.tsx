@@ -1,5 +1,5 @@
 import { Check, ExternalLink, LoaderCircle, RefreshCw, Search, Star, Store, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLauncherApi } from '../api/client'
 import { useLauncherStore } from '../hooks/use-launcher-store'
 import { PageHeading } from '../components/PageHeading'
@@ -52,9 +52,23 @@ export function DshMarketView({ onProfileChanged, embedded = false }: DshMarketV
     finally { setCheckingUpdates(false) }
   }
 
+  // 终端阶段（complete / error）短暂保留后清空进度条，避免「卡在 84%」错觉残留。
+  const progressClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleProgress = (next: DshMarketProgress) => {
+    setProgress(next)
+    if (progressClearRef.current) { clearTimeout(progressClearRef.current); progressClearRef.current = null }
+    if (next.phase === 'complete' || next.phase === 'error') {
+      progressClearRef.current = setTimeout(() => setProgress(null), 1800)
+    }
+  }
+
   useEffect(() => {
     void load()
-    return api.onDshMarketProgress(setProgress)
+    const unsubscribe = api.onDshMarketProgress(handleProgress)
+    return () => {
+      unsubscribe()
+      if (progressClearRef.current) clearTimeout(progressClearRef.current)
+    }
   }, [])
 
   // 激活 Profile（对应"激活整合包"）变化时——新建/删除/切换整合包——重新拉一次安装态，
