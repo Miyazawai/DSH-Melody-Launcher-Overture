@@ -1,4 +1,4 @@
-// 整合包（Pack）导出：从 profile 的 node_modules 收集插件本体，组合成可导出的压缩包。
+// 整合包（Pack）导出：从整合包家目录的 node_modules 收集插件本体，组合成可导出的压缩包。
 // 纯函数 + fs，不依赖 Electron。
 
 import { access } from 'node:fs/promises'
@@ -22,7 +22,7 @@ async function exists(target: string): Promise<boolean> {
 }
 
 /**
- * 收集 profile 内 node_modules 中每个包名对应的目录；scoped 包为 node_modules/@scope/pkg，缺失的记入 missing。
+ * 收集整合包家目录 node_modules 中每个包名对应的目录；scoped 包为 node_modules/@scope/pkg，缺失的记入 missing。
  * packageName 必须通过安全校验，且拼接后的路径不得越出 node_modules，防止路径穿越。
  */
 export async function collectPackBodies(
@@ -94,24 +94,6 @@ export interface DependencyTarballCollection {
   failed: string[]
 }
 
-/**
- * 解析 pnpm 的 `.pnpm` 目录名为真实包名与版本。
- * v11 目录名形如 `pkg@1.2.3`、`@scope+pkg@1.2.3`，可能带 `_peerhash` / `(peer)` 后缀；
- * file:/link: 依赖（即随包本体）返回 null。
- */
-export function parsePnpmStoreDirName(dirName: string): { name: string; version: string } | null {
-  const base = dirName.split('_')[0].split('(')[0]
-  if (/file|%3A|link:/i.test(base)) return null
-  const atIndex = base.lastIndexOf('@')
-  if (atIndex <= 0) return null
-  let name = base.slice(0, atIndex)
-  const version = base.slice(atIndex + 1)
-  if (!version || !/^[a-z@][a-z0-9._+/@-]*$/i.test(name)) return null
-  if (name.startsWith('@')) name = name.replace('+', '/')
-  if (!isSafePackageName(name)) return null
-  return { name, version }
-}
-
 /** 在 node 发行版目录里探测 npm-cli.js。 */
 export function findNpmCli(nodeExecutable: string): string | null {
   const dir = path.dirname(nodeExecutable)
@@ -140,8 +122,42 @@ function packOnce(nodeExecutable: string, npmCli: string, packageDir: string, de
   })
 }
 
+interface DependencyTarget { name: string; version: string; packageDir: string }
+
+/** 从包目录的 package.json 读取 name/version（hoisted 扁平布局用）。 */
+async function targetFromPackageJson(packageDir: string): Promise<DependencyTarget | null> {
+  try {
+    const manifest = JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8')) as { name?: unknown; version?: unknown }
+    if (typeof manifest.name !== 'string' || typeof manifest.version !== 'string') return null
+    if (!isSafePackageName(manifest.name)) return null
+    if (!/^v?\d+[.\d-]|^v?\d+\d*/.test(manifest.version) && !manifest.version.includes('-')) return null
+    return { name: manifest.name, version: manifest.version, packageDir }
+  } catch {
+    return null
+  }
+}
+
+/** hoisted 扁平 node_modules 布局：顶层每个目录（@scope 展开）就是一个包。 */
+async function enumerateHoistedTargets(nodeModulesDir: string): Promise<DependencyTarget[]> {
+  const targets: DependencyTarget[] = []
+  for (const entry of await readdir(nodeModulesDir)) {
+    if (entry.startsWith('.') || entry === 'bin') continue
+    const dir = path.join(nodeModulesDir, entry)
+    if (entry.startsWith('@')) {
+      for (const sub of await readdir(dir)) {
+        const target = await targetFromPackageJson(path.join(dir, sub))
+        if (target) targets.push(target)
+      }
+    } else {
+      const target = await targetFromPackageJson(dir)
+      if (target) targets.push(target)
+    }
+  }
+  return targets
+}
+
 /**
- * 把 profile 依赖（node_modules/.pnpm 里的每个真实包）打成 npm tarball。
+ * 把整合包环境依赖（node_modules 里的每个真实包）打成 npm tarball。
  * 全部成功才返回 tarballDir；任一失败返回 null（调用方回退在线导入）。
  */
 export async function collectDependencyTarballs(
@@ -153,8 +169,6 @@ export async function collectDependencyTarballs(
     onProgress?: (done: number, total: number, name: string) => void
   },
 ): Promise<DependencyTarballCollection> {
-  const pnpmDir = path.join(packProfileDir, 'node_modules', '.pnpm')
-  if (!existsSync(pnpmDir)) return { tarballDir: null, lockfileText: null, total: 0, failed: [] }
   let lockfileText: string | null = null
   try {
     lockfileText = await readFile(path.join(packProfileDir, 'pnpm-lock.yaml'), 'utf8')
@@ -162,14 +176,8 @@ export async function collectDependencyTarballs(
     return { tarballDir: null, lockfileText: null, total: 0, failed: [] }
   }
 
-  const targets: Array<{ name: string; version: string; packageDir: string }> = []
-  for (const entry of await readdir(pnpmDir)) {
-    const parsed = parsePnpmStoreDirName(entry)
-    if (!parsed) continue
-    const packageDir = path.join(pnpmDir, entry, 'node_modules', ...parsed.name.split('/'))
-    if (!existsSync(packageDir)) continue
-    targets.push({ ...parsed, packageDir })
-  }
+  // 整合包环境的 node_modules 是扁平实体布局：顶层每个目录（@scope 展开）就是一个包。
+  const targets = await enumerateHoistedTargets(path.join(packProfileDir, 'node_modules'))
   if (targets.length === 0) return { tarballDir: null, lockfileText, total: 0, failed: [] }
 
   const npmCli = findNpmCli(options.nodeExecutable)

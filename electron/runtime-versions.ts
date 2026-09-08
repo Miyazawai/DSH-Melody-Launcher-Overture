@@ -436,12 +436,23 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
   async function read(refresh = false): Promise<RuntimeEnvironmentState> {
     const settings = await options.readSettings()
     if (refresh || Date.now() - availableAt > 5 * 60_000 || dshAvailable.length === 0 || nodeAvailable.length === 0) {
+      // 在线列表只用于展示「可下载版本」；网络黑洞（代理半开等）时 fetch 可能永不返回，
+      // 用 15s 硬超时兜底，超时放弃本轮刷新（availableAt 照样推进，5 分钟内不再重试）。
+      const withTimeout = async <T,>(promise: Promise<T>): Promise<T | null> => {
+        let timer: NodeJS.Timeout | undefined
+        const timeout = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 15_000) })
+        try {
+          return await Promise.race([promise, timeout])
+        } finally {
+          clearTimeout(timer)
+        }
+      }
       const [dshResult, nodeResult] = await Promise.allSettled([
-        listAvailableDshVersions(options.githubFetch, dshRegistryCandidates(buildNetworkEnvironment(settings).npmRegistry)),
-        import('./node-runtime').then(module => module.listAvailableNodeVersions()),
+        withTimeout(listAvailableDshVersions(options.githubFetch, dshRegistryCandidates(buildNetworkEnvironment(settings).npmRegistry))),
+        withTimeout(import('./node-runtime').then(module => module.listAvailableNodeVersions())),
       ])
-      if (dshResult.status === 'fulfilled') dshAvailable = dshResult.value
-      if (nodeResult.status === 'fulfilled') nodeAvailable = nodeResult.value
+      if (dshResult.status === 'fulfilled' && dshResult.value) dshAvailable = dshResult.value
+      if (nodeResult.status === 'fulfilled' && nodeResult.value) nodeAvailable = nodeResult.value
       availableAt = Date.now()
     }
     return readInstalled(settings)
@@ -591,7 +602,8 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
     const item = (await findManagedDshVersions(settings.dshInstallPath)).find(entry => entry.version === normalized)
     if (!item) throw new Error(`DSH ${normalized} 尚未安装。`)
     await options.saveSettings({ ...settings, dshVersion: normalized, launchExecutable: item.executable, launchArgs: ['web'] })
-    return read()
+    // 切换包/版本是本地操作：绝不触发在线版本列表（网络黑洞时会把切换卡死）。
+    return readInstalled(settings)
   }
 
   async function removeDsh(version: string): Promise<RuntimeEnvironmentState> {
