@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLauncherApi } from '../api/client'
+import { useLauncherStore } from '../hooks/use-launcher-store'
 import { formatBytes } from '../lib/format'
 import { SkeletonStrip } from '../components/Skeleton'
 import { DshMarketView } from './DshMarketView'
@@ -420,6 +421,7 @@ function SettingsPluginsTab({
   onRefresh: () => void
   refreshLocked: boolean
 }) {
+  const store = useLauncherStore()
   const [subView, setSubView] = useState<'installed' | 'market'>('installed')
   return (
     <div className="settings-stack">
@@ -444,6 +446,7 @@ function SettingsPluginsTab({
                 locked={plugin.locked}
                 enabled={plugin.enabled}
                 busy={busy}
+                working={store.busy === plugin.packageName}
                 onToggle={enabled => { void onTogglePlugin(plugin, enabled) }}
                 onRemove={!plugin.locked ? () => { void onUninstallPlugin(plugin) } : undefined}
                 onOpenFolder={plugin.builtin ? undefined : () => onOpenPluginFolder(plugin.packageName)}
@@ -1061,6 +1064,7 @@ function ResourceRow({
   selected = false,
   locked = false,
   busy,
+  working = false,
   onToggle,
   onSelect,
   onRemove,
@@ -1073,30 +1077,38 @@ function ResourceRow({
   selected?: boolean
   locked?: boolean
   busy: boolean
+  /** 该行自身有一个动作在执行（如卸载中）：行尾转圈，替换开关/删除按钮。 */
+  working?: boolean
   onToggle?: (enabled: boolean) => void
   onSelect?: () => void
   onRemove?: () => void
   onOpenFolder?: () => void
 }) {
   return (
-    <div className={`settings-row ${enabled && !selected ? 'enabled' : ''}`}>
+    <div className={`settings-row ${enabled && !selected ? 'enabled' : ''}${working ? ' is-working' : ''}`}>
       <div className="settings-row-copy">
         <strong>{title}</strong>
         {subtitle && <span>{subtitle}</span>}
       </div>
       <div className="settings-row-actions">
         {selected && <span className="settings-row-badge"><Check size={12} />当前</span>}
-        {onToggle && (
-          <label className="switch" title={enabled ? '停用' : '启用'}>
-            <input type="checkbox" checked={enabled} disabled={busy} onChange={event => onToggle(event.target.checked)} />
-            <span />
-          </label>
-        )}
-        {!onToggle && onSelect && !selected && (
-          <button type="button" className="secondary-button" disabled={busy || locked} onClick={onSelect}>使用</button>
-        )}
-        {onRemove && (
-          <button type="button" className="icon-button" disabled={busy} onClick={onRemove} title="删除" aria-label={`删除 ${title}`}><Trash2 size={14} /></button>
+        {working ? (
+          <LoaderCircle className="spin" size={16} />
+        ) : (
+          <>
+            {onToggle && (
+              <label className="switch" title={enabled ? '停用' : '启用'}>
+                <input type="checkbox" checked={enabled} disabled={busy} onChange={event => onToggle(event.target.checked)} />
+                <span />
+              </label>
+            )}
+            {!onToggle && onSelect && !selected && (
+              <button type="button" className="secondary-button" disabled={busy || locked} onClick={onSelect}>使用</button>
+            )}
+            {onRemove && (
+              <button type="button" className="icon-button" disabled={busy} onClick={onRemove} title="删除" aria-label={`删除 ${title}`}><Trash2 size={14} /></button>
+            )}
+          </>
         )}
         {onOpenFolder && (
           <button type="button" className="icon-button" onClick={onOpenFolder} title="打开文件夹" aria-label={`打开 ${title} 文件夹`}><FolderOpen size={15} /></button>
