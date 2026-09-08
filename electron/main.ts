@@ -623,6 +623,48 @@ function createServices(): Services {
     selectDshVersion: async version => {
       await runtimeVersions.selectDsh(version)
     },
+    getNodeExecutable: async () => {
+      try {
+        return (await prepareNodeRuntime('plugin')).node
+      } catch {
+        return null
+      }
+    },
+    offlinePackInstall: async ({ tarballDir, profileDir, onOutput }) => {
+      const current = await settings.read()
+      const nodeRuntime = await prepareNodeRuntime('plugin')
+      const pnpmRuntime = await preparePnpmRuntime('plugin', nodeRuntime)
+      const environment = withExecutableDirectoryOnPath(
+        pnpmRuntime.executable,
+        withExecutableDirectoryOnPath(nodeRuntime.node, {
+          ...process.env,
+          DSH_HOME: current.dshHome,
+          npm_config_store_dir: path.join(app.getPath('userData'), 'plugin-store'),
+          NPM_CONFIG_STORE_DIR: path.join(app.getPath('userData'), 'plugin-store'),
+          pnpm_config_store_dir: path.join(app.getPath('userData'), 'plugin-store'),
+          PNPM_CONFIG_STORE_DIR: path.join(app.getPath('userData'), 'plugin-store'),
+          CI: 'true',
+          FORCE_COLOR: '0',
+        }),
+      )
+      const entries = (await readdir(tarballDir)).filter(file => file.endsWith('.tgz')).sort()
+      if (entries.length === 0) throw new Error('离线包内没有依赖 tarball。')
+      for (let index = 0; index < entries.length; index += 40) {
+        const batch = entries.slice(index, index + 40).map(file => path.join(tarballDir, file).replace(/\\/g, '/'))
+        const result = await runCommand(pnpmRuntime.executable, ['store', 'add', ...batch], {
+          cwd: profileDir,
+          env: environment,
+          onOutput: (text, level) => onOutput(text),
+        })
+        if (result.exitCode !== 0) throw new Error(`离线依赖入库失败（代码 ${result.exitCode}）`)
+      }
+      const install = await runCommand(pnpmRuntime.executable, ['install', '--offline'], {
+        cwd: profileDir,
+        env: environment,
+        onOutput: (text, level) => onOutput(text),
+      })
+      if (install.exitCode !== 0) throw new Error(`离线安装失败（代码 ${install.exitCode}）`)
+    },
   })
 
   const launcherUpdater = createLauncherUpdater({

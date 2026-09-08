@@ -68,8 +68,132 @@ export async function buildPackExportToFile(
   outputPath: string,
   presetDirs: Map<string, string> = new Map(),
   launcherConfig?: string,
+  offline?: { tarballDir: string; lockfileText: string },
 ): Promise<{ zipPath: string; missing: string[] }> {
   const { bodies, missing } = await collectPackBodies(packProfileDir, packageNames)
-  await buildPackZipToFile(manifest, bodies, outputPath, presetDirs, launcherConfig)
+  await buildPackZipToFile(manifest, bodies, outputPath, presetDirs, launcherConfig, offline)
   return { zipPath: outputPath, missing }
+}
+
+// ===========================================================================
+// 全离线导出支持：把 profile 依赖打成 npm tarball，随包携带；导入端灌入
+// pnpm store 后配合 lockfile 即可完全离线安装（pnpm install --offline）。
+
+import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { readdir, readFile, mkdir } from 'node:fs/promises'
+
+export interface DependencyTarballCollection {
+  /** tarball 输出目录；null 表示收集失败（导入将回退在线安装）。 */
+  tarballDir: string | null
+  /** profile 的 pnpm-lock.yaml 文本；null 表示本包没有可用的 lockfile。 */
+  lockfileText: string | null
+  /** 解析到的依赖总数。 */
+  total: number
+  /** 打包失败的依赖（>0 时整体视为失败，tarballDir 为 null）。 */
+  failed: string[]
+}
+
+/**
+ * 解析 pnpm 的 `.pnpm` 目录名为真实包名与版本。
+ * v11 目录名形如 `pkg@1.2.3`、`@scope+pkg@1.2.3`，可能带 `_peerhash` / `(peer)` 后缀；
+ * file:/link: 依赖（即随包本体）返回 null。
+ */
+export function parsePnpmStoreDirName(dirName: string): { name: string; version: string } | null {
+  const base = dirName.split('_')[0].split('(')[0]
+  if (/file|%3A|link:/i.test(base)) return null
+  const atIndex = base.lastIndexOf('@')
+  if (atIndex <= 0) return null
+  let name = base.slice(0, atIndex)
+  const version = base.slice(atIndex + 1)
+  if (!version || !/^[a-z@][a-z0-9._+/@-]*$/i.test(name)) return null
+  if (name.startsWith('@')) name = name.replace('+', '/')
+  if (!isSafePackageName(name)) return null
+  return { name, version }
+}
+
+/** 在 node 发行版目录里探测 npm-cli.js。 */
+export function findNpmCli(nodeExecutable: string): string | null {
+  const dir = path.dirname(nodeExecutable)
+  for (const candidate of [
+    path.join(dir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    path.join(dir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    path.join(dir, '..', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ]) {
+    if (existsSync(candidate)) return candidate
+  }
+  return null
+}
+
+function packOnce(nodeExecutable: string, npmCli: string, packageDir: string, destination: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(nodeExecutable, [npmCli, 'pack', packageDir, '--pack-destination', destination, '--silent'], {
+      windowsHide: true,
+    })
+    let stderrText = ''
+    child.stderr?.on('data', chunk => { stderrText += String(chunk) })
+    child.on('error', reject)
+    child.on('close', code => {
+      if (code === 0) resolve()
+      else reject(new Error(`npm pack 退出码 ${code}：${stderrText.trim().slice(-300)}`))
+    })
+  })
+}
+
+/**
+ * 把 profile 依赖（node_modules/.pnpm 里的每个真实包）打成 npm tarball。
+ * 全部成功才返回 tarballDir；任一失败返回 null（调用方回退在线导入）。
+ */
+export async function collectDependencyTarballs(
+  packProfileDir: string,
+  outputDir: string,
+  options: {
+    nodeExecutable: string
+    concurrency?: number
+    onProgress?: (done: number, total: number, name: string) => void
+  },
+): Promise<DependencyTarballCollection> {
+  const pnpmDir = path.join(packProfileDir, 'node_modules', '.pnpm')
+  if (!existsSync(pnpmDir)) return { tarballDir: null, lockfileText: null, total: 0, failed: [] }
+  let lockfileText: string | null = null
+  try {
+    lockfileText = await readFile(path.join(packProfileDir, 'pnpm-lock.yaml'), 'utf8')
+  } catch {
+    return { tarballDir: null, lockfileText: null, total: 0, failed: [] }
+  }
+
+  const targets: Array<{ name: string; version: string; packageDir: string }> = []
+  for (const entry of await readdir(pnpmDir)) {
+    const parsed = parsePnpmStoreDirName(entry)
+    if (!parsed) continue
+    const packageDir = path.join(pnpmDir, entry, 'node_modules', ...parsed.name.split('/'))
+    if (!existsSync(packageDir)) continue
+    targets.push({ ...parsed, packageDir })
+  }
+  if (targets.length === 0) return { tarballDir: null, lockfileText, total: 0, failed: [] }
+
+  const npmCli = findNpmCli(options.nodeExecutable)
+  if (!npmCli) return { tarballDir: null, lockfileText, total: targets.length, failed: ['npm-cli 不可用'] }
+
+  await mkdir(outputDir, { recursive: true })
+  const failed: string[] = []
+  let done = 0
+  const concurrency = Math.max(1, Math.min(options.concurrency ?? 4, 8))
+  let cursor = 0
+  const workers = Array.from({ length: Math.min(concurrency, targets.length) }, async () => {
+    while (cursor < targets.length) {
+      const target = targets[cursor]
+      cursor += 1
+      try {
+        await packOnce(options.nodeExecutable, npmCli, target.packageDir, outputDir)
+      } catch {
+        failed.push(`${target.name}@${target.version}`)
+      }
+      done += 1
+      options.onProgress?.(done, targets.length, target.name)
+    }
+  })
+  await Promise.all(workers)
+  if (failed.length > 0) return { tarballDir: null, lockfileText, total: targets.length, failed }
+  return { tarballDir: outputDir, lockfileText, total: targets.length, failed }
 }

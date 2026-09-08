@@ -39,6 +39,8 @@ export interface PackZipInspection {
 
 const PLUGIN_BODIES_PREFIX = 'plugin-bodies/'
 const PRESET_BODIES_PREFIX = 'preset-bodies/'
+const DEPENDENCY_TARBALLS_PREFIX = 'dependency-tarballs/'
+const LOCKFILE_ENTRY_NAME = 'pnpm-lock.yaml'
 
 /** 标准包清单读取上限（清单本身很小，给一个安全余量即可）。 */
 const MAX_MANIFEST_BYTES = 1 * 1024 * 1024
@@ -675,11 +677,20 @@ export async function buildPackZipToFile(
   outputPath: string,
   presetDirs: Map<string, string> = new Map(),
   launcherConfig?: string,
+  offline?: { tarballDir: string; lockfileText: string },
 ): Promise<void> {
   const zip = new yazl.ZipFile()
   const manifestBuffer = Buffer.from(serializePackManifest(manifest), 'utf8')
   zip.addBuffer(manifestBuffer, PACK_MANIFEST_FILENAME)
   if (launcherConfig) zip.addBuffer(Buffer.from(launcherConfig, 'utf8'), LAUNCHER_CONFIG_FILENAME)
+  // 全离线支持：依赖 tarball + lockfile 随包携带，导入端灌 store 后可完全离线安装。
+  if (offline) {
+    zip.addBuffer(Buffer.from(offline.lockfileText, 'utf8'), 'pnpm-lock.yaml')
+    for (const file of readdirSync(offline.tarballDir)) {
+      if (!file.endsWith('.tgz')) continue
+      zip.addFile(path.join(offline.tarballDir, file), `${DEPENDENCY_TARBALLS_PREFIX}${file}`)
+    }
+  }
   for (const [packageName, directory] of bodyDirs) {
     const base = `${PLUGIN_BODIES_PREFIX}${packageName}`
     const stack: Array<{ dir: string; rel: string }> = [{ dir: directory, rel: '' }]
@@ -745,4 +756,45 @@ export async function buildPackZipToFile(
     zip.outputStream.pipe(output)
     zip.end()
   })
+}
+
+export interface OfflinePackSupport {
+  tarballDir: string
+  lockfileText: string
+  tarballCount: number
+}
+
+/** 解出 zip 内的离线安装支持（依赖 tarball + lockfile）；缺任一返回 null。 */
+export async function extractOfflineSupportFromPath(filePath: string, workDir: string): Promise<OfflinePackSupport | null> {
+  const handle = await openLooseZipFromPath(filePath)
+  try {
+    let lockfileText: string | null = null
+    const tarballEntries: ZipPathEntry[] = []
+    for (const entry of handle.entries) {
+      if (entry.isDirectory) continue
+      const safe = safeArchivePath(entry.entryName)
+      if (!safe) continue
+      const rel = relForEntry(safe, handle.stripRoot)
+      if (rel === LOCKFILE_ENTRY_NAME) {
+        lockfileText = (await handle.readEntryData(entry, 4 * 1024 * 1024)).toString('utf8')
+      } else if (rel.startsWith(DEPENDENCY_TARBALLS_PREFIX) && rel.endsWith('.tgz')) {
+        tarballEntries.push(entry)
+      }
+    }
+    if (!lockfileText || tarballEntries.length === 0) return null
+    const tarballDir = path.join(workDir, 'dependency-tarballs')
+    await mkdir(tarballDir, { recursive: true })
+    for (const entry of tarballEntries) {
+      const safe = safeArchivePath(entry.entryName)
+      if (!safe) continue
+      const fileName = safe.slice(DEPENDENCY_TARBALLS_PREFIX.length)
+      if (!fileName || fileName.includes('/')) continue
+      const target = path.join(tarballDir, fileName)
+      assertInside(tarballDir, target)
+      await handle.writeEntryToFile(entry, target, {})
+    }
+    return { tarballDir, lockfileText, tarballCount: tarballEntries.length }
+  } finally {
+    await handle.close()
+  }
 }

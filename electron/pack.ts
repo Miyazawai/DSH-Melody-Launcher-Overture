@@ -38,10 +38,10 @@ import type {
   SkillInstallTarget,
 } from '../src/types'
 import { assertMeaningfulPackName, assertPackDshVersion, isValidPackDshVersion, manifestNameFromPackId, normalizePackDshVersion, packProfileName, parsePackManifest } from './pack-manifest'
-import { extractPackBodiesFromPath, extractPresetBodiesFromPath, findManifestInArchiveFromPath, inspectPackZipFromPath } from './pack-zip'
+import { extractOfflineSupportFromPath, extractPackBodiesFromPath, extractPresetBodiesFromPath, findManifestInArchiveFromPath, inspectPackZipFromPath } from './pack-zip'
 import { validateFullArchive } from './profile-repository-import'
 import { cleanPackNameHint, extractRawPluginBodiesFromPath, extractRawPresetSourcesFromPath, extractRawSkillSourcesFromPath, scanRawPackZipFromPath, type ExtractByteBudget } from './pack-scan'
-import { buildPackExportToFile } from './pack-export'
+import { buildPackExportToFile, collectDependencyTarballs } from './pack-export'
 import {
   readPackRegistry,
   removePackRecord,
@@ -135,6 +135,10 @@ export interface PackManagerOptions {
   selectDshVersion?: (version: string) => Promise<void>
   /** 包创建（新建/导入）后回调（刷新列表等）。 */
   onPackCreated?: (packId: string) => void
+  /** 解析启动器 node 可执行文件路径（导出依赖 tarball 用）；不可用返回 null。 */
+  getNodeExecutable?: () => Promise<string | null>
+  /** 全离线导入：把 zip 内依赖 tarball 灌入 pnpm store，再对 profile 离线 install。失败抛错（调用方回退在线）。 */
+  offlinePackInstall?: (params: { tarballDir: string; profileDir: string; onOutput: (line: string) => void }) => Promise<void>
 }
 
 export interface PackManager {
@@ -1406,6 +1410,74 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           })
         }
 
+        // 全离线快装：zip 携带依赖 tarball + lockfile 时，灌 store 后一次性离线安装
+        // 全部插件，不再逐个走在线解析；任何一步失败自动回退常规逐项安装。
+        if (wantedPlugins.length > 0 && options.offlinePackInstall) {
+          const offlineWork = path.join(dshHome, '.pack-offline-import', packId)
+          try {
+            await rm(offlineWork, { recursive: true, force: true }).catch(() => undefined)
+            const offline = await extractOfflineSupportFromPath(filePath, offlineWork)
+            const oldBodyRoot = offline?.lockfileText.match(/file:[^'\\n\s]*?[.]dsh-launcher-plugin-bodies/)?.[0]?.slice(5) ?? null
+            if (offline && oldBodyRoot) {
+              options.emitEvent({ kind: 'status', message: `检测到离线依赖包（${offline.tarballCount} 个），免联网直装中…` })
+              // 1) 本体解到临时目录后落位共享本体目录（lockfile 的 file: 前缀指向这里）。
+              const newBodyRoot = path.join(dshHome, '.dsh-launcher-plugin-bodies')
+              const offlineBodies = await extractPackBodiesFromPath(
+                filePath,
+                path.join(offlineWork, 'bodies'),
+                undefined,
+                new Set(manifest.plugins.map(entry => entry.packageName)),
+              )
+              const finalDirs = new Map<string, string>()
+              for (const packageName of wantedPlugins) {
+                const bodyDir = offlineBodies.get(packageName)
+                if (!bodyDir) throw new Error(`离线包缺少插件本体：${packageName}`)
+                finalDirs.set(packageName, await sharedPluginBodyDir(dshHome, packageName, bodyDir))
+              }
+              // 2) lockfile 的本体前缀改写为导入机路径，落到 profile。
+              const rewritten = offline.lockfileText.split(oldBodyRoot).join(newBodyRoot)
+              const profileDir = path.join(dshHome, 'profiles', profileName)
+              await writeFile(path.join(profileDir, 'pnpm-lock.yaml'), rewritten, 'utf8')
+              // 3) package.json 写入依赖与 bundles（等价 DSH CLI add 后的 reconcile 结果）。
+              const profileManifestPath = path.join(profileDir, 'package.json')
+              const pkgJson = JSON.parse(await readFile(profileManifestPath, 'utf8')) as {
+                dependencies?: Record<string, string>
+                dsh?: { profile?: { bundles?: string[] } }
+              }
+              const dependencies = pkgJson.dependencies && typeof pkgJson.dependencies === 'object' && !Array.isArray(pkgJson.dependencies)
+                ? pkgJson.dependencies
+                : {}
+              const templateBundles = pkgJson.dsh?.profile?.bundles ?? []
+              const bundles = new Set<string>(templateBundles)
+              for (const [packageName, dir] of finalDirs) {
+                dependencies[packageName] = `file:${dir.replace(/\\/g, '/')}`
+                bundles.add(packageName)
+              }
+              pkgJson.dependencies = dependencies
+              pkgJson.dsh = { ...pkgJson.dsh, profile: { ...pkgJson.dsh?.profile, bundles: [...bundles] } }
+              await writeFile(profileManifestPath, `${JSON.stringify(pkgJson, null, 2)}\n`, 'utf8')
+              // 4) 灌 store + 离线 install。
+              await options.offlinePackInstall({
+                tarballDir: offline.tarballDir,
+                profileDir,
+                onOutput: line => {
+                  const trimmed = line.trim()
+                  if (trimmed) options.emitEvent({ kind: 'status', message: trimmed.slice(0, 160) })
+                },
+              })
+              // 5) 这些插件已就位，常规逐项安装改为直通完成。
+              for (const item of installables) {
+                if (finalDirs.has(item.packageName)) item.install = async () => {}
+              }
+              options.emitEvent({ kind: 'status', message: `离线直装完成：${finalDirs.size} 个插件未联网安装。` })
+            }
+          } catch (error) {
+            log('info', `离线快装失败，回退在线安装：${asErrorMessage(error)}`)
+            options.emitEvent({ kind: 'status', message: '离线快装不可用，回退在线安装。' })
+          } finally {
+            await rm(offlineWork, { recursive: true, force: true }).catch(() => undefined)
+          }
+        }
         const { installed, failures } = await runSerialInstall(installables, { emitEvent: options.emitEvent })
         if (!options.unifiedProfiles) await reapplyCurrentSelection(settings, profileBeforeInstall)
         const result = buildInstallResult(packId, installed, failures)
@@ -1583,7 +1655,32 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           // entries remain reinstallable from the registry and therefore do
           // not inflate the lightweight archive.
           : manifest.plugins.filter(entry => entry.source === 'local' || (!entry.repository && entry.source !== 'npm')).map(entry => entry.packageName)
-        const { missing } = await buildPackExportToFile(packProfileDir, manifest, bodyNames, zipPath, presetDirs)
+        // 全离线支持：把 profile 依赖打成 tarball + 携带 lockfile；收集失败不阻塞导出（导入回退在线）。
+        let offline: { tarballDir: string; lockfileText: string } | undefined
+        try {
+          if (options.getNodeExecutable) {
+            const nodeExe = await options.getNodeExecutable()
+            if (nodeExe) {
+              options.emitEvent({ kind: 'status', message: '正在收集离线依赖（把依赖打包进压缩包，可能需要几分钟）…' })
+              const collection = await collectDependencyTarballs(packProfileDir, path.join(exportDir, 'dependency-tarballs'), {
+                nodeExecutable: nodeExe,
+                onProgress: (done, total) => {
+                  if (done % 20 === 0 || done === total) {
+                    options.emitEvent({ kind: 'status', message: `离线依赖打包中：${done}/${total}` })
+                  }
+                },
+              })
+              if (collection.tarballDir && collection.lockfileText) {
+                offline = { tarballDir: collection.tarballDir, lockfileText: collection.lockfileText }
+              } else if (collection.failed.length > 0) {
+                log('info', `离线依赖收集不完整（${collection.failed.length} 个失败），该包导入时将回退在线安装。`)
+              }
+            }
+          }
+        } catch (error) {
+          log('info', `离线依赖收集失败，导出包退化为在线导入：${asErrorMessage(error)}`)
+        }
+        const { missing } = await buildPackExportToFile(packProfileDir, manifest, bodyNames, zipPath, presetDirs, undefined, offline)
         if (missing.length > 0) {
           const message = `导出整合包「${packId}」失败：以下插件缺少本地本体（${missing.join('、')}），无法生成${exportMode === 'full' ? '全量' : '离线'}包。`
           log('error', message)
