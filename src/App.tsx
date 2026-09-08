@@ -5,6 +5,7 @@ import { LauncherHome } from './components/LauncherHome'
 import { TopBar } from './components/TopBar'
 import { Toast } from './components/Toast'
 import { PackInstallDialog } from './components/dialogs/PackInstallDialog'
+import { DshFailureDialog } from './components/dialogs/DshFailureDialog'
 import { SettingsDialog } from './components/dialogs/SettingsDialog'
 import { UpdateDialog } from './components/dialogs/UpdateDialog'
 import { DSH_REPOSITORY } from './constants'
@@ -43,6 +44,12 @@ function LauncherShell() {
     void store.refreshPacks()
     void store.refreshPackSnapshots()
   }, store.showToast)
+
+  /** 本机已安装的 DSH 版本集合：导入的整合包若要求缺失版本，安装前需确认下载。 */
+  const installedDshVersions = useMemo(
+    () => new Set((store.runtimeEnvironment?.dshInstalled ?? []).map(item => item.version)),
+    [store.runtimeEnvironment],
+  )
 
   // 对话框开关是纯展示状态，不进 store。
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -216,6 +223,7 @@ function LauncherShell() {
           itemProgress={packInstall.itemProgress}
           hasSnapshot={packInstall.hasSnapshot}
           packSnapshotsAvailable={store.packSnapshotsAvailable}
+          installedDshVersions={installedDshVersions}
           busy={store.busy !== null || packInstall.busy !== null}
           onConfirmImport={(items, name) => void packInstall.confirmImport(packInstall.importPath ?? '', items, name)}
           onRollback={() => void packInstall.rollback()}
@@ -236,6 +244,9 @@ function LauncherShell() {
           onApply={() => { void store.applyLauncherUpdate() }}
           onClose={() => setUpdateOpen(false)}
         />
+      )}
+      {store.dshFailure && (
+        <DshFailureDialog failure={store.dshFailure} onClose={store.dismissDshFailure} />
       )}
       {store.toast && <Toast toast={store.toast} onClose={store.dismissToast} />}
     </div>

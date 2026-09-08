@@ -31,6 +31,7 @@ import type {
   RepositoryInstallResult,
   RuntimeOutput,
   RuntimeEnvironmentState,
+  RuntimeFailure,
   RuntimeState,
   SkillInstallResult,
 } from '../types'
@@ -58,6 +59,8 @@ export function useLauncherStore() {
   const [recommendedWebUi, setRecommendedWebUi] = useState<RecommendedWebUiStatus | null>(null)
   const [profile, setProfile] = useState<ProfileState | null>(null)
   const [runtime, setRuntime] = useState<RuntimeState>(EMPTY_RUNTIME_STATE)
+  /** 最近一次 DSH 异常退出详情；用于 PCL2 式失败弹窗（日志 + 修复引导）。 */
+  const [dshFailure, setDshFailure] = useState<RuntimeFailure | null>(null)
   const [dshInstallation, setDshInstallation] = useState<DshInstallationStatus>(EMPTY_DSH_INSTALLATION)
   const [dshUpdate, setDshUpdate] = useState<DshUpdateStatus | null>(null)
   const [runtimeEnvironment, setRuntimeEnvironment] = useState<RuntimeEnvironmentState | null>(null)
@@ -288,6 +291,7 @@ export function useLauncherStore() {
           const reason = lines.find(line => !line.startsWith('启动命令') && !line.startsWith('工作目录') && !line.startsWith('退出代码'))
             ?? '进程没有输出诊断信息'
           showToast({ kind: 'error', message: `DSH 异常退出：${reason}`.slice(0, 220) })
+          setDshFailure(failure)
         }
       }),
       api.onInstallProgress(handleInstallProgress),
@@ -1009,12 +1013,15 @@ export function useLauncherStore() {
     return next !== undefined
   }, [api, applyPackUpdate, run])
 
+  const dismissDshFailure = useCallback(() => setDshFailure(null), [])
+
   return {
     // 状态
     loading,
     settings,
     profile,
     runtime,
+    dshFailure,
     dshInstallation,
     dshUpdate,
     runtimeEnvironment,
@@ -1045,6 +1052,7 @@ export function useLauncherStore() {
     selectPlugin: setSelectedPlugin,
     clearLogs: () => setLogs([]),
     dismissToast,
+    dismissDshFailure,
     showToast,
     refreshProfile,
     refreshSecondaryResources,

@@ -29,6 +29,8 @@ export interface PackInstallDialogProps {
   /** 当前任务的快照事件已到达（更精确）；store 侧的 packHasSnapshot 兜底。 */
   hasSnapshot: boolean
   packSnapshotsAvailable?: boolean
+  /** 本机已安装的 DSH 版本；整合包要求缺失版本时，「开始安装」先弹确认再走下载。 */
+  installedDshVersions?: ReadonlySet<string>
   /** 一次性的还原快照 / 启用整合包动作是否忙碌。 */
   busy: boolean
   /** raw 扫描导入时由用户在预览中编辑包名（仅该来源需要）；name 缺省表示用派生名。 */
@@ -62,6 +64,7 @@ export function PackInstallDialog({
   itemProgress,
   hasSnapshot,
   packSnapshotsAvailable = false,
+  installedDshVersions,
   busy,
   onConfirmImport,
   onRollback,
@@ -71,6 +74,9 @@ export function PackInstallDialog({
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   /** raw 扫描导入的可编辑包名（其它来源缺省用派生名）。 */
   const [nameInput, setNameInput] = useState('')
+  /** 预览确认时发现所需 DSH 版本未安装 → 暂存该版本并弹出确认，而非直接静默下载。 */
+  const [pendingDshVersion, setPendingDshVersion] = useState<string | null>(null)
+  const dshVersionAckRef = useRef<string | null>(null)
   const logEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -99,6 +105,14 @@ export function PackInstallDialog({
   }
 
   const confirmImport = () => {
+    // 理念：导入引用缺失 DSH 版本的整合包 → 确认弹窗后再下载（不做静默自动下载）。
+    const requirement = analysis?.dshVersion ?? null
+    if (requirement && installedDshVersions && !installedDshVersions.has(requirement) && dshVersionAckRef.current !== requirement) {
+      setPendingDshVersion(requirement)
+      return
+    }
+    dshVersionAckRef.current = null
+    setPendingDshVersion(null)
     const items = analysis?.items
       .filter(item => item.available && selected.has(item.packageName))
       .map(item => item.packageName) ?? []
@@ -163,7 +177,23 @@ export function PackInstallDialog({
           )}
         </div>
         <footer>
-          {phase === 'preview' && (
+          {phase === 'preview' && pendingDshVersion && (
+            <>
+              <span className="pack-footer-note dsh-version-note">
+                <CircleAlert size={14} />
+                此整合包要求 DSH&nbsp;<strong>{pendingDshVersion}</strong>，本机未安装，需要先下载才能启动。
+              </span>
+              <button type="button" className="secondary-button" onClick={() => setPendingDshVersion(null)}>取消</button>
+              <button
+                type="button"
+                className="primary-command"
+                onClick={() => { dshVersionAckRef.current = pendingDshVersion; confirmImport() }}
+              >
+                <Download size={16} />下载 DSH {pendingDshVersion} 并导入
+              </button>
+            </>
+          )}
+          {phase === 'preview' && !pendingDshVersion && (
             <>
               <span className="pack-footer-note">共 {selected.size} 个组件将安装</span>
               <button type="button" className="secondary-button" onClick={onClose}>取消</button>
@@ -337,6 +367,8 @@ function ResultPanel({ result }: { result: PackInstallResult }) {
 
 const packDialogStyle = `
 .pack-install-dialog { width: min(680px, calc(100vw - 32px)); }
+.pack-footer-note.dsh-version-note { display: inline-flex; align-items: center; gap: 5px; color: var(--amber); font-weight: 600; }
+.dsh-version-note strong { color: var(--accent); font-weight: 800; }
 .pack-install-dialog > header,
 .create-pack-dialog > header {
   display: flex; min-height: 56px; align-items: center; justify-content: space-between;
