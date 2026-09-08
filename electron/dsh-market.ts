@@ -546,6 +546,29 @@ export function createDshMarketService(options: DshMarketOptions) {
     } catch { /* profile 写入失败不阻断安装 */ }
   }
 
+  /**
+   * git monorepo 子包若已在 npm 发布：返回优先使用 npm 源（解析到 @latest）的目标，
+   * 消除「git 依赖无 semver、DSH 永远提示有更新」的误报。解析不到（未发布/源不可达）
+   * 返回 null，调用方继续走 git 原路径。命中时同步登记内存别名，供已装识别与更新比对。
+   */
+  async function npmPreferredTargetForGitSubpackage(entry: RegistryPlugin, source: { repo: string; subpath: string | null; branch: string | null }): Promise<string | null> {
+    if (source.subpath === null || typeof entry.npm === 'string') return null
+    const viaRaw = await fetchSubpackageManifest(source.repo, source.branch, source.subpath)
+    if (!viaRaw?.name) return null
+    try {
+      const settings = await options.readSettings()
+      const registry = buildNetworkEnvironment(settings).npmRegistry.replace(/\/+$/, '')
+      const url = `${registry}/${encodeURIComponent(viaRaw.name)}/latest`
+      const response = await fetchImpl(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(12_000) })
+      if (!response.ok) return null
+      const latest = (await response.json() as { version?: string }).version
+      if (!latest) return null
+      options.emitOutput('info', `dsh-market：${entry.name} 已在 npm 发布（${viaRaw.name}@${latest}），优先用 npm 源安装，避免 git 版本误报。`)
+      npmAliasByName.set(entry.name, viaRaw.name)
+      return viaRaw.name
+    } catch { return null }
+  }
+
   async function mutate(name: string, action: 'install' | 'update' | 'uninstall'): Promise<DshMarketInstalledPlugin[]> {
     if (active) throw new Error('dsh-market 正在执行另一个插件操作，请等待完成。')
     active = true
@@ -567,10 +590,21 @@ export function createDshMarketService(options: DshMarketOptions) {
         if (collision !== undefined) throw new Error(`同名冲突：Profile 已安装「${collision}」，请先卸载后再从 dsh-market 安装。`)
       }
       progress(name, action === 'uninstall' ? 'resolving' : 'checking', action === 'uninstall' ? '正在准备卸载' : '正在核对 dsh-market 来源', 8)
-      const result = await runPlugin(name, action === 'uninstall' ? ['remove', alias ?? name] : ['add', target], entry.url)
+      // npm 优先：git monorepo 子包若已发布到 npm，优先走 npm 源（解析 @latest），
+      // 否则 git 依赖拿不到可比 semver，DSH 会永远提示「有更新」。
+      const source = parseDshMarketSourceUrl(entry.url)
+      const gitSubpathTarget = target.startsWith('github:') && target.includes('#path:/') && source !== null
+      const preferred = action !== 'uninstall' && gitSubpathTarget
+        ? await npmPreferredTargetForGitSubpackage(entry, source)
+        : null
+      const npmFirstTried = preferred !== null
+      let result = await runPlugin(name, action === 'uninstall' ? ['remove', alias ?? name] : ['add', preferred ?? target], entry.url)
+      if (result.exitCode !== 0 && npmFirstTried) {
+        options.emitOutput('info', `dsh-market：npm 源安装失败，回退 git 源安装（${target}）。`)
+        result = await runPlugin(name, ['add', target], entry.url)
+      }
       if (result.exitCode !== 0) {
-        const source = parseDshMarketSourceUrl(entry.url)
-        const fellBack = action === 'install' && source !== null
+        const fellBack = action === 'install' && source !== null && !npmFirstTried
           ? await fallbackToNpmPackage(entry, source)
           : false
         if (!fellBack) throw new Error(describeMarketFailure(entry, result.exitCode, result.output))
