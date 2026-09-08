@@ -37,7 +37,7 @@ import type {
   SkillInstallResult,
   SkillInstallTarget,
 } from '../src/types'
-import { assertMeaningfulPackName, assertPackDshVersion, buildManifestFromReceipts, isValidPackDshVersion, normalizePackDshVersion, packProfileName, parsePackManifest } from './pack-manifest'
+import { assertMeaningfulPackName, assertPackDshVersion, isValidPackDshVersion, manifestNameFromPackId, normalizePackDshVersion, packProfileName, parsePackManifest } from './pack-manifest'
 import { extractPackBodiesFromPath, extractPresetBodiesFromPath, findLauncherConfigInArchiveFromPath, findManifestInArchiveFromPath, inspectPackZipFromPath } from './pack-zip'
 import { packLauncherConfig, parseLauncherConfig } from './pack-launcher-config'
 import { validateFullArchive } from './profile-repository-import'
@@ -1483,54 +1483,70 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         const dshHome = await homeOfRecord(record)
         const currentProfile = await options.installer.readProfile(dshHome, options.unifiedProfiles ? packId : settings.profileName)
         const exportProfileName = options.unifiedProfiles ? packId : settings.profileName
-        // 按「包名优先、profile 偏好」取 receipt：避免装好后切过激活包导致
-        // profileName 不一致、receipt 全被过滤掉、导出的 manifest 变成空壳。
+        // 安装凭据只用于“来源/版本”信息，不再决定“导出什么”：
+        // 导出清单一律以该包家目录里 profile 的 package.json 依赖为真实依据（幽灵记录自动消失）。
         const allReceipts = await readPluginReceipts(options.pluginReceiptsPath)
         const receiptByName = new Map<string, PluginInstallReceipt>()
         for (const item of allReceipts) {
           const existing = receiptByName.get(item.packageName)
           if (!existing || item.packId === exportProfileName) receiptByName.set(item.packageName, item)
         }
-        const allPresetReceipts = await readPresetReceipts(options.presetReceiptsPath)
-        const presetReceiptByName = new Map(allPresetReceipts.map(item => [item.name, item]))
-        const presetNames = new Set((record.presets ?? []).map(preset => preset.name))
-        const presetReceipts = [...presetNames].map(name => presetReceiptByName.get(name)).filter(<T>(r: T | undefined): r is T => r !== undefined)
-        const allSkillReceipts = await readSkillReceipts(options.skillReceiptsPath)
-        const skillReceiptByName = new Map(allSkillReceipts.map(item => [item.name, item]))
-        const skillNames = new Set((record.skills ?? []).map(skill => skill.name))
-        const skillReceipts = [...skillNames].map(name => skillReceiptByName.get(name)).filter(<T>(r: T | undefined): r is T => r !== undefined)
+        const profilePlugins = currentProfile.plugins.filter(plugin => !plugin.builtin)
+        const plugins: PackManifest['plugins'] = profilePlugins.map(plugin => {
+          const receipt = receiptByName.get(plugin.packageName)
+          const entry: PackManifest['plugins'][number] = { packageName: plugin.packageName, enabled: plugin.enabled !== false }
+          if (receipt?.source === 'github' || receipt?.source === 'archive-subdirectory') {
+            entry.source = 'github'
+            if (receipt.repository) entry.repository = receipt.repository
+            if (receipt.subdirectory) entry.subdirectory = receipt.subdirectory
+            if (receipt.commit) entry.commit = receipt.commit
+            if (receipt.defaultBranch) entry.defaultBranch = receipt.defaultBranch
+            if (receipt.targetId) entry.targetId = receipt.targetId
+          } else if (receipt?.source === 'local-directory') {
+            entry.source = 'local'
+            if (receipt.version) entry.version = receipt.version
+          } else if (receipt) {
+            entry.source = 'npm'
+            if (receipt.version) entry.version = receipt.version
+          } else if (plugin.repositoryFullName) {
+            // 无凭据但带仓库源：github 源，commit 无法固定时走本地本体兜底（见下）。
+            entry.source = 'github'
+            entry.repository = plugin.repositoryFullName
+          } else {
+            // 无凭据且非 git 源：npm 源 + 已装版本号钉住。
+            entry.source = 'npm'
+            if (plugin.version) entry.version = plugin.version
+          }
+          return entry
+        })
+        // 技能 / 预设：同样以“本包家目录里真实存在”为准（receipt 只提供在线来源），
+        // 而不是看 record 里可能过期的列表。
+        const skillReceipts: SkillInstallReceipt[] = []
+        for (const receipt of await readSkillReceipts(options.skillReceiptsPath)) {
+          const skillTarget = receipt.format === 'bundle'
+            ? path.join(dshHome, 'skills', receipt.name)
+            : path.join(dshHome, 'skills', `${receipt.name}.md`)
+          if (existsSync(skillTarget)) skillReceipts.push(receipt)
+        }
+        const presetReceipts: PresetInstallReceipt[] = []
+        for (const receipt of await readPresetReceipts(options.presetReceiptsPath)) {
+          if (existsSync(path.join(dshHome, '.agent-presets', receipt.name))) presetReceipts.push(receipt)
+        }
         const applicationIds = new Set((record.applications ?? []).map(addon => addon.id))
         const applicationAddons = (await options.applicationAddons.list())
           .filter(addon => applicationIds.has(addon.id))
-        const orderedReceipts = record.plugins
-          .map(plugin => receiptByName.get(plugin.packageName))
-          .filter((receipt): receipt is PluginInstallReceipt => receipt !== undefined)
         const dshVersion = isValidPackDshVersion(record.dshVersion)
           ? normalizePackDshVersion(record.dshVersion)
           : await resolvePackDshVersion(settings)
-        const manifest = buildManifestFromReceipts(packId, orderedReceipts, presetReceipts, skillReceipts, applicationAddons, dshVersion)
-        manifest.plugins = manifest.plugins.map((entry) => {
-          const recordPlugin = record.plugins.find(plugin => plugin.packageName === entry.packageName)
-          return { ...entry, enabled: recordPlugin?.enabled ?? true }
-        })
-        // 把没有来源记录、但已安装在本机 Profile 的非内置插件也纳入导出：它们以 local 源 + 本地本体形式离线携带。
-        const manifestPluginNames = new Set(manifest.plugins.map(entry => entry.packageName))
-        const installedPluginsByPackage = new Map(
-          currentProfile.plugins
-            .filter(plugin => !plugin.builtin)
-            .map(plugin => [plugin.packageName, plugin]),
-        )
-        for (const plugin of record.plugins) {
-          if (manifestPluginNames.has(plugin.packageName)) continue
-          const installed = installedPluginsByPackage.get(plugin.packageName)
-          if (!installed) continue
-          manifest.plugins.push({
-            packageName: plugin.packageName,
-            source: 'local',
-            version: installed.version,
-            enabled: plugin.enabled,
-          })
-          manifestPluginNames.add(plugin.packageName)
+        const manifest: PackManifest = {
+          name: manifestNameFromPackId(packId),
+          description: `由 DSH Launcher 从已安装组件导出（${plugins.length} 个插件${presetReceipts.length > 0 ? `、${presetReceipts.length} 个预设` : ''}${skillReceipts.length > 0 ? `、${skillReceipts.length} 个技能` : ''}）。`,
+          version: '1.0.0',
+          dshVersion,
+          plugins,
+          ...(presetReceipts.length > 0 ? { presets: presetReceipts.map(receipt => ({ name: receipt.name, repository: receipt.repository, sourcePath: receipt.sourcePath, revision: receipt.revision })) } : {}),
+          ...(skillReceipts.length > 0 ? { skills: skillReceipts.map(receipt => ({ name: receipt.name, format: receipt.format, repository: receipt.repository, sourcePath: receipt.sourcePath, revision: receipt.revision })) } : {}),
+          ...(applicationAddons.length > 0 ? { applications: applicationAddons.map(addon => ({ id: addon.id, name: addon.name, repository: addon.repository, packageName: addon.packageName, version: addon.version, binName: addon.binName, launchMode: addon.launchMode, launchArgs: addon.launchArgs, provides: addon.provides })) } : {}),
         }
         const unresolvedRemote: string[] = []
         manifest.plugins = manifest.plugins.map(entry => {
@@ -1547,24 +1563,16 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           }
           // A source that cannot be pinned is made self-contained for light
           // exports instead of silently installing a moving @latest/HEAD.
-          return { packageName: entry.packageName, source: 'local', version: entry.version }
+          return { ...entry, source: 'local', version: entry.version }
         })
         if (unresolvedRemote.length > 0) {
-          throw new Error(`导出 Profile「${packId}」失败：无法固定插件来源（${unresolvedRemote.join('、')}），且本地没有可携带的插件本体。`)
-        }
-        // 预设即使没有来源记录，只要本地本体存在，就纳入 manifest（配合 presetDirs 离线导入）。
-        const manifestPresetNames = new Set((manifest.presets ?? []).map(entry => entry.name))
-        for (const preset of record.presets ?? []) {
-          if (!manifestPresetNames.has(preset.name)) {
-            manifest.presets = [...(manifest.presets ?? []), { name: preset.name }]
-            manifestPresetNames.add(preset.name)
-          }
+          throw new Error(`导出整合包「${packId}」失败：无法固定插件来源（${unresolvedRemote.join('、')}），且本地没有可携带的插件本体。`)
         }
         // 只收集 manifest 引用的插件本体：profile 里可能混入未被选入包的手动安装插件，不应进包。
         const packageNames = manifest.plugins.map(entry => entry.packageName)
-        // 预设本体也打进 zip：换机导入时可完全离线安装。
+        // 预设本体也打进 zip：换机导入时可完全离线安装（以上述磁盘存在性筛选的 receipt 为准）。
         const presetDirs = new Map<string, string>()
-        for (const preset of record.presets ?? []) {
+        for (const preset of presetReceipts) {
           const dir = path.join(dshHome, '.agent-presets', preset.name)
           if (existsSync(dir)) presetDirs.set(preset.name, dir)
         }

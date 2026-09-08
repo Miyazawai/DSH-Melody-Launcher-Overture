@@ -355,7 +355,7 @@ export function serializePackManifest(manifest: PackManifest): string {
   return stringify(output, { lineWidth: 0 })
 }
 
-function manifestNameFromPackId(packId: string): string {
+export function manifestNameFromPackId(packId: string): string {
   let name = packId.startsWith(PACK_PROFILE_PREFIX) ? packId.slice(PACK_PROFILE_PREFIX.length) : packId
   if (!name) name = 'pack'
   if (!/^[A-Za-z0-9]/.test(name)) name = `p${name}`
