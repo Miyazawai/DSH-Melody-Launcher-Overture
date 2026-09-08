@@ -1,5 +1,5 @@
 import { app, BrowserWindow, net, safeStorage, shell } from 'electron'
-import { cp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -34,6 +34,7 @@ import { migrateToPackHomesV2 } from './pack-migration'
 import { readPackRegistry } from './pack-registry'
 import { createPluginTrialManager, type PluginTrialManager } from './plugin-trial'
 import { readPluginReceipts, recordPluginInstall } from './plugin-receipts'
+import { approveAllIgnoredBuilds } from './plugin-install'
 import { configureProcessTracker, shutdownTrackedProcesses, withExecutableDirectoryOnPath } from './process'
 import { createProcessSupervisor, type ProcessSupervisor } from './process-supervisor'
 import { readProfile, reorderPlugins, togglePlugin } from './profile'
@@ -462,38 +463,64 @@ function createServices(): Services {
    * 安装本地目录，因此这里在组装层用 DSH CLI 插件命令补上最小通路。
    */
   async function installPackLocalDirectory(target: PackInstallTarget): Promise<void> {
-    const localDirectory = validateLocalPluginDirectory(target.localDirectory)
+    const originalDirectory = validateLocalPluginDirectory(target.localDirectory)
+    // Windows 下 pnpm 的 `file:` spec 无法解析含空格/非 ASCII 的路径（spec 会在空格处被
+    // 截断，pnpm 报 ERR_PNPM_SPEC_NOT_SUPPORTED_BY_ANY_RESOLVER）。用户主目录常含空格
+    // （如 C:\Users\Miyazawa i\…），因此先把本体复制到盘根的无空格 staging 目录再安装；
+    // pnpm 会把内容硬链接进其 store，staging 装完即删，不影响已安装插件。
+    const needsStaging = process.platform === 'win32' && /[\s\u00A0]/.test(originalDirectory)
+    const installDirectory = needsStaging ? await stageBodyForPnpm(originalDirectory) : originalDirectory
     const current = await settings.read()
     const nodeRuntime = await prepareNodeRuntime('plugin')
     const pnpmRuntime = await preparePnpmRuntime('plugin', nodeRuntime)
     const executable = resolveNodeExecutable(current.launchExecutable, nodeRuntime)
-    const commandArgs = buildPluginCommandArgs(current, executable, ['add', `file:${localDirectory}`], target.profileName)
-    const result = await runCommand(executable, commandArgs, {
+    const commandArgs = buildPluginCommandArgs(current, executable, ['add', `file:${installDirectory.replace(/\\/g, '/')}`], target.profileName)
+    const environment = withExecutableDirectoryOnPath(
+      pnpmRuntime.executable,
+      withExecutableDirectoryOnPath(nodeRuntime.node, {
+        ...process.env,
+        DSH_HOME: current.dshHome,
+        npm_config_store_dir: path.join(app.getPath('userData'), 'plugin-store'),
+        NPM_CONFIG_STORE_DIR: path.join(app.getPath('userData'), 'plugin-store'),
+        pnpm_config_store_dir: path.join(app.getPath('userData'), 'plugin-store'),
+        PNPM_CONFIG_STORE_DIR: path.join(app.getPath('userData'), 'plugin-store'),
+        FORCE_COLOR: '0',
+      }),
+    )
+    const onOutput = (text: string, level: string) => events.output('plugin', level as 'error' | 'info' | 'success', text)
+    const runAdd = () => runCommand(executable, commandArgs, {
       cwd: current.workspace,
-        env: withExecutableDirectoryOnPath(
-          pnpmRuntime.executable,
-          withExecutableDirectoryOnPath(nodeRuntime.node, {
-            ...process.env,
-            DSH_HOME: current.dshHome,
-            npm_config_store_dir: path.join(app.getPath('userData'), 'plugin-store'),
-            NPM_CONFIG_STORE_DIR: path.join(app.getPath('userData'), 'plugin-store'),
-            pnpm_config_store_dir: path.join(app.getPath('userData'), 'plugin-store'),
-            PNPM_CONFIG_STORE_DIR: path.join(app.getPath('userData'), 'plugin-store'),
-            FORCE_COLOR: '0',
-          }),
-      ),
-      onOutput: (text, level) => events.output('plugin', level, text),
+      env: environment,
+      onOutput,
     })
-    if (result.exitCode !== 0) throw new Error(`插件安装失败（代码 ${result.exitCode}），请查看运行日志。`)
+    try {
+      let result = await runAdd()
+      // pnpm 默认拒绝依赖里的构建脚本（cloudflared/node-pty 等）并以非零码退出。
+      // 与官方安装链路一致：批准被忽略的构建后自动重试一次。
+      if (result.exitCode !== 0 && result.output.includes('ERR_PNPM_IGNORED_BUILDS')) {
+        const workspacePath = path.join(current.dshHome, 'profiles', target.profileName, 'pnpm-workspace.yaml')
+        const approved = await approveAllIgnoredBuilds(workspacePath, result.output)
+        if (approved.length > 0) {
+          onOutput(`已允许 ${approved.length} 个被忽略的构建脚本，正在自动重试。`, 'info')
+          result = await runAdd()
+        }
+      }
+      if (result.exitCode !== 0) throw new Error(`插件安装失败（代码 ${result.exitCode}），请查看运行日志。`)
+    } finally {
+      // staging 目录用完即删（成功或失败都清），避免在盘根留垃圾。
+      if (installDirectory !== originalDirectory) {
+        await rm(installDirectory, { recursive: true, force: true }).catch(() => undefined)
+      }
+    }
     let version: string | null = null
     try {
-      const packageManifest = JSON.parse(await readFile(path.join(localDirectory, 'package.json'), 'utf8')) as { version?: unknown }
+      const packageManifest = JSON.parse(await readFile(path.join(originalDirectory, 'package.json'), 'utf8')) as { version?: unknown }
       version = typeof packageManifest.version === 'string' ? packageManifest.version : null
     } catch {
       // 版本读取失败可忽略，receipt 的 version 允许为 null。
     }
     await recordPluginInstall(pluginReceiptsPath, {
-      repository: `file:${localDirectory}`,
+      repository: `file:${originalDirectory}`,
       packageName: target.packageName,
       packId: target.profileName,
       source: 'local-directory',
@@ -502,6 +529,16 @@ function createServices(): Services {
       commit: '',
       installedAt: new Date().toISOString(),
     })
+  }
+
+  /** 在系统盘根的无空格目录下建唯一 staging 目录，把离线本体复制进去，返回其路径。 */
+  async function stageBodyForPnpm(sourceDirectory: string): Promise<string> {
+    const systemRoot = path.parse(process.env.windir ?? 'C:\\Windows').root || 'C:\\'
+    const stagingRoot = path.join(systemRoot, 'dsh-import-bodies')
+    await mkdir(stagingRoot, { recursive: true })
+    const destination = await mkdtemp(path.join(stagingRoot, 'body-'))
+    await cp(sourceDirectory, destination, { recursive: true })
+    return destination
   }
 
   const packInstaller: InstallInstaller = {

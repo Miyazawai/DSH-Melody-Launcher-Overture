@@ -7911,6 +7911,11 @@ input:focus-visible {
 }
 .settings-panel.is-dragging-zip { outline: 2px dashed var(--accent); outline-offset: -4px; background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
 .settings-zip-drop-hint { margin: 8px 16px; padding: 10px 12px; border-radius: 8px; background: var(--accent); color: var(--topbar-ink); font-weight: 600; text-align: center; }
+/* 整个「整合包」标签页的拖拽接收区：覆盖 settings-content 全宽，拖入时整页高亮。 */
+.settings-packs-zone { position: relative; border-radius: 12px; transition: background 0.12s ease; }
+.settings-packs-zone.is-dragging-zip { outline: 2px dashed var(--accent); outline-offset: -3px; background: color-mix(in srgb, var(--accent-soft) 38%, transparent); }
+.settings-packs-zone.is-dragging-zip .settings-panel { background: color-mix(in srgb, var(--surface) 82%, transparent); }
+.settings-zip-drop-zone-hint { position: sticky; top: 0; z-index: 6; margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; background: var(--accent); color: var(--topbar-ink); font-weight: 600; text-align: center; box-shadow: var(--chrome-shadow); }
 
 .settings-panel-heading {
   display: flex;
