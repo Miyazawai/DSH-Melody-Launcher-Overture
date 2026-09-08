@@ -10,7 +10,7 @@ export const LAUNCHER_REPOSITORY = 'rirko/dsh-melody-launcher'
 /** DSH 本体的 npm 包名。检测与安装都以它为准。 */
 export const DSH_PACKAGE_NAME = '@deepseek-ai/dsh'
 
-/** 未显式配置时使用的 Profile。 */
+/** 未显式配置时使用的默认整合包。 */
 export const DEFAULT_PROFILE_NAME = 'web'
 
 /** 渲染层保留的最大日志条数，超出后丢弃最旧的记录。 */

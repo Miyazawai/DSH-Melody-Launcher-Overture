@@ -76,6 +76,8 @@ export function PackInstallDialog({
   const [nameInput, setNameInput] = useState('')
   /** 预览确认时发现所需 DSH 版本未安装 → 暂存该版本并弹出确认，而非直接静默下载。 */
   const [pendingDshVersion, setPendingDshVersion] = useState<string | null>(null)
+  /** 确认下载缺失的 DSH 版本后、主进程导入事件开始前的过渡态：给出明确反馈，避免「像卡死」。 */
+  const [dshDownloading, setDshDownloading] = useState(false)
   const dshVersionAckRef = useRef<string | null>(null)
   const logEndRef = useRef<HTMLDivElement>(null)
 
@@ -92,7 +94,7 @@ export function PackInstallDialog({
 
   const active = phase === 'installing'
   const settled = phase === 'done' || phase === 'error'
-  const closeable = !active && !busy
+  const closeable = !active && !busy && !dshDownloading
   const canRollback = hasSnapshot || packSnapshotsAvailable
 
   const toggleItem = (packageName: string) => {
@@ -117,6 +119,12 @@ export function PackInstallDialog({
       .filter(item => item.available && selected.has(item.packageName))
       .map(item => item.packageName) ?? []
     onConfirmImport(items, analysis?.source === 'raw' ? nameInput.trim() : undefined)
+  }
+
+  const confirmDshDownload = () => {
+    setDshDownloading(true)
+    dshVersionAckRef.current = pendingDshVersion
+    confirmImport()
   }
 
   /** raw 来源要求一个能派生出有意义包标识的名字（含字母或数字）。 */
@@ -181,15 +189,18 @@ export function PackInstallDialog({
             <>
               <span className="pack-footer-note dsh-version-note">
                 <CircleAlert size={14} />
-                此整合包要求 DSH&nbsp;<strong>{pendingDshVersion}</strong>，本机未安装，需要先下载才能启动。
+                {dshDownloading
+                  ? <>正在下载 DSH&nbsp;<strong>{pendingDshVersion}</strong>，完成后自动继续导入，请勿关闭窗口…</>
+                  : <>此整合包要求 DSH&nbsp;<strong>{pendingDshVersion}</strong>，本机未安装，需要先下载才能启动。</>}
               </span>
-              <button type="button" className="secondary-button" onClick={() => setPendingDshVersion(null)}>取消</button>
+              <button type="button" className="secondary-button" disabled={dshDownloading} onClick={() => setPendingDshVersion(null)}>取消</button>
               <button
                 type="button"
                 className="primary-command"
-                onClick={() => { dshVersionAckRef.current = pendingDshVersion; confirmImport() }}
+                disabled={dshDownloading}
+                onClick={confirmDshDownload}
               >
-                <Download size={16} />下载 DSH {pendingDshVersion} 并导入
+                <Download size={16} />{dshDownloading ? '正在下载…' : `下载 DSH ${pendingDshVersion} 并导入`}
               </button>
             </>
           )}
@@ -258,13 +269,13 @@ function PreviewPanel({ analysis, selected, nameInput, onNameChange, onToggle }:
             placeholder="给整合包起个名字（需包含字母或数字）"
             autoFocus
           />
-          <small>{/[a-zA-Z0-9]/.test(nameInput) ? '名称将作为包标识与 Profile 名的一部分。' : '名称需包含字母或数字，否则无法生成包标识。'}</small>
+          <small>{/[a-zA-Z0-9]/.test(nameInput) ? '名称将作为整合包标识。' : '名称需包含字母或数字，否则无法生成包标识。'}</small>
         </label>
       )}
       <p className="pack-preview-meta">
         版本 {analysis.version} · 要求 DSH {analysis.dshVersion ?? '当前版本'} ·{' '}
         {analysis.items.length === 0
-          ? '包里没有任何可装的组件——大概率是原 Profile 已被清理或导出时没带任何内容。'
+          ? '包里没有任何可装的组件——大概率是原整合包数据已被清理或导出时没带任何内容。'
           : `${analysis.items.length} 个组件，勾选要安装的项；离线本体从包内安装，其余走在线源。`}
       </p>
       <div className="pack-item-list">

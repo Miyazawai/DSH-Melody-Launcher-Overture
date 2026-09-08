@@ -65,7 +65,7 @@ function LauncherShell() {
   const installingDsh = store.busy === BUSY.dshInstall
     || (installingResource && store.installProgress?.kind === 'dsh')
   const installingApplication = installingResource && store.installProgress?.kind === 'application'
-  // 安装会写入 Profile、Skill 或应用注册表；跨页时仍需阻止这些写操作。
+  // 安装会写入整合包、Skill 或应用注册表；跨页时仍需阻止这些写操作。
   const profileMutationLocked = installingResource
   // The selector itself must not be latched by a stale install-progress event.
   // The main-process mutation guard remains authoritative while a real
@@ -168,7 +168,7 @@ function LauncherShell() {
                     onInstallDshVersion={async version => {
                       const ok = await store.installDshVersion(version)
                       // 装版本会自动补发同名整合包（零包时还会自动激活成为当前包），
-                      // 刷新包列表与 Profile/插件/技能读数让新环境立刻可见。
+                      // 刷新包列表与整合包/插件/技能读数让新环境立刻可见。
                       if (ok) {
                         await Promise.all([store.refreshPacks(), store.refreshProfile(), store.refreshSecondaryResources()])
                       }

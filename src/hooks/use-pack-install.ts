@@ -126,7 +126,7 @@ export function usePackInstall(onSettled: () => void, showToast: (toast: ToastSt
           break
         case 'snapshot':
           setHasSnapshot(true)
-          appendLog('status', '已为当前 profile 生成配置快照，可一键还原。')
+          appendLog('status', '已为当前整合包生成配置快照，可一键还原。')
           break
         case 'done':
           setResult(event.result)
@@ -219,7 +219,7 @@ export function usePackInstall(onSettled: () => void, showToast: (toast: ToastSt
   /** 一次性动作：还原安装前的配置快照。 */
   const rollback = useCallback(async () => {
     const next = await run('pack-rollback', () => api.rollbackPack())
-    if (next) appendLog('status', `已还原 profile「${next.profileName}」（${next.restored} 个文件）。`)
+    if (next) appendLog('status', `已还原整合包「${next.profileName}」（${next.restored} 个文件）。`)
     return next
   }, [api, appendLog, run])
 

@@ -298,7 +298,7 @@ export function useLauncherStore() {
       api.onCatalogAnalysisProgress(handleCatalogAnalysisProgress),
       api.onDshMarketProgress(progress => {
         // 市场的插件级操作（安装/更新/卸载）与目录同步一样，只写日志行，
-        // 不进入安装活动状态：避免触发灵动岛自动弹出、Profile 切换/启动被短时锁定。
+        // 不进入安装活动状态：避免触发灵动岛自动弹出、整合包切换/启动被短时锁定。
         if (typeof progress.message === 'string' && progress.message.trim()) {
           appendRuntimeLog({
             channel: 'plugin',
@@ -341,7 +341,7 @@ export function useLauncherStore() {
     }
   }, [adoptProfile, api, showToast])
 
-  /** 插件管理页的「刷新」：Profile 之外的 Skill、加载项、预设都是全局资源，需一并重读。 */
+  /** 插件管理页的「刷新」：整合包之外的 Skill、加载项、预设都是全局资源，需一并重读。 */
   const refreshSecondaryResources = useCallback(async () => {
     try {
       const [skills, applications, presets] = await Promise.all([
@@ -786,13 +786,13 @@ export function useLauncherStore() {
   }, [api])
 
   const createProfile = useCallback(async (request: Parameters<LauncherApi['createProfile']>[0]) => {
-    const next = await run(`profile-create:${request.name}`, () => api.createProfile(request), { success: `Profile「${request.name}」已创建。` })
+    const next = await run(`profile-create:${request.name}`, () => api.createProfile(request), { success: `整合包「${request.name}」已创建。` })
     if (next) await refreshProfiles()
     return next
   }, [api, refreshProfiles, run])
 
   const cloneProfile = useCallback(async (sourceName: string, targetName: string, description?: string) => {
-    const next = await run(`profile-clone:${targetName}`, () => api.cloneProfile(sourceName, targetName, description), { success: `Profile「${targetName}」已克隆。` })
+    const next = await run(`profile-clone:${targetName}`, () => api.cloneProfile(sourceName, targetName, description), { success: `整合包「${targetName}」已克隆。` })
     if (next) await refreshProfiles()
     return next
   }, [api, refreshProfiles, run])
@@ -800,7 +800,7 @@ export function useLauncherStore() {
   const switchProfile = useCallback(async (profileName: string, options?: { fillMissing?: boolean }) => {
     const target = profiles.find(item => item.id === profileName)
     const fillMissing = options?.fillMissing ?? (target && target.missingDependencies.length > 0
-      ? (typeof window !== 'undefined' && window.confirm(`Profile「${profileName}」缺少 ${target.missingDependencies.length} 项依赖，是否从来源记录补齐后切换？`))
+      ? (typeof window !== 'undefined' && window.confirm(`整合包「${profileName}」缺少 ${target.missingDependencies.length} 项依赖，是否从来源记录补齐后切换？`))
       : false)
     if (target && target.missingDependencies.length > 0 && !fillMissing) {
       // The confirmation dialog is the cancellation boundary for dependency
@@ -815,10 +815,10 @@ export function useLauncherStore() {
       await refreshProfile()
       await refreshProfiles()
       return result
-    }, { success: `已切换到 Profile「${profileName}」。` })
+    }, { success: `已切换到整合包「${profileName}」。` })
     // 依赖补齐由主进程复用安装进度事件；如果安装在准备阶段失败，
     // 某些旧版本/第三方安装器可能来不及发送 error 终态。切换请求已经
-    // 结束后清除残留进度，避免 Profile 下拉框和导出菜单永久处于写锁状态。
+    // 结束后清除残留进度，避免整合包下拉框和导出菜单永久处于写锁状态。
     setInstallProgress(null)
     return next
   }, [api, profiles, refreshProfiles, refreshProfile, run])
@@ -901,7 +901,7 @@ export function useLauncherStore() {
 
   const exportProfile = useCallback(async (profileName: string, mode: Parameters<LauncherApi['exportProfile']>[1], options?: Parameters<LauncherApi['exportProfile']>[2]): Promise<string | null> => {
     const result = await run(`profile-export:${profileName}:${mode}`, () => api.exportProfile(profileName, mode, options))
-    if (result) showToast({ kind: 'success', message: mode === 'repository' ? `Profile 已同步到 ${result}` : `Profile 已导出到 ${result}` })
+    if (result) showToast({ kind: 'success', message: mode === 'repository' ? `整合包已同步到 ${result}` : `整合包已导出到 ${result}` })
     return result ?? null
   }, [api, run, showToast])
 

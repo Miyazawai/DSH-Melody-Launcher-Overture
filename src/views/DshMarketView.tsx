@@ -71,7 +71,7 @@ export function DshMarketView({ onProfileChanged, embedded = false }: DshMarketV
     }
   }, [])
 
-  // 激活 Profile（对应"激活整合包"）变化时——新建/删除/切换整合包——重新拉一次安装态，
+  // 激活整合包变化时——新建/删除/切换整合包——重新拉一次安装态，
   // 避免出现「整合包已删但 DSH Market 还显示已启用」的错觉。
   const store = useLauncherStore()
   const activeProfileName = store.settings?.profileName ?? null

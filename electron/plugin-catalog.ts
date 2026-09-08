@@ -441,7 +441,7 @@ export async function analyzeRepository(
       repository,
       defaultBranch,
       installability: 'application',
-      summary: '这是 DeepSeek Harness 源码工作区，不是可以加入 Profile 的第三方插件。',
+      summary: '这是 DeepSeek Harness 源码工作区，不是可以加入整合包的第三方插件。',
       targets: [],
     }
   }

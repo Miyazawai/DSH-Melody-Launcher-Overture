@@ -165,9 +165,9 @@ let demoInstalledApplications: InstalledApplicationAddon[] = [{
 }]
 let demoInstalledPresets: InstalledPreset[] = []
 let demoDshMarketPlugins: DshMarketCatalog['plugins'] = [
-  { name: 'dsh-explorer', owner: 'No-PRM', url: 'https://github.com/No-PRM/dsh-explorer', category: 'ui', description: { zh: 'Git 优先的文件树侧栏。', en: 'Git-first file tree sidebar.' }, npm: null, stars: 2, added: '2026-08-16', install: 'dsh plugin --profile web add github:No-PRM/dsh-explorer', installed: false, enabled: false, version: null, updateAvailable: false, updateVersion: null },
-  { name: 'dsh-message-rail', owner: 'wx-yss', url: 'https://github.com/wx-yss/dsh-message-rail', category: 'ui', description: { zh: '会话消息导航栏。', en: 'Session message navigation rail.' }, npm: 'dsh-message-rail', stars: 2, added: '2026-08-15', install: 'dsh plugin --profile web add dsh-message-rail', installed: false, enabled: false, version: null, updateAvailable: false, updateVersion: null },
-  { name: 'dsh-web-mobile', owner: 'mexiaosqwq', url: 'https://github.com/mexiaosqwq/dsh-web-mobile', category: 'ui', description: { zh: '移动端 Web UI 适配。', en: 'Mobile-adaptive Web UI.' }, npm: null, stars: 15, added: '2026-08-15', install: 'dsh plugin --profile web add github:mexiaosqwq/dsh-web-mobile', installed: false, enabled: false, version: null, updateAvailable: false, updateVersion: null },
+  { name: 'dsh-explorer', owner: 'No-PRM', url: 'https://github.com/No-PRM/dsh-explorer', category: 'ui', description: { zh: 'Git 优先的文件树侧栏。', en: 'Git-first file tree sidebar.' }, npm: null, stars: 2, added: '2026-08-16', install: 'dsh plugin add github:No-PRM/dsh-explorer', installed: false, enabled: false, version: null, updateAvailable: false, updateVersion: null },
+  { name: 'dsh-message-rail', owner: 'wx-yss', url: 'https://github.com/wx-yss/dsh-message-rail', category: 'ui', description: { zh: '会话消息导航栏。', en: 'Session message navigation rail.' }, npm: 'dsh-message-rail', stars: 2, added: '2026-08-15', install: 'dsh plugin add dsh-message-rail', installed: false, enabled: false, version: null, updateAvailable: false, updateVersion: null },
+  { name: 'dsh-web-mobile', owner: 'mexiaosqwq', url: 'https://github.com/mexiaosqwq/dsh-web-mobile', category: 'ui', description: { zh: '移动端 Web UI 适配。', en: 'Mobile-adaptive Web UI.' }, npm: null, stars: 15, added: '2026-08-15', install: 'dsh plugin add github:mexiaosqwq/dsh-web-mobile', installed: false, enabled: false, version: null, updateAvailable: false, updateVersion: null },
 ]
 
 let demoRuntime: RuntimeState = { running: false, pid: null, startedAt: null, url: null, port: null }
@@ -517,7 +517,7 @@ function demoApplicationAnalysis(fullName: string, defaultBranch: string): Appli
     repository: fullName,
     defaultBranch,
     installability: 'ready',
-    summary: '检测到 DSH Desktop 独立宿主，将作为应用加载项安装，不会写入 Web Profile。',
+    summary: '检测到 DSH Desktop 独立宿主，将作为应用加载项安装，不会写入 Web 整合包。',
     targets: [{
       id: 'dsh-desktop:.',
       addonId: 'dsh-desktop',
@@ -929,7 +929,7 @@ export const demoApi: LauncherApi = {
   listProfiles: async () => [{
     id: demoSettings.profileName,
     name: demoSettings.profileName,
-    description: '浏览器演示 Profile',
+    description: '浏览器演示整合包',
     dshVersion: demoSettings.dshVersion ?? '0.1.0-rc.7',
     source: { kind: 'local' as const },
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -977,7 +977,7 @@ export const demoApi: LauncherApi = {
   readProfileMetadata: async profileName => {
     const list = await demoApi.listProfiles()
     const found = list.find(item => item.id === profileName)
-    if (!found) throw new Error(`Profile「${profileName}」不存在。`)
+    if (!found) throw new Error(`整合包「${profileName}」不存在。`)
     return found
   },
   exportProfile: async profileName => `C:\\Users\\demo\\Desktop\\${profileName}.zip`,
@@ -990,7 +990,7 @@ export const demoApi: LauncherApi = {
       commit: 'demo000000000000000000000000000000000000',
       manifestPath: 'dsh-profile.yaml' as const,
       profileName: 'pack-demo',
-      description: '演示 GitHub Profile 仓库。',
+      description: '演示 GitHub 整合包仓库。',
       version: '1.0.0',
       dshVersion: demoSettings.dshVersion ?? '0.1.0-rc.7',
       dshVersionInstalled: true,
@@ -1495,14 +1495,14 @@ export const demoApi: LauncherApi = {
     emitAiEvent({ kind: 'log', text: `开始研究 ${input.repository}（分支 ${input.defaultBranch}）` })
     await wait(500)
     emitAiEvent({ kind: 'snapshot', snapshotId: `demo-${Date.now()}` })
-    emitAiEvent({ kind: 'log', text: '已为当前 profile 生成配置快照。' })
+    emitAiEvent({ kind: 'log', text: '已为当前整合包生成配置快照。' })
     setDemoAiStatus({ phase: 'running', sessionId: 'demo-session', message: 'AI 正在研究仓库并尝试安装…' })
     await wait(700)
     emitAiEvent({ kind: 'log', text: '读取仓库结构，确认组件形态…' })
     emitAiEvent({ kind: 'auto-approved', toolName: 'read_file', reason: '只读操作，自动放行' })
     await wait(400)
-    emitAiEvent({ kind: 'log', text: '发现组件位于 `packages/web-app`，需要写入 profile 配置。' })
-    emitAiEvent({ kind: 'approval', request: { id: 'demo-1', toolName: 'bash', toolKind: 'bash', args: 'dsh plugin add @demo/dsh-web-app --profile web', reason: '写文件或运行安装命令，需要确认' } })
+    emitAiEvent({ kind: 'log', text: '发现组件位于 `packages/web-app`，需要写入整合包配置。' })
+    emitAiEvent({ kind: 'approval', request: { id: 'demo-1', toolName: 'bash', toolKind: 'bash', args: 'dsh plugin add @demo/dsh-web-app', reason: '写文件或运行安装命令，需要确认' } })
     // 挂起等待 aiApprove 裁决；取消由 aiCancel 兜底（resolve(false) 并置 cancelled）。
     const allowed = await new Promise<boolean>(resolve => {
       demoAiResolve = resolve
@@ -1511,7 +1511,7 @@ export const demoApi: LauncherApi = {
     emitAiEvent({ kind: 'log', text: allowed ? '已批准安装命令。' : '已拒绝安装命令。' })
     if (allowed) {
       setDemoAiStatus({ phase: 'done', message: 'AI 已完成研究并安装组件。' })
-      emitAiEvent({ kind: 'log', text: '组件已写入 profile，安装完成。' })
+      emitAiEvent({ kind: 'log', text: '组件已写入整合包，安装完成。' })
       emitAiEvent({ kind: 'done', message: 'AI 已完成研究并安装组件。请检查改动；不满意可还原快照。' })
       return { ok: true, message: 'AI 已完成研究并安装组件。' }
     }
@@ -1534,7 +1534,7 @@ export const demoApi: LauncherApi = {
     setDemoAiStatus({ phase: 'preparing', repository: null, taskKind: 'runtime-repair', subject: demoSettings.profileName, startedAt: new Date().toISOString(), sessionId: null, message: '正在准备启动修复环境…' })
     await wait(500)
     setDemoAiStatus({ phase: 'running', sessionId: 'demo-runtime-repair', message: 'AI 正在分析启动诊断并尝试修复…' })
-    emitAiEvent({ kind: 'log', text: '正在检查 Profile 的 Bundle 加载顺序和宿主服务依赖。' })
+    emitAiEvent({ kind: 'log', text: '正在检查整合包的 Bundle 加载顺序和宿主服务依赖。' })
     await wait(700)
     setDemoAiStatus({ phase: 'done', message: 'AI 已完成启动修复。' })
     emitAiEvent({ kind: 'done', message: 'AI 已完成分析与修复尝试。请重新启动验证。' })

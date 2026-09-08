@@ -625,7 +625,7 @@ export function createInstaller(options: InstallerOptions): Installer {
     // 按 pnpm 的提示在 Profile 里跑一次 `pnpm install` 迁移到当前 store，然后重试一次。
     if (result.exitCode !== 0 && installingRepository && allowBuildRetry && result.output.includes('ERR_PNPM_UNEXPECTED_STORE')) {
       const profilePath = path.join(settings.dshHome, 'profiles', targetProfile)
-      options.emitOutput('info', '检测到 pnpm store 版本升级，正在迁移 Profile 依赖后自动重试。')
+      options.emitOutput('info', '检测到 pnpm store 版本升级，正在迁移整合包依赖后自动重试。')
       emit({
         repository: installingRepository,
         kind: 'plugin',
@@ -649,7 +649,7 @@ export function createInstaller(options: InstallerOptions): Installer {
         onOutput: (text, level: OutputLevel) => options.emitOutput(level, text),
       })
       if (migrate.exitCode === 0) {
-        options.emitOutput('info', 'Profile 依赖已迁移到当前 pnpm store，正在重试安装。')
+        options.emitOutput('info', '整合包依赖已迁移到当前 pnpm store，正在重试安装。')
         return runPluginCommand(args, installingRepository, false, profileName, approvedRegistryBuildKeys, deniedRegistryBuildKeys)
       }
       throw new Error(`插件依赖迁移失败（代码 ${migrate.exitCode}），请查看运行日志。`)
@@ -914,7 +914,7 @@ export function createInstaller(options: InstallerOptions): Installer {
       }
 
       if (failures.length > 0) {
-        throw new Error(`插件未能从所有本机 Profile 完全卸载：${failures.join('；')}`)
+        throw new Error(`插件未能从所有本机整合包完全卸载：${failures.join('；')}`)
       }
       return readProfile(settings.dshHome, profileName ?? currentProfile, options.pluginReceiptsPath)
     },

@@ -6,7 +6,7 @@ import type { AppSettings, UiTheme } from '../../types'
 
 /**
  * 启动器设置：按 C 端实际需要分组——外观 / 启动 / 网络 / 官方推荐 / 关于；
- * 启动命令、Profile、端口、Copilot 提示词等开发者向字段收进默认折叠的「高级设置」。
+ * 启动命令、端口、Copilot 提示词等开发者向字段收进默认折叠的「高级设置」。
  */
 
 interface SettingsDialogProps {
@@ -64,7 +64,7 @@ export function SettingsDialog({ settings, busy, onClose, onSave }: SettingsDial
               ))}
             </div>
           </SettingsGroup>
-          <SettingsGroup icon={<Rocket size={16} />} title="启动" desc="DSH 本体目录存放程序与依赖；DSH_HOME 存放 Profile、配置、插件和 Skills。">
+          <SettingsGroup icon={<Rocket size={16} />} title="启动" desc="DSH 本体目录存放程序与依赖；DSH_HOME 存放整合包、配置、插件和 Skills。">
             <label className="form-field"><span>本体安装目录</span><div className="path-input"><input value={draft.dshInstallPath} onChange={event => setDraft({ ...draft, dshInstallPath: event.target.value })} /><button type="button" onClick={() => void chooseDirectory('dshInstallPath')} title="选择 DSH 本体安装目录"><Folder size={17} /></button></div></label>
             <label className="form-field"><span>DSH_HOME</span><div className="path-input"><input value={draft.dshHome} onChange={event => setDraft({ ...draft, dshHome: event.target.value })} /><button type="button" onClick={() => void chooseDirectory('dshHome')} title="选择 DSH_HOME"><Folder size={17} /></button></div></label>
             <label className="check-field"><input type="checkbox" checked={draft.openAfterLaunch} onChange={event => setDraft({ ...draft, openAfterLaunch: event.target.checked })} /><span><strong>启动后打开 Harness</strong><small>识别到本地 Web 地址时，在默认浏览器中打开。</small></span></label>
@@ -82,7 +82,7 @@ export function SettingsDialog({ settings, busy, onClose, onSave }: SettingsDial
             </div>
           </SettingsGroup>
           <details className="settings-group settings-advanced">
-            <summary><span className="settings-group-icon"><Wrench size={16} /></span>高级设置<small>启动命令、Profile、端口、Copilot 提示词——一般不需要改动</small></summary>
+            <summary><span className="settings-group-icon"><Wrench size={16} /></span>高级设置<small>启动命令、端口、Copilot 提示词——一般不需要改动</small></summary>
             <label className="form-field"><span>Profile 名称</span><input value={draft.profileName} onChange={event => setDraft({ ...draft, profileName: event.target.value })} /></label>
             <label className="form-field"><span>可执行文件</span><input value={draft.launchExecutable} onChange={event => setDraft({ ...draft, launchExecutable: event.target.value })} /></label>
             <label className="form-field"><span>参数</span><input value={argsText} onChange={event => setArgsText(event.target.value)} /></label>

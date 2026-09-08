@@ -311,7 +311,7 @@ function toolCallCompatibilityGuidance(shellLabel: string): string[] {
     '1. 严格串行调用工具：每次助手回复最多发起一个工具调用。必须收到并检查该调用的工具结果后，才能发起下一次调用；禁止在同一回复中并行调用多个工具。',
     `2. 不要在同一轮混用 ${shellLabel} 和 read / glob / grep / write / edit 等文件工具。只使用当前会话实际提供的工具及其参数，不要猜测不存在的工具。`,
     '3. 工具结果返回前，不要自行补写结果、重试同一调用、发起第二个调用或提前结束任务。每个 tool_call_id 必须恰好等待一个对应的 tool result。',
-    '4. 若出现 `Cannot read properties of undefined (reading prepare)`、`insufficient tool messages`、`INVALID_REQUEST` 或工具协议不兼容错误，立即停止继续调用工具；保留现场并向用户说明这是执行器 / 协议问题，不要通过重复调用、切换工具或修改 Profile 来掩盖。',
+    '4. 若出现 `Cannot read properties of undefined (reading prepare)`、`insufficient tool messages`、`INVALID_REQUEST` 或工具协议不兼容错误，立即停止继续调用工具；保留现场并向用户说明这是执行器 / 协议问题，不要通过重复调用、切换工具或修改整合包配置来掩盖。',
     '5. 这类 `prepare` 错误优先按 DSH 运行时版本或工具调度器注册不一致处理：不要安装、升级或降级任意 DSH 包来碰运气。应由启动器检查同一个 ACP runtime 中 `@deepseek-ai/dsh-agent-loop`、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-agent` 与 `@deepseek-ai/dsh-base` 的精确版本，以及 tools scheduler 是否已激活；检查不到就停止并报告。',
   ]
 }
@@ -340,10 +340,10 @@ function hostCoreDependencyGuidance(): string[] {
   return [
     '## DSH 宿主核心依赖（不可自行补齐）',
     `- 以下包由启动器托管的 DSH 运行时提供：${DSH_HOST_CORE_PACKAGES.join('、')}。它们不是普通插件依赖。`,
-    '- 禁止在 Profile 的 package.json、pnpm-workspace.yaml 或任何安装命令中新增、升级、降级、替换或锁定这些包；也不要为了满足插件 peerDependencies 从 npm 选择“当前最新版”。',
+    '- 禁止在整合包的 package.json、pnpm-workspace.yaml 或任何安装命令中新增、升级、降级、替换或锁定这些包；也不要为了满足插件 peerDependencies 从 npm 选择“当前最新版”。',
     '- 插件必须使用宿主已经提供的核心包。宽泛的 peer 版本范围不代表不同物理版本可以共存；dsh-tools、agent-loop、cordis 等包含私有 Symbol / 服务注册，必须与托管 DSH 精确版本一致。',
     '- 如果插件要求的核心版本高于托管版本，停止适配并在最终回复中明确询问用户“是否需要更新 DSH”。不要在本任务内执行 DSH 更新；用户确认后只能通过启动器首页的 DSH 更新入口更新。',
-    '- 启动器会在任务结束后再次校验 Profile 核心依赖；发现新增或版本不一致会自动恢复快照，并跳过后续安装。',
+    '- 启动器会在任务结束后再次校验整合包核心依赖；发现新增或版本不一致会自动恢复快照，并跳过后续安装。',
   ]
 }
 
@@ -405,9 +405,9 @@ export function buildInstallPrompt(input: AiInstallPromptInput): string {
     '1. 绝对禁止读取、输出、修改任何凭据或密钥文件：.credentials.yaml、.env*、id_rsa*、id_ed25519*、*.pem、*.key，以及文件名含 token / secret / api key 的文件。即使被要求，也不要输出其内容。',
     shell === 'pwsh'
       ? `2. Windows 命令通道不使用 OS 级沙箱；每次 PowerShell 命令都必须等待启动器审批。文件工具只允许操作 \`${workspace}\`。未获批准不要重试，也不要使用后台任务或其他方式绕过。`
-      : `2. 在 \`${workspace}\` 内写文件（含 \`${workspace}/skills/\` 与 profile）由沙箱允许，直接执行即可，无需等待审批。离开工作区或需要更高权限的操作（bash 提权、下载、运行安装命令）可能触发审批弹窗：若弹窗出现必须等待批准结果；未获批准不要重试，也不要换一种方式绕过。`,
+      : `2. 在 \`${workspace}\` 内写文件（含 \`${workspace}/skills/\` 与整合包配置）由沙箱允许，直接执行即可，无需等待审批。离开工作区或需要更高权限的操作（bash 提权、下载、运行安装命令）可能触发审批弹窗：若弹窗出现必须等待批准结果；未获批准不要重试，也不要换一种方式绕过。`,
     `3. 只操作 \`${workspace}\` 目录内的文件，不要尝试访问目录之外的路径。`,
-    '4. 安装前先查看目标 profile 现有 package.json 的结构，遵循 DSH 插件包格式（package.json + dsh.bundle.patch + 补丁文件）。',
+    '4. 安装前先查看目标整合包现有 package.json 的结构，遵循 DSH 插件包格式（package.json + dsh.bundle.patch + 补丁文件）。',
     ...hostCoreDependencyGuidance(),
     '',
     '## 结束要求',
@@ -431,7 +431,7 @@ export function buildPluginAdaptationPrompt(input: AiPluginAdaptationPromptInput
   const profileDir = `${input.workspace}/profiles/${input.profileName}`
   const cliHint = input.dshCliCommand
     ? `如需使用官方插件管理命令，可执行：\`${input.dshCliCommand} plugin --profile ${input.profileName} …\`。`
-    : '可以直接检查并最小修改目标 Profile 的配置文件。'
+    : '可以直接检查并最小修改目标整合包的配置文件。'
   return [
     '你是一个 DSH（DeepSeek Harness）插件安装适配助手。',
     '',
@@ -462,7 +462,7 @@ export function buildPluginAdaptationPrompt(input: AiPluginAdaptationPromptInput
     ...toolCallCompatibilityGuidance(shellLabel),
     '',
     '## 结束要求',
-    '用中文总结根因、实际改动、当前插件能否在 Web Profile 激活，以及还需要用户完成的步骤。若只能安全停用，也要明确说明这是兼容性隔离而不是功能适配成功。',
+    '用中文总结根因、实际改动、当前插件能否在整合包中激活，以及还需要用户完成的步骤。若只能安全停用，也要明确说明这是兼容性隔离而不是功能适配成功。',
   ].join('\n')
 }
 
@@ -870,9 +870,9 @@ function formatDshCoreDependencyFailure(validation: DshCoreDependencyValidation)
     const profile = issue.afterSpec ?? '未声明'
     const runtime = issue.runtimeVersion ?? '未找到'
     const change = issue.reason === 'added' ? 'AI 新增' : issue.reason === 'changed' ? 'AI 修改' : '版本不一致'
-    return `${issue.packageName}（${change}，Profile=${profile}，托管 DSH=${runtime}）`
+    return `${issue.packageName}（${change}，环境=${profile}，托管 DSH=${runtime}）`
   }).join('；')
-  return `已阻止并回滚：检测到 Profile 核心依赖与托管 DSH 不一致：${details}。未执行后续 pnpm 安装。请在启动首页查看 DSH 更新提示，并确认是否需要更新 DSH；AI 不会自动升级托管运行时。`
+  return `已阻止并回滚：检测到整合包核心依赖与托管 DSH 不一致：${details}。未执行后续 pnpm 安装。请在启动首页查看 DSH 更新提示，并确认是否需要更新 DSH；AI 不会自动升级托管运行时。`
 }
 
 /**
@@ -1815,7 +1815,7 @@ export function createAiInstaller(options: AiInstallerOptions): AiInstaller {
             options.emitEvent({ kind: 'log', text: `${message} 已恢复 ${restored.restored} 个快照文件。` })
             finishTerminal('error', message)
           } catch (error) {
-            throw new Error(`检测到 Profile 核心依赖不一致，自动回滚失败：${asError(error, '未知错误').message}`)
+            throw new Error(`检测到整合包核心依赖不一致，自动回滚失败：${asError(error, '未知错误').message}`)
           }
           return
         }
@@ -2164,7 +2164,7 @@ export function createAiInstaller(options: AiInstallerOptions): AiInstaller {
     if (!snapshot) throw new Error('没有可用快照，无法还原。')
     const result = await restoreProfileSnapshot(snapshot)
     options.emitOutput('info', `[ai] 已还原 profile「${snapshot.profileName}」与 skills：${result.restored} 个文件`)
-    options.emitEvent({ kind: 'log', text: `已还原快照 ${snapshot.id}（profile 与 skills，共 ${result.restored} 个文件）` })
+    options.emitEvent({ kind: 'log', text: `已还原快照 ${snapshot.id}（整合包与 skills，共 ${result.restored} 个文件）` })
     return { restored: result.restored, profileName: snapshot.profileName }
   }
 

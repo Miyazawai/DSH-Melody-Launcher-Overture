@@ -409,8 +409,8 @@ export function createDshMarketService(options: DshMarketOptions) {
     // DSH command; otherwise pnpm refuses to touch the Profile at all.
     if (result.exitCode !== 0 && /ERR_PNPM_UNEXPECTED_STORE/i.test(result.output)) {
       const profilePath = path.join(settings.dshHome, 'profiles', settings.profileName)
-      options.emitOutput('info', '检测到 Profile 使用旧 pnpm store，正在迁移依赖后自动重试。')
-      progress(name, 'resolving', '正在迁移 Profile 依赖到启动器插件池', 78)
+      options.emitOutput('info', '检测到整合包使用旧 pnpm store，正在迁移依赖后自动重试。')
+      progress(name, 'resolving', '正在迁移整合包依赖到启动器插件池', 78)
       const migrate = await execute(pnpm.executable, ['install'], {
         cwd: profilePath,
         env: dshEnv,
@@ -420,7 +420,7 @@ export function createDshMarketService(options: DshMarketOptions) {
       if (migrate.exitCode !== 0) {
         throw new Error(`插件依赖迁移失败（代码 ${migrate.exitCode}）：${migrate.output.slice(-800)}`)
       }
-      progress(name, 'resolving', 'Profile 依赖已迁移，正在重试插件操作', 80)
+      progress(name, 'resolving', '整合包依赖已迁移，正在重试插件操作', 80)
       result = await runDshPlugin()
     }
     // Keep dsh-market's recovery behavior: an ignored build approval, a git
@@ -543,7 +543,7 @@ export function createDshMarketService(options: DshMarketOptions) {
         await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
         await unlink(temporary).catch(() => undefined)
       }
-    } catch { /* profile 写入失败不阻断安装 */ }
+    } catch { /* 整合包写入失败不阻断安装 */ }
   }
 
   /**
@@ -587,7 +587,7 @@ export function createDshMarketService(options: DshMarketOptions) {
       if (action === 'install' && alias === null) {
         const names = [npmAlias ?? '', entry.name].filter((value): value is string => typeof value === 'string' && value !== '')
         const collision = names.find(value => before.map[value] !== undefined)
-        if (collision !== undefined) throw new Error(`同名冲突：Profile 已安装「${collision}」，请先卸载后再从 dsh-market 安装。`)
+        if (collision !== undefined) throw new Error(`同名冲突：当前整合包已安装「${collision}」，请先卸载后再从 dsh-market 安装。`)
       }
       progress(name, action === 'uninstall' ? 'resolving' : 'checking', action === 'uninstall' ? '正在准备卸载' : '正在核对 dsh-market 来源', 8)
       // npm 优先：git monorepo 子包若已发布到 npm，优先走 npm 源（解析 @latest），

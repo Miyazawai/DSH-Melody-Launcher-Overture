@@ -277,7 +277,7 @@ function createServices(): Services {
           }
           if (repaired.length > 0) {
             await writeFile(targetManifestPath, `${JSON.stringify({ ...targetManifest, dependencies }, null, 2)}\n`, 'utf8')
-            events.output('plugin', 'info', `已从其他 Profile 复用 ${repaired.length} 个插件来源：${repaired.join('、')}`)
+            events.output('plugin', 'info', `已从其他整合包复用 ${repaired.length} 个插件来源：${repaired.join('、')}`)
           }
         } catch {
           // The subsequent pnpm command reports a precise manifest error.
@@ -480,6 +480,9 @@ function createServices(): Services {
       withExecutableDirectoryOnPath(nodeRuntime.node, {
         ...process.env,
         DSH_HOME: current.dshHome,
+        // CI 模式让 pnpm 用 append-only reporter：无 TTY 时也实时输出解析/下载进度行，
+        // 否则导入对话框的日志区在拉取依赖的几分钟里看起来像卡死。
+        CI: 'true',
         npm_config_store_dir: path.join(app.getPath('userData'), 'plugin-store'),
         NPM_CONFIG_STORE_DIR: path.join(app.getPath('userData'), 'plugin-store'),
         pnpm_config_store_dir: path.join(app.getPath('userData'), 'plugin-store'),
@@ -488,12 +491,29 @@ function createServices(): Services {
       }),
     )
     const onOutput = (text: string, level: string) => events.output('plugin', level as 'error' | 'info' | 'success', text)
+    // pnpm 的输出走插件日志通道，导入对话框看不到；这里把关键进度行节流转发进
+    // packProgress 流，让对话框日志区在拉取依赖的几分钟里持续有新内容。
+    let lastRelayAt = 0
+    const relayToDialog = (line: string) => {
+      const now = Date.now()
+      if (now - lastRelayAt < 4000) return
+      lastRelayAt = now
+      const trimmed = line.trim().slice(0, 160)
+      if (trimmed) events.packProgress({ kind: 'status', message: trimmed })
+    }
+    const onInstallOutput = (text: string, level: string) => {
+      onOutput(text, level)
+      for (const line of text.split(/\r?\n/)) {
+        if (line.includes('Progress:') || line.includes('Done in') || line.includes('ERR_PNPM')) relayToDialog(line)
+      }
+    }
     const runAdd = () => runCommand(executable, commandArgs, {
       cwd: current.workspace,
       env: environment,
-      onOutput,
+      onOutput: onInstallOutput,
     })
     try {
+      events.packProgress({ kind: 'status', message: '离线本体安装：正在解析插件依赖；首次安装需联网拉取依赖包，可能需要几分钟。' })
       let result = await runAdd()
       // pnpm 默认拒绝依赖里的构建脚本（cloudflared/node-pty 等）并以非零码退出。
       // 与官方安装链路一致：批准被忽略的构建后自动重试一次。
@@ -630,7 +650,7 @@ function createServices(): Services {
   }).then(async () => {
     const current = await settings.read()
     const result = await consolidatePluginPool(current.dshHome)
-    if (result.dependencies > 0) events.output('plugin', 'info', `已将 ${result.dependencies} 个 Profile 插件依赖归并到共享插件池。`)
+    if (result.dependencies > 0) events.output('plugin', 'info', `已将 ${result.dependencies} 个整合包插件依赖归并到共享插件池。`)
   }).then(async () => {
     await migrateToPackHomesV2({
       registryPath: packsJsonPath,

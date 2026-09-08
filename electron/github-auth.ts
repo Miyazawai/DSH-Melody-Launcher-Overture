@@ -530,7 +530,7 @@ export function createGitHubAuthService(options: GitHubAuthOptions): GitHubAuthS
 
     async createRepository(input) {
       const name = input.name.trim()
-      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name)) throw new Error('GitHub Profile 仓库名称无效。')
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name)) throw new Error('GitHub 整合包仓库名称无效。')
       const response = await authorizedFetch(`${GITHUB_API_ROOT}/user/repos`, {
         method: 'POST',
         headers: { Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
@@ -553,7 +553,7 @@ export function createGitHubAuthService(options: GitHubAuthOptions): GitHubAuthS
         }
       }
       if (!response.ok || typeof body?.full_name !== 'string' || typeof body.html_url !== 'string') {
-        throw new Error(`创建 GitHub Profile 仓库失败（HTTP ${response.status}）。`)
+        throw new Error(`创建 GitHub 整合包仓库失败（HTTP ${response.status}）。`)
       }
       return { fullName: body.full_name, htmlUrl: body.html_url, defaultBranch: typeof body.default_branch === 'string' ? body.default_branch : 'main' }
     },
@@ -565,14 +565,14 @@ export function createGitHubAuthService(options: GitHubAuthOptions): GitHubAuthS
       const url = repositoryApiUrl(repository, `/contents/${encodedPath}`)
       const current = await authorizedFetch(`${url}${branch ? `?ref=${encodeURIComponent(branch)}` : ''}`, { headers: { Accept: 'application/vnd.github+json' } })
       const currentBody = await current.json().catch(() => null) as { sha?: unknown } | null
-      if (!current.ok && current.status !== 404) throw new Error(`读取 GitHub Profile 文件失败（HTTP ${current.status}）。`)
+      if (!current.ok && current.status !== 404) throw new Error(`读取 GitHub 整合包文件失败（HTTP ${current.status}）。`)
       const bytes = typeof content === 'string' ? Buffer.from(content, 'utf8') : Buffer.from(content)
       const response = await authorizedFetch(url, {
         method: 'PUT',
         headers: { Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, content: bytes.toString('base64'), ...(typeof currentBody?.sha === 'string' ? { sha: currentBody.sha } : {}), ...(branch ? { branch } : {}) }),
       })
-      if (!response.ok) throw new Error(`写入 GitHub Profile 文件失败（HTTP ${response.status}）。`)
+      if (!response.ok) throw new Error(`写入 GitHub 整合包文件失败（HTTP ${response.status}）。`)
     },
 
     async readRepositoryFile(repository, filePath, branch) {
@@ -581,7 +581,7 @@ export function createGitHubAuthService(options: GitHubAuthOptions): GitHubAuthS
       const encodedPath = normalized.split('/').map(encodeURIComponent).join('/')
       const response = await authorizedFetch(`${repositoryApiUrl(repository, `/contents/${encodedPath}`)}${branch ? `?ref=${encodeURIComponent(branch)}` : ''}`, { headers: { Accept: 'application/vnd.github+json' } })
       const body = await response.json().catch(() => null) as { content?: unknown; encoding?: unknown } | null
-      if (!response.ok || body?.encoding !== 'base64' || typeof body.content !== 'string') throw new Error(`读取 GitHub Profile 文件失败（HTTP ${response.status}）。`)
+      if (!response.ok || body?.encoding !== 'base64' || typeof body.content !== 'string') throw new Error(`读取 GitHub 整合包文件失败（HTTP ${response.status}）。`)
       return Uint8Array.from(Buffer.from(body.content.replace(/\s+/g, ''), 'base64'))
     },
 

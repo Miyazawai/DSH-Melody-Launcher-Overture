@@ -461,11 +461,11 @@ export async function createProfile(options: ProfileServiceOptions, input: Profi
   const dshHome = await homeOf(options)
   const scoped = { ...options, dshHome }
   const directory = profileDirFor(dshHome, input.name)
-  if (await exists(directory)) throw new Error(`Profile「${input.name}」已存在。`)
+  if (await exists(directory)) throw new Error(`整合包「${input.name}」已存在。`)
   await mkdir(directory, { recursive: true })
   if (input.cloneFrom) {
     const source = profileDirFor(dshHome, input.cloneFrom)
-    if (!await exists(source)) throw new Error(`源 Profile「${input.cloneFrom}」不存在。`)
+    if (!await exists(source)) throw new Error(`源整合包「${input.cloneFrom}」不存在。`)
     for (const file of PACKAGE_FILES) {
       if (await exists(path.join(source, file))) await cp(path.join(source, file), path.join(directory, file))
     }
@@ -483,7 +483,7 @@ export async function createProfile(options: ProfileServiceOptions, input: Profi
     } catch {
       // An empty pool is valid before the first plugin is installed.
     }
-    await writeFile(path.join(directory, 'package.json'), `${JSON.stringify({ name: `dsh-profile-${input.name}`, private: true, dependencies, dsh: { profile: { bundles: [] } } }, null, 2)}\n`, 'utf8')
+    await writeFile(path.join(directory, 'package.json'), `${JSON.stringify({ name: `dsh-pack-${input.name}`, private: true, dependencies, dsh: { profile: { bundles: [] } } }, null, 2)}\n`, 'utf8')
   }
   // Clones may carry a legacy workspace file as well; normalize both creation
   // paths before the first switch or install can invoke pnpm.
@@ -503,7 +503,7 @@ export async function cloneProfile(options: ProfileServiceOptions, sourceName: s
 }
 
 export async function switchProfile(options: ProfileServiceOptions, profileName: string, fillMissing?: boolean | ((missing: string[]) => Promise<void>)): Promise<AppSettings> {
-  if (options.isRuntimeRunning?.()) throw new Error('请先停止 DSH，再切换 Profile。')
+  if (options.isRuntimeRunning?.()) throw new Error('请先停止 DSH，再切换整合包。')
   const dshHome = await homeOf(options)
   const targetDir = profileDirFor(dshHome, profileName)
   if (!await exists(targetDir)) throw new Error(`Profile「${profileName}」不存在。`)
@@ -536,7 +536,7 @@ export async function switchProfile(options: ProfileServiceOptions, profileName:
 }
 
 export async function deleteProfile(options: ProfileServiceOptions, profileName: string): Promise<void> {
-  if (options.isRuntimeRunning?.()) throw new Error('请先停止 DSH，再删除 Profile。')
+  if (options.isRuntimeRunning?.()) throw new Error('请先停止 DSH，再删除整合包。')
   const current = await options.readSettings()
   if (current.profileName === profileName) throw new Error('当前 Profile 不能删除。')
   const dshHome = await homeOf(options)

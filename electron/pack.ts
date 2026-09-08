@@ -227,7 +227,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       if (!existsSync(targetFile) && existsSync(sourceFile)) await cp(sourceFile, targetFile)
     }
     if (!existsSync(path.join(target, 'package.json'))) {
-      await writeFile(path.join(target, 'package.json'), `${JSON.stringify({ name: `dsh-profile-${profileName}`, private: true, dependencies: {}, dsh: { profile: { bundles: [] } } }, null, 2)}\n`, 'utf8')
+      await writeFile(path.join(target, 'package.json'), `${JSON.stringify({ name: `dsh-pack-${profileName}`, private: true, dependencies: {}, dsh: { profile: { bundles: [] } } }, null, 2)}\n`, 'utf8')
     }
     await ensureProfileCoreBundles(target)
     await writeProfileMetadata(dshHome, profileName, {
@@ -299,7 +299,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
     const occupied = (candidate: string) => records.some(record => record.id === candidate)
       || existsSync(path.join(dshHome, 'profiles', candidate))
     if (importOptions?.overwrite) {
-      if (!occupied(baseId)) throw new Error(`无法覆盖不存在的 Profile「${baseId}」。`)
+      if (!occupied(baseId)) throw new Error(`无法覆盖不存在的整合包「${baseId}」。`)
       return baseId
     }
     if (!occupied(baseId)) return baseId
@@ -307,7 +307,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       const candidate = `${baseId}-${index}`
       if (isSafeProfileName(candidate) && !occupied(candidate)) return candidate
     }
-    throw new Error(`Profile「${baseId}」已存在，无法生成新的导入名称。`)
+    throw new Error(`整合包「${baseId}」已存在，无法生成新的导入名称。`)
   }
 
   /**
@@ -1585,7 +1585,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           : manifest.plugins.filter(entry => entry.source === 'local' || (!entry.repository && entry.source !== 'npm')).map(entry => entry.packageName)
         const { missing } = await buildPackExportToFile(packProfileDir, manifest, bodyNames, zipPath, presetDirs)
         if (missing.length > 0) {
-          const message = `导出 Profile「${packId}」失败：以下插件缺少本地本体（${missing.join('、')}），无法生成${exportMode === 'full' ? '全量' : '离线'}包。`
+          const message = `导出整合包「${packId}」失败：以下插件缺少本地本体（${missing.join('、')}），无法生成${exportMode === 'full' ? '全量' : '离线'}包。`
           log('error', message)
           throw new Error(message)
         }
@@ -1776,7 +1776,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         const dshHome = await getDshHome()
         const currentProfile = await options.installer.readProfile(dshHome, settings.profileName)
         const installedPlugin = currentProfile.plugins.find(item => item.packageName === packageName)
-        if (!installedPlugin || installedPlugin.builtin) throw new Error('当前 Profile 中找不到可打包的非内置插件。')
+        if (!installedPlugin || installedPlugin.builtin) throw new Error('当前整合包中找不到可打包的非内置插件。')
         options.emitEvent({ kind: 'status', message: `正在向整合包添加插件 ${packageName}…` })
         const record = await findRecord(packId)
         const plugins = [...record.plugins.filter(item => item.packageName !== packageName), { packageName, enabled: true }]

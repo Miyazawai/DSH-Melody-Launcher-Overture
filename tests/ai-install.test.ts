@@ -200,7 +200,7 @@ describe('AI 故障修复提示词', () => {
     expect(prompt).toContain('insufficient tool messages')
     expect(prompt).toContain('@deepseek-ai/dsh-agent-loop')
     expect(prompt).toContain('不要安装、升级或降级任意 DSH 包')
-    expect(prompt).toContain('禁止在 Profile 的 package.json')
+    expect(prompt).toContain('禁止在整合包的 package.json')
     expect(prompt).toContain('是否需要更新 DSH')
     expect(prompt).toContain('@deepseek-ai/dsh-tools')
   })

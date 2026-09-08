@@ -240,35 +240,35 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   ipcMain.handle(IPC.profilesList, () => profiles.list())
   ipcMain.handle(IPC.profilesCreate, async (_event, request) => {
     assertProfileMutationAvailable()
-    if (!request || typeof request.name !== 'string' || !isSafeProfileName(request.name)) throw new Error('Profile 名称无效。')
-    if (request.cloneFrom !== undefined && (typeof request.cloneFrom !== 'string' || !isSafeProfileName(request.cloneFrom))) throw new Error('源 Profile 名称无效。')
+    if (!request || typeof request.name !== 'string' || !isSafeProfileName(request.name)) throw new Error('整合包名称无效。')
+    if (request.cloneFrom !== undefined && (typeof request.cloneFrom !== 'string' || !isSafeProfileName(request.cloneFrom))) throw new Error('源整合包名称无效。')
     return profiles.create({ name: request.name, description: typeof request.description === 'string' ? request.description : undefined, dshVersion: request.dshVersion ?? null, cloneFrom: request.cloneFrom })
   })
   ipcMain.handle(IPC.profilesClone, async (_event, payload) => {
     assertProfileMutationAvailable()
-    if (!payload || typeof payload.sourceName !== 'string' || typeof payload.targetName !== 'string' || !isSafeProfileName(payload.sourceName) || !isSafeProfileName(payload.targetName)) throw new Error('Profile 名称无效。')
+    if (!payload || typeof payload.sourceName !== 'string' || typeof payload.targetName !== 'string' || !isSafeProfileName(payload.sourceName) || !isSafeProfileName(payload.targetName)) throw new Error('整合包名称无效。')
     return profiles.clone(payload.sourceName, payload.targetName, typeof payload.description === 'string' ? payload.description : undefined)
   })
   ipcMain.handle(IPC.profilesSwitch, async (_event, payload: string | { profileName: string; fillMissing?: boolean }) => {
     assertProfileMutationAvailable()
     const profileName = typeof payload === 'string' ? payload : payload?.profileName
-    if (typeof profileName !== 'string' || !isSafeProfileName(profileName)) throw new Error('Profile 名称无效。')
+    if (typeof profileName !== 'string' || !isSafeProfileName(profileName)) throw new Error('整合包名称无效。')
     const fillMissing = typeof payload === 'object' && payload?.fillMissing === true
     return profiles.switch(profileName, fillMissing)
   })
   ipcMain.handle(IPC.profilesDelete, async (_event, profileName: string) => {
     assertProfileMutationAvailable()
-    if (typeof profileName !== 'string' || !isSafeProfileName(profileName)) throw new Error('Profile 名称无效。')
+    if (typeof profileName !== 'string' || !isSafeProfileName(profileName)) throw new Error('整合包名称无效。')
     return profiles.remove(profileName)
   })
   ipcMain.handle(IPC.profilesMetadata, async (_event, profileName: string) => {
-    if (typeof profileName !== 'string' || !isSafeProfileName(profileName)) throw new Error('Profile 名称无效。')
+    if (typeof profileName !== 'string' || !isSafeProfileName(profileName)) throw new Error('整合包名称无效。')
     return profiles.metadata(profileName)
   })
   ipcMain.handle(IPC.profilesExport, async (_event, payload: { profileName: string; mode: string; repositoryPrivate?: boolean }) => {
     assertProfileMutationAvailable()
-    if (!payload || typeof payload.profileName !== 'string' || !isSafeProfileName(payload.profileName)) throw new Error('Profile 名称无效。')
-    if (!['light', 'full', 'repository'].includes(payload.mode)) throw new Error('Profile 导出模式无效。')
+    if (!payload || typeof payload.profileName !== 'string' || !isSafeProfileName(payload.profileName)) throw new Error('整合包名称无效。')
+    if (!['light', 'full', 'repository'].includes(payload.mode)) throw new Error('整合包导出模式无效。')
     // PackManager remains the compatibility implementation of the ZIP writer.
     // Its input is now the same profile id, so no second local runtime state is created.
     const mode = payload.mode as 'light' | 'full' | 'repository'
@@ -287,12 +287,12 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
             defaultBranch: sourceBranch,
           }
         : await githubAuth.createRepository({
-            name: `dsh-profile-${payload.profileName}`,
+            name: `dsh-pack-${payload.profileName}`,
             description: `DSH Profile：${payload.profileName}`,
             private: payload.repositoryPrivate === true,
           })
       const inspection = await inspectPackZipFromPath(zipPath)
-      await githubAuth.upsertRepositoryFile(repo.fullName, 'dsh-profile.yaml', serializePackManifest(inspection.manifest), `更新 Profile ${payload.profileName}` , repo.defaultBranch)
+      await githubAuth.upsertRepositoryFile(repo.fullName, 'dsh-pack.yaml', serializePackManifest(inspection.manifest), `更新整合包 ${payload.profileName}` , repo.defaultBranch)
       await githubAuth.upsertRepositoryFile(repo.fullName, 'README.md', `# DSH Profile ${payload.profileName}\n\n此仓库由 DSH Launcher 管理。\n`, `更新 Profile ${payload.profileName} 说明`, repo.defaultBranch)
       // Repository imports use one stable canonical archive name. Local
       // downloads keep the Profile-specific filename for backward compatibility.
@@ -317,8 +317,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   })
   ipcMain.handle(IPC.profilesImport, async (_event, payload: { filePath: string; name?: string; overwrite?: boolean }) => {
     assertProfileMutationAvailable()
-    if (!payload || typeof payload.filePath !== 'string') throw new Error('Profile 文件路径无效。')
-    if (runtime.isRunning()) throw new Error('请先停止 DSH，再导入 Profile。')
+    if (!payload || typeof payload.filePath !== 'string') throw new Error('整合包文件路径无效。')
+    if (runtime.isRunning()) throw new Error('请先停止 DSH，再导入整合包。')
     let importPath = payload.filePath
     let temporaryRoot: string | null = null
     let githubSource: { repository: string; branch?: string; commit?: string | null } | null = null
@@ -344,7 +344,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         await writeFile(importPath, manifestText(manifest), 'utf8')
         githubSource = { repository: loaded.repository, branch: loaded.branch, commit: loaded.commit }
       }
-      if (!path.isAbsolute(importPath)) throw new Error('Profile 文件路径无效。')
+      if (!path.isAbsolute(importPath)) throw new Error('整合包文件路径无效。')
       const result = await packManager.importPack(importPath, undefined, payload.name || payload.overwrite ? { name: payload.name, overwrite: payload.overwrite === true, localPluginBodies } : { localPluginBodies })
       if (githubSource) {
         const importedSettings = await settings.read()
@@ -356,7 +356,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     }
   })
   ipcMain.handle(IPC.profilesRepositoryAnalyze, async (_event, url: string) => {
-    if (typeof url !== 'string' || !url.trim()) throw new Error('GitHub Profile 仓库链接无效。')
+    if (typeof url !== 'string' || !url.trim()) throw new Error('GitHub 整合包仓库链接无效。')
     const preview = await analyzeProfileRepository({ githubAuth, pluginReceiptsPath }, url)
     const existing = (await profiles.list()).find(item => item.source?.kind === 'github' && item.source.repository.toLowerCase() === preview.repository.toLowerCase())
     const environment = await runtimeVersions.read(false)
@@ -385,9 +385,9 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   ipcMain.handle(IPC.profilesRepositoryImport, async (_event, payload: { url: string; mode: ProfileRepositoryImportMode; name?: string; overwrite?: boolean; resolutions?: Record<string, PackPluginEntry> }) => {
     assertProfileMutationAvailable()
     if (!payload || typeof payload.url !== 'string' || (payload.mode !== 'source' && payload.mode !== 'full')) {
-      throw new Error('Profile 仓库导入参数无效。')
+      throw new Error('整合包仓库导入参数无效。')
     }
-    if (runtime.isRunning()) throw new Error('请先停止 DSH，再导入 Profile。')
+    if (runtime.isRunning()) throw new Error('请先停止 DSH，再导入整合包。')
     const loaded = await loadProfileRepositoryManifest(githubAuth, payload.url)
     const environment = await runtimeVersions.read(false)
     if (!environment.dshInstalled.some(item => item.version === loaded.manifest.dshVersion)) {
@@ -455,7 +455,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   ipcMain.handle(IPC.profileToggle, async (_event, payload: { packageName: string; enabled: boolean; profileName?: string }) => {
     assertProfileMutationAvailable()
     if (!isSafePackageName(payload.packageName)) throw new Error('插件名称无效。')
-    if (payload.profileName !== undefined && !isSafeProfileName(payload.profileName)) throw new Error('Profile 名称无效。')
+    if (payload.profileName !== undefined && !isSafeProfileName(payload.profileName)) throw new Error('整合包名称无效。')
     return linkedComponents.togglePlugin(payload.packageName, Boolean(payload.enabled), payload.profileName)
   })
   ipcMain.handle(IPC.profileReorder, async (_event, packageNames: string[]) => {
@@ -587,14 +587,14 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     const packageName = typeof payload === 'string' ? payload : payload?.packageName
     if (!isSafePackageName(packageName)) throw new Error('插件名称无效。')
     const profileName = typeof payload === 'object' ? payload.profileName : undefined
-    if (profileName !== undefined && !isSafeProfileName(profileName)) throw new Error('Profile 名称无效。')
+    if (profileName !== undefined && !isSafeProfileName(profileName)) throw new Error('整合包名称无效。')
     return installer.remove(packageName, profileName)
   })
   ipcMain.handle(IPC.pluginsTrialRead, () => pluginTrial.list())
   ipcMain.handle(IPC.pluginsTrial, async (_event, payload: { packageName: string; profileName?: string }) => {
     assertProfileMutationAvailable()
     if (!payload || !isSafePackageName(payload.packageName)) throw new Error('插件名称无效。')
-    if (payload.profileName !== undefined && !isSafeProfileName(payload.profileName)) throw new Error('Profile 名称无效。')
+    if (payload.profileName !== undefined && !isSafeProfileName(payload.profileName)) throw new Error('整合包名称无效。')
     return pluginTrial.trial(payload.packageName, payload.profileName)
   })
 
@@ -805,7 +805,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   })
   ipcMain.handle(IPC.aiAdaptPlugin, async (_event, input: { packageName: string; profileName?: string }) => {
     if (!input || !isSafePackageName(input.packageName)) throw new Error('插件名称无效。')
-    if (input.profileName !== undefined && !isSafeProfileName(input.profileName)) throw new Error('Profile 名称无效。')
+    if (input.profileName !== undefined && !isSafeProfileName(input.profileName)) throw new Error('整合包名称无效。')
     const failure = await pluginTrial.latestFailure(input.packageName, input.profileName)
     const session = await copilot.beginLegacy('plugin-adaptation', 'DSH 安装适配', failure.packageName)
     copilot.bindLegacy(session.id)

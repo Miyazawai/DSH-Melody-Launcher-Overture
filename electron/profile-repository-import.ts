@@ -7,7 +7,7 @@ import { extractPackBodiesFromPath, inspectPackZipFromPath } from './pack-zip'
 import { readPluginReceipts, type PluginInstallReceipt } from './plugin-receipts'
 import type { GitHubAuthService } from './github-auth'
 
-type RepositoryFile = { bytes: Uint8Array; path: 'dsh-profile.yaml' | 'dsh-pack.yaml' }
+type RepositoryFile = { bytes: Uint8Array; path: 'dsh-pack.yaml' }
 
 function jsonObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
@@ -28,14 +28,12 @@ async function repositoryDefaultBranch(auth: GitHubAuthService, repository: stri
 }
 
 async function readManifest(auth: GitHubAuthService, repository: string, branch: string): Promise<RepositoryFile> {
-  for (const file of ['dsh-profile.yaml', 'dsh-pack.yaml'] as const) {
-    try {
-      return { bytes: await auth.readRepositoryFile(repository, file, branch), path: file }
-    } catch {
-      // Try the compatibility filename next.
-    }
+  try {
+    return { bytes: await auth.readRepositoryFile(repository, 'dsh-pack.yaml', branch), path: 'dsh-pack.yaml' }
+  } catch {
+    // Only the canonical manifest filename is accepted.
   }
-  throw new Error('仓库中没有 dsh-profile.yaml 或兼容的 dsh-pack.yaml。')
+  throw new Error('仓库中没有 dsh-pack.yaml。')
 }
 
 async function manifestCommit(auth: GitHubAuthService, repository: string, branch: string, file: string): Promise<string | null> {
@@ -188,7 +186,7 @@ export async function validateFullArchive(filePath: string, manifest: PackManife
   const inspection = await inspectPackZipFromPath(filePath)
   const archiveManifest = inspection.manifest
   if (archiveManifest.name !== manifest.name || archiveManifest.version !== manifest.version || archiveManifest.dshVersion !== manifest.dshVersion) {
-    throw new Error('完整包内清单与仓库 dsh-profile.yaml 不一致。')
+    throw new Error('完整包内清单与仓库 dsh-pack.yaml 不一致。')
   }
   const expected = manifest.plugins.map(item => item.packageName)
   const archiveNames = archiveManifest.plugins.map(item => item.packageName)

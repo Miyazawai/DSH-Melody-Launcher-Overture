@@ -132,7 +132,7 @@ function excludeReplacementHostedPlugins(
     return {
       ...pluginAnalysis,
       installability: 'application',
-      summary: '该 Bundle 由同一个替代运行时应用提供，不应单独加入普通 DSH Profile。',
+      summary: '该 Bundle 由同一个替代运行时应用提供，不应单独加入普通整合包。',
       targets: [],
     }
   }

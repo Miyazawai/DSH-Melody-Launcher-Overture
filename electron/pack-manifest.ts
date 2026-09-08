@@ -20,7 +20,6 @@ import type { SkillInstallReceipt } from './skill-receipts'
 
 /** 压缩包内的清单文件名（导出 / 导入共用）。 */
 export const PACK_MANIFEST_FILENAME = 'dsh-pack.yaml'
-export const PROFILE_MANIFEST_FILENAME = 'dsh-profile.yaml'
 
 const PACK_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$/
 const PACK_VERSION_RE = /^\d+\.\d+\.\d+/

@@ -256,7 +256,7 @@ export interface DshUpdateStatus {
   message: string
 }
 
-/** Profile 是本地运行环境与可分享整合包的唯一实体。 */
+/** 整合包是本地运行环境与可分享单位的唯一实体。 */
 export interface ProfileSourceMetadata {
   kind: 'local' | 'github' | 'import'
   path?: string

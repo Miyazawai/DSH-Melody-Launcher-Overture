@@ -295,7 +295,7 @@ export function createPluginTrialManager(options: PluginTrialManagerOptions): Pl
       const sourceManifestPath = path.join(sourceProfileDir, 'package.json')
       const sourceManifest = await readJson<ProfileManifest>(sourceManifestPath)
       const specifier = sourceManifest.dependencies?.[packageName]
-      if (!specifier) throw new Error(`当前 Profile 的 dependencies 中没有 ${packageName}，无法建立隔离试运行。`)
+      if (!specifier) throw new Error(`当前整合包的 dependencies 中没有 ${packageName}，无法建立隔离试运行。`)
 
       const linkedSource = path.join(sourceProfileDir, 'node_modules', ...packageName.split('/'))
       if (!await pathExists(linkedSource)) throw new Error(`插件文件不存在：${linkedSource}`)
