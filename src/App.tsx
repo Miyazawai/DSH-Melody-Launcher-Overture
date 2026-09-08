@@ -190,6 +190,7 @@ function LauncherShell() {
                       void store.refreshPacks()
                     }}
                     onActivatePack={store.activatePack}
+                    packActivity={store.packActivity}
                     onRenamePack={store.renamePack}
                     onCreateBlankPack={(name, dshVersion) => store.createBlankPack({ name, dshVersion })}
                     onPackDiskUsage={store.packDiskUsage}

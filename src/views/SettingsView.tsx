@@ -91,6 +91,8 @@ interface SettingsPanelsProps {
   onSkillInstalled: (result: SkillInstallResult) => void
   onProfileChanged: () => void
   onActivatePack: (packId: string) => Promise<boolean>
+  /** 整合包后台活动（导出打包进度等）；null 表示空闲。 */
+  packActivity?: string | null
   onRenamePack: (packId: string, name: string) => Promise<boolean>
   onCreateBlankPack: (name: string, dshVersion: string | null) => Promise<PackStatus | undefined>
   onPackDiskUsage: (packId: string) => Promise<number>
@@ -127,6 +129,7 @@ export function SettingsPanels({
   onSkillInstalled,
   onProfileChanged,
   onActivatePack,
+  packActivity,
   onRenamePack,
   onCreateBlankPack,
   onPackDiskUsage,
@@ -234,12 +237,14 @@ export function SettingsPanels({
           {tab === 'packs' && (
             <div
               className={`settings-packs-zone${zoneDroppingZip ? ' is-dragging-zip' : ''}`}
+              data-pack-activity={packActivity ?? undefined}
               onDragEnter={onZoneDragEnter}
               onDragLeave={onZoneDragLeave}
               onDragOver={onZoneDragOver}
               onDrop={onZoneDrop}
             >
               {zoneDroppingZip && <div className="settings-zip-drop-zone-hint">松开鼠标，把 .zip 整合包安装进来</div>}
+              {packActivity && <div className="settings-pack-activity"><LoaderCircle size={13} className="spin" /><span>{packActivity}</span></div>}
               <SettingsPacks
                 packs={packs}
                 activePack={activePack}

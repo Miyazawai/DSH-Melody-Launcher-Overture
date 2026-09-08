@@ -884,10 +884,23 @@ export function useLauncherStore() {
     return next !== undefined
   }, [api, refreshPacks, refreshProfile, refreshSecondaryResources, run, setSettings])
 
+  // 整合包后台活动（导出打包进度等）：来自主进程 packProgress 状态事件，面板上展示，
+  // 否则导出这类长任务在 UI 上毫无反馈、看起来像卡死。
+  const [packActivity, setPackActivity] = useState<string | null>(null)
+  useEffect(() => api.onPackProgress(event => {
+    if (event.kind === 'status') setPackActivity(event.message)
+    else if (event.kind === 'done' || event.kind === 'error') setPackActivity(null)
+  }), [api])
+
   const exportPack = useCallback(async (packId: string): Promise<string | null> => {
-    const path = await run(`pack-export:${packId}`, () => api.exportPack(packId))
-    if (path) showToast({ kind: 'success', message: `整合包已导出到 ${path}` })
-    return path ?? null
+    setPackActivity('正在导出整合包：正在打包插件与离线依赖（可能需要几分钟），完成后自动保存…')
+    try {
+      const path = await run(`pack-export:${packId}`, () => api.exportPack(packId))
+      if (path) showToast({ kind: 'success', message: `整合包已导出到 ${path}` })
+      return path ?? null
+    } finally {
+      setPackActivity(null)
+    }
   }, [api, run, showToast])
 
   /** 删除确认框用的包占用字节数；失败返回 0（不弹错，静默降级）。 */
@@ -1108,6 +1121,7 @@ export function useLauncherStore() {
     deleteProfile,
     refreshPackSnapshots,
     activatePack,
+    packActivity,
     renamePack,
     createBlankPack,
     packDiskUsage,

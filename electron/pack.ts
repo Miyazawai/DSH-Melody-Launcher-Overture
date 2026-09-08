@@ -147,7 +147,7 @@ export interface PackManager {
   createPack(request: PackCreateRequest): Promise<PackInstallResult>
   analyzeImport(filePath: string): Promise<PackAnalysis>
   importPack(filePath: string, items?: string[], options?: PackImportOptions): Promise<PackInstallResult>
-  exportPack(packId: string, mode?: ProfileExportMode): Promise<{ zipPath: string; fileName: string }>
+  exportPack(packId: string, mode?: ProfileExportMode, targetZipPath?: string): Promise<{ zipPath: string; fileName: string }>
   activatePack(packId: string): Promise<AppSettings>
   removePack(packId: string): Promise<{ removed: number }>
   renamePack(packId: string, name: string): Promise<PackStatus>
@@ -1539,7 +1539,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       }
     },
 
-    async exportPack(packId, exportMode: ProfileExportMode = 'light') {
+    async exportPack(packId, exportMode: ProfileExportMode = 'light', targetZipPath?: string) {
       const reason = guarded()
       if (reason) throw new Error(reason)
       active = true
@@ -1647,8 +1647,9 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         const packProfileDir = path.join(dshHome, 'profiles', options.unifiedProfiles ? packId : settings.profileName)
         const exportRoot = path.join(options.snapshotRoot, 'exports')
         await mkdir(exportRoot, { recursive: true })
-        exportDir = await mkdtemp(path.join(exportRoot, 'pack-'))
-        const zipPath = path.join(exportDir, `${packId}.zip`)
+        exportDir = targetZipPath ? null : await mkdtemp(path.join(exportRoot, 'pack-'))
+        // 指定了目标路径（用户已通过保存对话框选好）就直接写入；否则走临时目录。
+        const zipPath = targetZipPath ?? path.join(exportDir!, `${packId}.zip`)
         const bodyNames = exportMode === 'full'
           ? packageNames
           // Lightweight exports carry only local/unmatched bodies. npm
@@ -1662,7 +1663,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
             const nodeExe = await options.getNodeExecutable()
             if (nodeExe) {
               options.emitEvent({ kind: 'status', message: '正在收集离线依赖（把依赖打包进压缩包，可能需要几分钟）…' })
-              const collection = await collectDependencyTarballs(packProfileDir, path.join(exportDir, 'dependency-tarballs'), {
+              const collection = await collectDependencyTarballs(packProfileDir, path.join(exportRoot, `.offline-${Date.now()}`), {
                 nodeExecutable: nodeExe,
                 onProgress: (done, total) => {
                   if (done % 20 === 0 || done === total) {
@@ -1681,12 +1682,13 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           log('info', `离线依赖收集失败，导出包退化为在线导入：${asErrorMessage(error)}`)
         }
         const { missing } = await buildPackExportToFile(packProfileDir, manifest, bodyNames, zipPath, presetDirs, undefined, offline)
+        if (offline) await rm(offline.tarballDir, { recursive: true, force: true }).catch(() => undefined)
         if (missing.length > 0) {
           const message = `导出整合包「${packId}」失败：以下插件缺少本地本体（${missing.join('、')}），无法生成${exportMode === 'full' ? '全量' : '离线'}包。`
           log('error', message)
           throw new Error(message)
         }
-        return { zipPath, fileName: `${packId}.zip` }
+        return { zipPath, fileName: path.basename(zipPath) }
       } catch (error) {
         if (exportDir) await rm(exportDir, { recursive: true, force: true }).catch(() => undefined)
         throw error

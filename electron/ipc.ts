@@ -940,23 +940,16 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
 
   ipcMain.handle(IPC.packsExport, async (_event, packId: string) => {
     if (!isSafeProfileName(packId)) throw new Error('整合包标识无效。')
-    const { zipPath, fileName } = await packManager.exportPack(packId)
+    // 先让用户选保存位置，再开始打包（离线依赖收集可能需要几分钟，对话框立刻给反馈）。
     const window = deps.getWindow()
-    if (!window) {
-      await rm(path.dirname(zipPath), { recursive: true, force: true }).catch(() => undefined)
-      return null
-    }
-    try {
-      const result = await dialog.showSaveDialog(window, {
-        defaultPath: fileName,
-        filters: [{ name: '整合包', extensions: ['zip'] }],
-      })
-      if (result.canceled || !result.filePath) return null
-      await copyFile(zipPath, result.filePath)
-      return result.filePath
-    } finally {
-      await rm(path.dirname(zipPath), { recursive: true, force: true }).catch(() => undefined)
-    }
+    if (!window) return null
+    const result = await dialog.showSaveDialog(window, {
+      defaultPath: `${packId}.zip`,
+      filters: [{ name: '整合包', extensions: ['zip'] }],
+    })
+    if (result.canceled || !result.filePath) return null
+    await packManager.exportPack(packId, undefined, result.filePath)
+    return result.filePath
   })
 
   ipcMain.handle(IPC.packsPickFile, async () => {
