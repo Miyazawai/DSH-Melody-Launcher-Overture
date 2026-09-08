@@ -10,6 +10,8 @@
 
 <br />
 
+[![Release](https://img.shields.io/github/v/release/Miyazawai/DSH-Melody-Launcher-Overture?style=for-the-badge&logo=github&color=6C7BFF)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases/latest)
+[![Build](https://img.shields.io/github/actions/workflow/status/Miyazawai/DSH-Melody-Launcher-Overture/build.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/actions/workflows/build.yml)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases)
 [![Upstream](https://img.shields.io/badge/上游-rirko%2Fdsh--melody--launcher-6C7BFF?style=for-the-badge&logo=github&logoColor=white)](https://github.com/rirko/dsh-melody-launcher)
 [![Tests](https://img.shields.io/badge/tests-692%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
@@ -127,6 +129,11 @@ npm run package:win   # 打包 Windows 便携 exe
 ```
 
 要求 Node.js ≥ 20。
+
+> [!TIP]
+> **发版**：推 `v*` 标签即可触发 CI 自动打包并把便携 exe 挂到 Release：
+> `git tag -a v0.4.2 -m "v0.4.2" && git push origin v0.4.2`
+> 版本号与 `package.json` 的 `version` 保持一致，exe 文件名由它决定。
 
 ## 数据与配置
 
