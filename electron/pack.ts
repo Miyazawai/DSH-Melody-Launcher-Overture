@@ -42,6 +42,7 @@ import { extractOfflineSupportFromPath, extractPackBodiesFromPath, extractPreset
 import { validateFullArchive } from './profile-repository-import'
 import { cleanPackNameHint, extractRawPluginBodiesFromPath, extractRawPresetSourcesFromPath, extractRawSkillSourcesFromPath, scanRawPackZipFromPath, type ExtractByteBudget } from './pack-scan'
 import { buildPackExportToFile, collectDependencyTarballs } from './pack-export'
+import { parseDocument } from 'yaml'
 import {
   readPackRegistry,
   removePackRecord,
@@ -1417,11 +1418,26 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           try {
             await rm(offlineWork, { recursive: true, force: true }).catch(() => undefined)
             const offline = await extractOfflineSupportFromPath(filePath, offlineWork)
-            const oldBodyRoot = offline?.lockfileText.match(/file:[^'\\n\s]*?[.]dsh-launcher-plugin-bodies/)?.[0]?.slice(5) ?? null
-            if (offline && oldBodyRoot) {
+            // 从 lockfile 读出每个插件本体的期望绝对路径（安装时的 file: 目录），
+            // 把 zip 内本体原样复制过去——lockfile 一字不改，install --offline 即可命中。
+            const expectedBodyDirs = new Map<string, string>()
+            if (offline) {
+              const lockDoc = parseDocument(offline.lockfileText).toJS() as {
+                importers?: Record<string, { dependencies?: Record<string, { specifier?: string }> }>
+              } | null
+              const importerDeps = lockDoc?.importers?.['.']?.dependencies ?? {}
+              for (const packageName of wantedPlugins) {
+                const specifier = importerDeps[packageName]?.specifier ?? ''
+                if (!specifier.startsWith('file:')) continue
+                const expected = specifier.slice('file:'.length)
+                // 只接受绝对路径；相对路径无法可靠还原，回退在线安装。
+                if (!/^[A-Za-z]:[/\\]/.test(expected) && !expected.startsWith('/')) continue
+                expectedBodyDirs.set(packageName, path.normalize(expected))
+              }
+            }
+            if (offline && expectedBodyDirs.size === wantedPlugins.length) {
               options.emitEvent({ kind: 'status', message: `检测到离线依赖包（${offline.tarballCount} 个），免联网直装中…` })
-              // 1) 本体解到临时目录后落位共享本体目录（lockfile 的 file: 前缀指向这里）。
-              const newBodyRoot = path.join(dshHome, '.dsh-launcher-plugin-bodies')
+              // 1) 本体解到临时目录，再复制到 lockfile 期望的绝对路径（已存在则复用）。
               const offlineBodies = await extractPackBodiesFromPath(
                 filePath,
                 path.join(offlineWork, 'bodies'),
@@ -1431,13 +1447,17 @@ export function createPackManager(options: PackManagerOptions): PackManager {
               const finalDirs = new Map<string, string>()
               for (const packageName of wantedPlugins) {
                 const bodyDir = offlineBodies.get(packageName)
-                if (!bodyDir) throw new Error(`离线包缺少插件本体：${packageName}`)
-                finalDirs.set(packageName, await sharedPluginBodyDir(dshHome, packageName, bodyDir))
+                const expectedDir = expectedBodyDirs.get(packageName)
+                if (!bodyDir || !expectedDir) throw new Error(`离线包缺少插件本体：${packageName}`)
+                if (!existsSync(expectedDir)) {
+                  await mkdir(path.dirname(expectedDir), { recursive: true })
+                  await cp(bodyDir, expectedDir, { recursive: true })
+                }
+                finalDirs.set(packageName, expectedDir)
               }
-              // 2) lockfile 的本体前缀改写为导入机路径，落到 profile。
-              const rewritten = offline.lockfileText.split(oldBodyRoot).join(newBodyRoot)
+              // 2) lockfile 原样落到 profile。
               const profileDir = path.join(dshHome, 'profiles', profileName)
-              await writeFile(path.join(profileDir, 'pnpm-lock.yaml'), rewritten, 'utf8')
+              await writeFile(path.join(profileDir, 'pnpm-lock.yaml'), offline.lockfileText, 'utf8')
               // 3) package.json 写入依赖与 bundles（等价 DSH CLI add 后的 reconcile 结果）。
               const profileManifestPath = path.join(profileDir, 'package.json')
               const pkgJson = JSON.parse(await readFile(profileManifestPath, 'utf8')) as {
@@ -1449,8 +1469,8 @@ export function createPackManager(options: PackManagerOptions): PackManager {
                 : {}
               const templateBundles = pkgJson.dsh?.profile?.bundles ?? []
               const bundles = new Set<string>(templateBundles)
-              for (const [packageName, dir] of finalDirs) {
-                dependencies[packageName] = `file:${dir.replace(/\\/g, '/')}`
+              for (const packageName of finalDirs.keys()) {
+                dependencies[packageName] = `file:${(finalDirs.get(packageName) ?? '').replace(/\\/g, '/')}`
                 bundles.add(packageName)
               }
               pkgJson.dependencies = dependencies

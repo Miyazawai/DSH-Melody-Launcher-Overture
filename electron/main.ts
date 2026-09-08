@@ -513,7 +513,7 @@ function createServices(): Services {
       onOutput: onInstallOutput,
     })
     try {
-      events.packProgress({ kind: 'status', message: '离线本体安装：正在解析插件依赖；首次安装需联网拉取依赖包，可能需要几分钟。' })
+      events.packProgress({ kind: 'status', message: '离线本体安装：该包未内置依赖，正在联网拉取（约几分钟）。用新版启动器重新导出，即可把依赖打进包内实现免联网安装。' })
       let result = await runAdd()
       // pnpm 默认拒绝依赖里的构建脚本（cloudflared/node-pty 等）并以非零码退出。
       // 与官方安装链路一致：批准被忽略的构建后自动重试一次。
