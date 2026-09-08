@@ -871,13 +871,13 @@ export function createInstaller(options: InstallerOptions): Installer {
       const settings = await options.readSettings()
       const currentProfile = settings.profileName
       const receipts = await readPluginReceipts(options.pluginReceiptsPath).catch(() => [])
-      const receiptProfiles = receipts
-        .filter(receipt => receipt.packageName === packageName && isSafeProfileName(receipt.profileName))
-        .map(receipt => receipt.profileName)
+      const receiptOwners = receipts
+        .filter(receipt => receipt.packageName === packageName && isSafeProfileName(receipt.packId))
+        .map(receipt => receipt.packId)
 
       // 传入 profileName 的调用用于整合包/内部流程，只操作指定 Profile；
       // UI 的普通卸载不传该参数，因此会覆盖本机所有已登记的 Profile。
-      const targetProfiles = new Set<string>(profileName ? [profileName] : [currentProfile, ...receiptProfiles])
+      const targetProfiles = new Set<string>(profileName ? [profileName] : [currentProfile, ...receiptOwners])
       if (!profileName) {
         try {
           const entries = await readdir(path.join(settings.dshHome, 'profiles'), { withFileTypes: true })
@@ -898,7 +898,7 @@ export function createInstaller(options: InstallerOptions): Installer {
           // 清理安装回执仍可继续；损坏的 Profile 不应阻塞其他 Profile 的卸载。
         }
         const installed = profile?.plugins.some(item => item.packageName === packageName && !item.builtin) ?? false
-        const hasReceipt = receiptProfiles.includes(targetProfile)
+        const hasReceipt = receiptOwners.includes(targetProfile)
 
         if (profileName || installed) {
           try {
@@ -1037,7 +1037,7 @@ export function createInstaller(options: InstallerOptions): Installer {
         await recordPluginInstall(options.pluginReceiptsPath, {
           repository: fullName,
           packageName: target.packageName,
-          profileName,
+          packId: profileName,
           source: target.source,
           subdirectory: target.subdirectory,
           version: target.version,
@@ -1105,7 +1105,7 @@ export function createInstaller(options: InstallerOptions): Installer {
         await recordPluginInstall(options.pluginReceiptsPath, {
           repository,
           packageName: request.packageName,
-          profileName,
+          packId: profileName,
           source: 'npm',
           subdirectory: null,
           version: version ?? installedPlugin.version ?? null,

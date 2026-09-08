@@ -287,7 +287,7 @@ function createServices(): Services {
       let offlinePnpm: PnpmRuntime | null = null
       let offlineInstallAttempted = false
       for (const packageName of missing) {
-        const receipt = receipts.find(item => item.profileName === profileName && item.packageName === packageName)
+        const receipt = receipts.find(item => item.packId === profileName && item.packageName === packageName)
         if (!receipt) {
           // A cloned/imported Profile may have no launcher receipt while its
           // exact package is already present in the shared pnpm store. Try an
@@ -495,7 +495,7 @@ function createServices(): Services {
     await recordPluginInstall(pluginReceiptsPath, {
       repository: `file:${localDirectory}`,
       packageName: target.packageName,
-      profileName: target.profileName,
+      packId: target.profileName,
       source: 'local-directory',
       subdirectory: null,
       version,

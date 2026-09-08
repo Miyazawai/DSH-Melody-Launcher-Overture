@@ -129,7 +129,7 @@ describe('Profile service', () => {
     const bodyFile = path.join(bodyRoot, 'alpha', 'index.js')
     await createProfile(env.options, { name: 'alpha' })
     await recordPluginInstall(receiptPath, {
-      repository: 'demo/plugin', packageName: '@demo/plugin', profileName: 'alpha', source: 'github',
+      repository: 'demo/plugin', packageName: '@demo/plugin', packId: 'alpha', source: 'github',
       subdirectory: null, version: '1.0.0', commit: 'abcdef1', installedAt: new Date().toISOString(),
     })
     await mkdir(path.dirname(bodyFile), { recursive: true })

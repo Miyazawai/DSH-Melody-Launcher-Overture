@@ -178,7 +178,7 @@ function createDshSimulator(store: SettingsStore, receiptsPath: string): DshSimu
     await recordPluginInstall(receiptsPath, {
       repository: target.repository ?? 'demo/owner',
       packageName: target.packageName,
-      profileName,
+      packId: profileName,
       source: target.source,
       subdirectory: target.subdirectory ?? null,
       version: target.version ?? null,
@@ -391,7 +391,7 @@ describe('pack E2E · 标准包生命周期（真隔离）', () => {
     expect(existsSync(home)).toBe(false)
     expect(await readPackRegistry(env.registryPath)).toEqual([])
     expect(store.current.activePackId).toBeNull()
-    expect((await readPluginReceipts(env.pluginReceiptsPath)).filter(r => r.profileName === 'pack-alpha-pack')).toEqual([])
+    expect((await readPluginReceipts(env.pluginReceiptsPath)).filter(r => r.packId === 'pack-alpha-pack')).toEqual([])
 
     // 零包状态下新建空白包：自动成为当前包（引导闭环），不再有兜底 web 包可删。
     const blank = await manager.createBlankPack({ name: 'Blank', dshVersion: null })

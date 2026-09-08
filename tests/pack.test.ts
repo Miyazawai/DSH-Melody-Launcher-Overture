@@ -173,11 +173,11 @@ function recordFor(id: string, plugins: PackRecord['plugins'] = []): PackRecord 
   }
 }
 
-function receipt(packageName: string, profileName: string, source: PluginInstallReceipt['source'] = 'npm'): PluginInstallReceipt {
+function receipt(packageName: string, packId: string, source: PluginInstallReceipt['source'] = 'npm'): PluginInstallReceipt {
   return {
     repository: 'demo/owner',
     packageName,
-    profileName,
+    packId,
     source,
     subdirectory: null,
     version: '1.2.3',

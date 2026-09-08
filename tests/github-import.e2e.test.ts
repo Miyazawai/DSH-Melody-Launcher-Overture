@@ -248,7 +248,7 @@ describe('从 GitHub 链接导入并安装 —— 端到端', () => {
     ])
     expect(recordPluginInstall).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ packageName: 'demo-plugin', profileName: 'web', source: 'github' }),
+      expect.objectContaining({ packageName: 'demo-plugin', packId: 'web', source: 'github' }),
     )
   })
 

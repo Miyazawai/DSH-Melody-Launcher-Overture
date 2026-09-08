@@ -268,7 +268,7 @@ describe('installNpmPackage', () => {
     ])
     expect(analyzeRepository).not.toHaveBeenCalled()
     expect(recordPluginInstall).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
-      repository: 'npm:demo-plugin', packageName: 'demo-plugin', profileName: 'web', source: 'npm', version: '1.2.3',
+      repository: 'npm:demo-plugin', packageName: 'demo-plugin', packId: 'web', source: 'npm', version: '1.2.3',
     }))
     expect(result.installedProfileName).toBe('web')
   })
@@ -314,7 +314,7 @@ describe('installPluginTarget with local-directory source', () => {
     expect(addCall!.options.env[pathKey]?.split(path.delimiter)).toContain(path.dirname(pnpmExecutable))
     expect(recordPluginInstall).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ packageName: 'demo-plugin', profileName: 'tui', source: 'local-directory' }),
+      expect.objectContaining({ packageName: 'demo-plugin', packId: 'tui', source: 'local-directory' }),
     )
     expect(result.installedProfileName).toBe('tui')
   })

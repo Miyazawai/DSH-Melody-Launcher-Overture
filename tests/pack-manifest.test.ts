@@ -173,7 +173,7 @@ describe('buildManifestFromReceipts', () => {
     {
       repository: 'demo/alpha',
       packageName: 'alpha',
-      profileName: 'web',
+      packId: 'web',
       source: 'github',
       subdirectory: 'packages/alpha',
       version: '1.2.3',
@@ -183,7 +183,7 @@ describe('buildManifestFromReceipts', () => {
     {
       repository: 'demo/beta',
       packageName: '@demo/beta',
-      profileName: 'web',
+      packId: 'web',
       source: 'archive-subdirectory',
       subdirectory: null,
       version: null,
@@ -193,7 +193,7 @@ describe('buildManifestFromReceipts', () => {
     {
       repository: 'demo/gamma',
       packageName: 'gamma',
-      profileName: 'web',
+      packId: 'web',
       source: 'npm',
       subdirectory: null,
       version: '2.0.0',
@@ -239,7 +239,7 @@ describe('buildManifestFromReceipts', () => {
     const manifest = buildManifestFromReceipts('pack-x', [{
       repository: 'file:/some/path',
       packageName: 'alpha',
-      profileName: 'pack-x',
+      packId: 'pack-x',
       source: 'local-directory',
       subdirectory: null,
       version: '1.0.0',

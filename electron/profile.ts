@@ -129,7 +129,7 @@ export async function readProfile(dshHome: string, profileName: string, pluginRe
       const manifestRepo = repositoryUrl(dependencyManifest ?? {})
       const dependencyRepo = repositoryFullNameFromSpecifier(manifest.dependencies?.[packageName])
       const receiptRepo = repositoryFullNameFromSpecifier(receipts.find(receipt =>
-        receipt.profileName === profileName && receipt.packageName === packageName,
+        receipt.packId === profileName && receipt.packageName === packageName,
       )?.repository)
       const repositoryFullName = dependencyRepo ?? repositoryFullNameFromSpecifier(manifestRepo) ?? receiptRepo
       // Always expose a browser-ready GitHub URL when the source can be normalized.

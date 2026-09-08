@@ -738,7 +738,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           const installedPlugin = currentProfile.plugins.find(item => item.packageName === packageName)
           // 核心内置 Bundle 不属于用户可导出资源，直接跳过，不报失败。
           if (installedPlugin?.builtin) continue
-          const receipt = receipts.find(item => item.profileName === profileName && item.packageName === packageName)
+          const receipt = receipts.find(item => item.packId === profileName && item.packageName === packageName)
           if (receipt || installedPlugin) {
             installedPluginNames.push(packageName)
           } else {
@@ -1489,7 +1489,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         const receiptByName = new Map<string, PluginInstallReceipt>()
         for (const item of allReceipts) {
           const existing = receiptByName.get(item.packageName)
-          if (!existing || item.profileName === exportProfileName) receiptByName.set(item.packageName, item)
+          if (!existing || item.packId === exportProfileName) receiptByName.set(item.packageName, item)
         }
         const allPresetReceipts = await readPresetReceipts(options.presetReceiptsPath)
         const presetReceiptByName = new Map(allPresetReceipts.map(item => [item.name, item]))
@@ -1627,7 +1627,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           await rm(path.join(home, 'profiles', packId), { recursive: true, force: true })
           await rm(packBodiesDir(home, packId), { recursive: true, force: true }).catch(() => undefined)
         }
-        const profileReceipts = (await readPluginReceipts(options.pluginReceiptsPath)).filter(item => item.profileName === packId)
+        const profileReceipts = (await readPluginReceipts(options.pluginReceiptsPath)).filter(item => item.packId === packId)
         for (const receipt of profileReceipts) {
           await removePluginReceipt(options.pluginReceiptsPath, packId, receipt.packageName)
         }

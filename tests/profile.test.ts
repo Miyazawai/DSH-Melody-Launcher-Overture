@@ -99,7 +99,7 @@ describe('profile management', () => {
     await recordPluginInstall(receiptPath, {
       repository: 'demo/sidebar',
       packageName: '@demo/sidebar',
-      profileName,
+      packId: profileName,
       source: 'archive-subdirectory',
       subdirectory: 'sidebar',
       version: '2.0.0',

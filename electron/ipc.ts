@@ -437,7 +437,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     const state = await readProfile(current.dshHome, current.profileName, pluginReceiptsPath)
     const plugin = state.plugins.find(item => item.packageName === packageName)
     if (!plugin) return null
-    const receipt = (await readPluginReceipts(pluginReceiptsPath)).find(item => item.profileName === current.profileName && item.packageName === packageName)
+    const receipt = (await readPluginReceipts(pluginReceiptsPath)).find(item => item.packId === current.profileName && item.packageName === packageName)
     const source = receipt?.source === 'npm' ? 'npm' : receipt?.source === 'github' || plugin.repositoryFullName ? 'github' : 'local'
     const targetId = receipt?.targetId ?? `${packageName}:.`
     return {

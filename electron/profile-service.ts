@@ -546,7 +546,7 @@ export async function deleteProfile(options: ProfileServiceOptions, profileName:
   // to this one. The physical pnpm store is deliberately untouched.
   if (options.pluginReceiptsPath) {
     const receipts = await readPluginReceipts(options.pluginReceiptsPath).catch(() => [])
-    for (const receipt of receipts.filter(item => item.profileName === profileName)) {
+    for (const receipt of receipts.filter(item => item.packId === profileName)) {
       await removePluginReceipt(options.pluginReceiptsPath, profileName, receipt.packageName)
     }
   }
