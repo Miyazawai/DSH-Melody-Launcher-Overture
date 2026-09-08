@@ -47,7 +47,7 @@ export function createMainWindow(options: CreateWindowOptions): BrowserWindow {
     roundedCorners: true,
     hasShadow: true,
     icon: options.iconPath,
-    title: 'DSH-Melody-Launcher',
+    title: 'DSH-Melody-Launcher: Overture',
     show: false,
     webPreferences: {
       preload: options.preloadPath,

@@ -64,9 +64,9 @@ export function LauncherHome({
           <img className="home-brand-logo" src="/launcher-logo.png" alt="" width={112} height={112} draggable={false} />
           <h1 className="home-brand-name">
             <strong>DSH</strong>
-            <span>Melody Launcher</span>
+            <span>Overture</span>
           </h1>
-          <p className="home-brand-tagline">DeepSeek Harness 启动器</p>
+          <p className="home-brand-tagline">DeepSeek Harness 启动器 · 序曲</p>
         </div>
         <div className="home-brand-meta">
           <span className="home-brand-version">v{packageMetadata.version}</span>

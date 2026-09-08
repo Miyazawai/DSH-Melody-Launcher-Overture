@@ -18,7 +18,7 @@ interface CreateTrayOptions {
 
 export function createTray(options: CreateTrayOptions): TrayController {
   const tray = new Tray(options.iconPath)
-  tray.setToolTip('DSH 旋律启动器')
+  tray.setToolTip('DSH 旋律启动器：序曲')
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '显示主窗口', click: () => options.showMainWindow() },
     { type: 'separator' },
@@ -31,7 +31,7 @@ export function createTray(options: CreateTrayOptions): TrayController {
       if (tray.isDestroyed() || process.platform !== 'win32') return
       tray.displayBalloon({
         iconType: 'info',
-        title: 'DSH 旋律启动器',
+        title: 'DSH 旋律启动器：序曲',
         content: '程序仍在后台运行，右键托盘图标可退出。',
       })
     },
