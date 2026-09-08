@@ -38,8 +38,7 @@ import type {
   SkillInstallTarget,
 } from '../src/types'
 import { assertMeaningfulPackName, assertPackDshVersion, isValidPackDshVersion, manifestNameFromPackId, normalizePackDshVersion, packProfileName, parsePackManifest } from './pack-manifest'
-import { extractPackBodiesFromPath, extractPresetBodiesFromPath, findLauncherConfigInArchiveFromPath, findManifestInArchiveFromPath, inspectPackZipFromPath } from './pack-zip'
-import { packLauncherConfig, parseLauncherConfig } from './pack-launcher-config'
+import { extractPackBodiesFromPath, extractPresetBodiesFromPath, findManifestInArchiveFromPath, inspectPackZipFromPath } from './pack-zip'
 import { validateFullArchive } from './profile-repository-import'
 import { cleanPackNameHint, extractRawPluginBodiesFromPath, extractRawPresetSourcesFromPath, extractRawSkillSourcesFromPath, scanRawPackZipFromPath, type ExtractByteBudget } from './pack-scan'
 import { buildPackExportToFile } from './pack-export'
@@ -316,6 +315,17 @@ export function createPackManager(options: PackManagerOptions): PackManager {
    * 派生后的 dshHome 即指向新包目录，后续所有安装动作（npm add、技能/预设落盘、快照）
    * 自然写进新包，整条既有安装管线零改动。覆盖导入时沿用既有记录的 homePath。
    */
+  /**
+   * 同名导入冲突时 resolveImportedProfileId 会给 packId 追加 -N 后缀；
+   * 显示名跟随改成「原名 (N)」，避免列表里出现两个一模一样的名字。
+   */
+  function importPackDisplayName(packId: string, baseName: string): string {
+    const base = packProfileName(baseName)
+    if (packId === base) return baseName
+    const suffix = packId.slice(base.length + 1)
+    return /^\d+$/.test(suffix) ? `${baseName} (${suffix})` : baseName
+  }
+
   async function provisionPackHome(params: {
     packId: string
     existing: PackRecord[]
@@ -979,7 +989,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
             dshHome = await provisionPackHome({
               packId,
               existing,
-              meta: { name: manifest.name, description: manifest.description, version: manifest.version, dshVersion: manifest.dshVersion, source: 'manifest' },
+              meta: { name: importPackDisplayName(packId, importOptions?.name ?? manifest.name), description: manifest.description, version: manifest.version, dshVersion: manifest.dshVersion, source: 'manifest' },
             })
             await ensureUnifiedProfile(dshHome, profileName, settings.profileName, { description: manifest.description, dshVersion: manifest.dshVersion, source: 'yaml' })
           }
@@ -1024,7 +1034,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           const result = buildInstallResult(packId, installed, failures)
           const record: PackRecord = {
             id: packId,
-            name: manifest.name,
+            name: importPackDisplayName(packId, importOptions?.name ?? manifest.name),
             description: manifest.description,
             version: manifest.version,
             dshVersion: manifest.dshVersion,
@@ -1065,7 +1075,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
             dshHome = await provisionPackHome({
               packId,
               existing,
-              meta: { name: packName, description: `非标准整合包：${packName}`, version: '1.0.0', dshVersion, source: 'raw' },
+              meta: { name: importPackDisplayName(packId, packName), description: `非标准整合包：${packName}`, version: '1.0.0', dshVersion, source: 'raw' },
             })
             await ensureUnifiedProfile(dshHome, profileName, settings.profileName, { description: `非标准整合包：${packName}`, dshVersion, source: 'zip' })
           }
@@ -1168,7 +1178,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
 
           const record: PackRecord = {
             id: packId,
-            name: packName,
+            name: importPackDisplayName(packId, packName),
             description: `非标准整合包：扫描到 ${scan.plugins.length} 个插件、${scan.skills.length} 个技能${scan.presets.length > 0 ? `、${scan.presets.length} 个预设` : ''}。`,
             version: '1.0.0',
             dshVersion,
@@ -1208,7 +1218,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           dshHome = await provisionPackHome({
             packId,
             existing,
-            meta: { name: manifest.name, description: manifest.description, version: manifest.version, dshVersion: manifest.dshVersion, source: inspection.hasBodies ? 'zip' : 'manifest' },
+            meta: { name: importPackDisplayName(packId, manifest.name), description: manifest.description, version: manifest.version, dshVersion: manifest.dshVersion, source: inspection.hasBodies ? 'zip' : 'manifest' },
           })
           await ensureUnifiedProfile(dshHome, profileName, settings.profileName, { description: manifest.description, dshVersion: manifest.dshVersion, source: 'zip' })
         }
@@ -1408,7 +1418,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         const installedApplicationIds = installed.filter(name => applicationIds.has(name))
         const record: PackRecord = {
           id: packId,
-          name: manifest.name,
+          name: importPackDisplayName(packId, manifest.name),
           description: manifest.description,
           version: manifest.version,
           dshVersion: manifest.dshVersion,
@@ -1438,20 +1448,6 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         }
         await upsertPackRecord(options.registryPath, record)
         await writeRecordManifest(record, manifest)
-        // 携带 launcher-config.yaml 时，把可迁移的启动器配置并入当前设置（不含凭据/路径/Profile）。
-        try {
-          const launcherConfigText = await findLauncherConfigInArchiveFromPath(filePath)
-          if (launcherConfigText) {
-            const parsedConfig = parseLauncherConfig(launcherConfigText)
-            if (Object.keys(parsedConfig).length > 0) {
-              const currentSettings = await options.readSettings()
-              await options.saveSettings({ ...currentSettings, ...parsedConfig })
-            }
-          }
-        } catch (error) {
-          // 配置损坏不影响主导入，仅记录不中断。
-          log('error', `整合包配置解析失败，已忽略：${asErrorMessage(error)}`)
-        }
         const extraParts: string[] = []
         if (installedPresetNames.length > 0) extraParts.push(`${installedPresetNames.length} 个预设`)
         if (installedSkillNames.length > 0) extraParts.push(`${installedSkillNames.length} 个技能`)
@@ -1587,7 +1583,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           // entries remain reinstallable from the registry and therefore do
           // not inflate the lightweight archive.
           : manifest.plugins.filter(entry => entry.source === 'local' || (!entry.repository && entry.source !== 'npm')).map(entry => entry.packageName)
-        const { missing } = await buildPackExportToFile(packProfileDir, manifest, bodyNames, zipPath, presetDirs, packLauncherConfig(settings))
+        const { missing } = await buildPackExportToFile(packProfileDir, manifest, bodyNames, zipPath, presetDirs)
         if (missing.length > 0) {
           const message = `导出 Profile「${packId}」失败：以下插件缺少本地本体（${missing.join('、')}），无法生成${exportMode === 'full' ? '全量' : '离线'}包。`
           log('error', message)
