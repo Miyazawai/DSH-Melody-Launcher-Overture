@@ -265,7 +265,6 @@ export function buildPackZip(manifest: PackManifest, bodyDirs: Map<string, strin
   const zip = new AdmZip()
   const manifestBuffer = Buffer.from(serializePackManifest(manifest), 'utf8')
   zip.addFile(PACK_MANIFEST_FILENAME, manifestBuffer)
-  zip.addFile(PROFILE_MANIFEST_FILENAME, manifestBuffer)
   if (launcherConfig) zip.addFile(LAUNCHER_CONFIG_FILENAME, Buffer.from(launcherConfig, 'utf8'))
   for (const [packageName, directory] of bodyDirs) {
     const base = `${PLUGIN_BODIES_PREFIX}${packageName}`
@@ -680,7 +679,6 @@ export async function buildPackZipToFile(
   const zip = new yazl.ZipFile()
   const manifestBuffer = Buffer.from(serializePackManifest(manifest), 'utf8')
   zip.addBuffer(manifestBuffer, PACK_MANIFEST_FILENAME)
-  zip.addBuffer(manifestBuffer, PROFILE_MANIFEST_FILENAME)
   if (launcherConfig) zip.addBuffer(Buffer.from(launcherConfig, 'utf8'), LAUNCHER_CONFIG_FILENAME)
   for (const [packageName, directory] of bodyDirs) {
     const base = `${PLUGIN_BODIES_PREFIX}${packageName}`

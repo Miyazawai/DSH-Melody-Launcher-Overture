@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC, IPC_EVENTS } from '../src/constants'
 import type {
   AiInstallEvent,
@@ -145,6 +145,7 @@ const api: LauncherApi = {
   importPack: (path, items, options) => ipcRenderer.invoke(IPC.packsImport, path, items, options?.name),
   exportPack: packId => ipcRenderer.invoke(IPC.packsExport, packId),
   pickPackFile: () => ipcRenderer.invoke(IPC.packsPickFile),
+  getDroppedFilePath: (file: File) => webUtils.getPathForFile(file),
   activatePack: packId => ipcRenderer.invoke(IPC.packsActivate, packId),
   renamePack: (packId, name) => ipcRenderer.invoke(IPC.packsRename, { packId, name }),
   createBlankPack: request => ipcRenderer.invoke(IPC.packsCreateBlank, request),

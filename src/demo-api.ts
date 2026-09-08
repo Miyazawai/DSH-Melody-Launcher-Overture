@@ -1660,6 +1660,7 @@ export const demoApi: LauncherApi = {
     return pack ? `C:\\Users\\demo\\Desktop\\${pack.name}.zip` : null
   },
   pickPackFile: async () => 'C:\\Users\\demo\\Downloads\\example-pack.zip',
+  getDroppedFilePath: file => (file as File & { path?: string }).path ?? 'C:\\Users\\demo\\Downloads\\example-pack.zip',
   activatePack: async packId => {
     const pack = demoPacks.find(item => item.id === packId)
     if (!pack) throw new Error(`未找到整合包：${packId}`)

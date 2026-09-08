@@ -7909,6 +7909,8 @@ input:focus-visible {
   padding: 18px 20px;
   box-shadow: var(--chrome-shadow);
 }
+.settings-panel.is-dragging-zip { outline: 2px dashed var(--accent); outline-offset: -4px; background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
+.settings-zip-drop-hint { margin: 8px 16px; padding: 10px 12px; border-radius: 8px; background: var(--accent); color: var(--topbar-ink); font-weight: 600; text-align: center; }
 
 .settings-panel-heading {
   display: flex;

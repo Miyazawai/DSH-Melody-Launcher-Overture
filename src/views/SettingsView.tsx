@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLauncherApi } from '../api/client'
+import { resolveLauncherApi } from '../api/client'
 import { useLauncherStore } from '../hooks/use-launcher-store'
 import { formatBytes } from '../lib/format'
 import { SkeletonStrip } from '../components/Skeleton'
@@ -80,6 +81,7 @@ interface SettingsPanelsProps {
   installProgress: InstallProgress | null
   onRefresh: () => void
   onImportPack: () => void
+  onImportPackPath: (path: string) => void
   onInstallDshVersion: (version: string) => Promise<boolean>
   onRemoveDshVersion: (version: string) => Promise<boolean>
   onTogglePlugin: (plugin: ManagedPlugin, enabled: boolean) => Promise<boolean>
@@ -115,6 +117,7 @@ export function SettingsPanels({
   installProgress,
   onRefresh,
   onImportPack,
+  onImportPackPath,
   onInstallDshVersion,
   onRemoveDshVersion,
   onTogglePlugin,
@@ -201,6 +204,7 @@ export function SettingsPanels({
               dshInstalledVersions={(runtimeEnvironment?.dshInstalled ?? []).map(item => item.version)}
               onRefresh={onRefresh}
               onImport={onImportPack}
+              onImportPath={onImportPackPath}
               onCreateBlank={async (name, dshVersion) => {
                 const created = await onCreateBlankPack(name, dshVersion)
                 return created !== undefined
@@ -864,6 +868,7 @@ function SettingsPacks({
   dshInstalledVersions,
   onRefresh,
   onImport,
+  onImportPath,
   onCreateBlank,
   onActivate,
   onRename,
@@ -878,6 +883,8 @@ function SettingsPacks({
   dshInstalledVersions: string[]
   onRefresh: () => void
   onImport: () => void
+  /** 直接丢一个 .zip 路径进来就开始导入（拖拽 .zip 进入本面板时使用）。 */
+  onImportPath?: (path: string) => void
   onCreateBlank: (name: string, dshVersion: string | null) => Promise<boolean>
   onActivate: (packId: string) => void
   onRename: (packId: string, name: string) => Promise<boolean>
@@ -891,7 +898,42 @@ function SettingsPacks({
   const [newName, setNewName] = useState('')
   const [newVersion, setNewVersion] = useState<string>('')
   const [removing, setRemoving] = useState<string | null>(null)
+  const [droppingZip, setDroppingZip] = useState(false)
+  const dropCounter = useRef(0)
   const createNameInputRef = useRef<HTMLInputElement>(null)
+
+  // 拖拽 .zip 整合包到本面板直接导入：被遮罩的拖入状态计数，避免子元素 dragenter/leave 闪烁。
+  const onPanelDragEnter = (event: React.DragEvent) => {
+    if (!event.dataTransfer?.types.includes('Files')) return
+    event.preventDefault()
+    dropCounter.current += 1
+    if (dropCounter.current === 1) setDroppingZip(true)
+  }
+  const onPanelDragLeave = (event: React.DragEvent) => {
+    if (!event.dataTransfer?.types.includes('Files')) return
+    event.preventDefault()
+    dropCounter.current = Math.max(0, dropCounter.current - 1)
+    if (dropCounter.current === 0) setDroppingZip(false)
+  }
+  const onPanelDragOver = (event: React.DragEvent) => {
+    if (!event.dataTransfer?.types.includes('Files')) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+  const onPanelDrop = (event: React.DragEvent) => {
+    if (!event.dataTransfer?.types.includes('Files')) return
+    event.preventDefault()
+    dropCounter.current = 0
+    setDroppingZip(false)
+    if (!onImportPath) return
+    const files = Array.from(event.dataTransfer.files).filter(file => file.name.toLowerCase().endsWith('.zip'))
+    if (files.length === 0) return
+    const api = resolveLauncherApi()
+    for (const file of files) {
+      const filePath = api.getDroppedFilePath(file)
+      onImportPath(filePath)
+    }
+  }
 
   const openCreateForm = () => {
     setCreating(true)
@@ -919,7 +961,13 @@ function SettingsPacks({
   }
 
   return (
-    <div className="settings-panel">
+    <div
+      className={`settings-panel${droppingZip ? ' is-dragging-zip' : ''}`}
+      onDragEnter={onPanelDragEnter}
+      onDragLeave={onPanelDragLeave}
+      onDragOver={onPanelDragOver}
+      onDrop={onPanelDrop}
+    >
       <div className="settings-panel-heading">
         <div className="settings-panel-title"><Package size={17} /><span>整合包</span>{packs.length > 0 && <span className="settings-count">{packs.length}</span>}</div>
         <div className="settings-market-heading-actions">
@@ -928,6 +976,9 @@ function SettingsPacks({
           <button type="button" className="primary-command" onClick={onImport} disabled={busy}><Download size={15} />导入整合包</button>
         </div>
       </div>
+      {droppingZip && (
+        <div className="settings-zip-drop-hint">松开鼠标，把 .zip 整合包安装进来</div>
+      )}
       <div className="settings-hint">每个整合包是一套真隔离环境（DSH 版本 + 插件 + 技能 + 预设 + 配置 + 会话），互不串扰；整合包只由新建或导入产生，缺少的 DSH 版本会自动下载。</div>
       {creating && (
         <div className="settings-pack-create">
@@ -1023,7 +1074,7 @@ function SettingsPacks({
                 ) : (
                   <span className="settings-pack-title-line">
                     <strong>{pack.name}</strong>
-                    <span className="settings-pack-badge">v{pack.version}</span>
+                    <span className="settings-pack-badge">DSH {pack.dshVersion ?? '未绑定'}</span>
                     <button type="button" className="icon-button settings-pack-edit" onClick={() => setRenaming({ id: pack.id, value: pack.name })} title="重命名" aria-label="重命名"><Pencil size={13} /></button>
                   </span>
                 )}

@@ -1210,6 +1210,8 @@ export interface LauncherApi {
   importPack(path: string, items?: string[], options?: PackImportOptions): Promise<PackInstallResult>
   exportPack(packId: string): Promise<string | null>
   pickPackFile(): Promise<string | null>
+  /** 把拖拽进入窗口的 .zip File 解析为磁盘绝对路径（preload 通过 webUtils 还原）。 */
+  getDroppedFilePath(file: File): string
   activatePack(packId: string): Promise<AppSettings>
   renamePack(packId: string, name: string): Promise<PackStatus>
   createBlankPack(request: { name: string; dshVersion: string | null }): Promise<PackStatus>
