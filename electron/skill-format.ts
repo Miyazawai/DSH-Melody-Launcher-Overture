@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rename } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
 import path from 'node:path'
 import { parse } from 'yaml'
@@ -147,5 +147,14 @@ export async function toggleInstalledSkill(dshHome: string, name: string, enable
     }
     throw error
   }
+  return readInstalledSkills(dshHome)
+}
+
+/** 彻底删除一个已安装 Skill（技能包目录或单文件；停用中的也一并删掉）。 */
+export async function uninstallInstalledSkill(dshHome: string, name: string): Promise<InstalledSkill[]> {
+  const current = await readInstalledSkills(dshHome)
+  const skill = current.find(item => item.name === name)
+  if (!skill) throw new Error(`未找到本地 Skill：${name}`)
+  await rm(skill.path, { recursive: true, force: true })
   return readInstalledSkills(dshHome)
 }

@@ -411,7 +411,8 @@ describe('pack E2E · 标准包生命周期（真隔离）', () => {
     const reimportedHome = await packHome(env, 'pack-alpha-pack')
     expect((await sim.readProfile(reimportedHome, 'pack-alpha-pack')).activeBundles).toContain('alpha')
     expect(store.current.activePackId).toBe('pack-alpha-pack')
-  })
+    // 全流程含快照导出/导入，跑满默认 5s 在并行负载下会超时。
+  }, 60_000)
 })
 
 // ===========================================================================

@@ -106,6 +106,7 @@ export const IPC = {
   skillsInstall: 'skills:install',
   skillsReadInstalled: 'skills:read-installed',
   skillsToggle: 'skills:toggle',
+  skillsUninstall: 'skills:uninstall',
   applicationsInstall: 'applications:install',
   applicationsReadInstalled: 'applications:read-installed',
   applicationsToggle: 'applications:toggle',

@@ -1223,6 +1223,10 @@ export const demoApi: LauncherApi = {
     demoInstalledSkills = demoInstalledSkills.map(skill => skill.name === name ? { ...skill, enabled } : skill)
     return demoInstalledSkills
   },
+  uninstallSkill: async name => {
+    demoInstalledSkills = demoInstalledSkills.filter(skill => skill.name !== name)
+    return demoInstalledSkills
+  },
   presetsBuiltin: async () => ([
     { name: 'standard', displayName: '标准模式', description: '功能完整的编码 Agent，支持文件编辑、Shell、检索、Skills、计划与子代理。', order: 1 },
     { name: 'code', displayName: 'PTC 模式', description: '具备标准模式全部能力，并通过 Code Mode SDK 呈现工具。', order: 2 },

@@ -611,6 +611,13 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     }
     return installer.toggleSkill(payload.name, Boolean(payload.enabled))
   })
+  ipcMain.handle(IPC.skillsUninstall, async (_event, name: string) => {
+    assertProfileMutationAvailable()
+    if (typeof name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+      throw new Error('Skill 名称无效。')
+    }
+    return installer.uninstallSkill(name)
+  })
 
   ipcMain.handle(IPC.applicationsReadInstalled, () => applicationAddons.list())
   ipcMain.handle(IPC.applicationsInstall, async (_event, request: ApplicationInstallRequest) => {

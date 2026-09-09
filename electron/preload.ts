@@ -94,6 +94,7 @@ const api: LauncherApi = {
   installSkill: request => ipcRenderer.invoke(IPC.skillsInstall, request),
   readInstalledSkills: () => ipcRenderer.invoke(IPC.skillsReadInstalled),
   toggleSkill: (name, enabled) => ipcRenderer.invoke(IPC.skillsToggle, { name, enabled }),
+  uninstallSkill: name => ipcRenderer.invoke(IPC.skillsUninstall, name),
   installApplication: request => ipcRenderer.invoke(IPC.applicationsInstall, request),
   readInstalledApplications: () => ipcRenderer.invoke(IPC.applicationsReadInstalled),
   toggleApplication: (id, enabled) => ipcRenderer.invoke(IPC.applicationsToggle, { id, enabled }),

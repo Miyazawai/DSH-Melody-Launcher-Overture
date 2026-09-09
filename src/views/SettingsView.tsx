@@ -559,8 +559,9 @@ function SettingsSkillsTab({
               subtitle={skill.description || skill.path}
               enabled={skill.enabled}
               busy={busy}
-              working={store.busy === skill.name}
+              working={store.busy === `skill-remove:${skill.name}`}
               onToggle={enabled => onToggleSkill(skill, enabled)}
+              onRemove={() => { void store.uninstallSkill(skill) }}
               onOpenFolder={() => onOpenPath(skill.path)}
             />
           ))}
@@ -669,6 +670,7 @@ const SkillMarketCard = memo(function SkillMarketCard({
   isBusy,
   onInstall,
   onToggle,
+  onUninstall,
   onOpenRepo,
 }: {
   entry: SkillMarketEntry
@@ -676,6 +678,7 @@ const SkillMarketCard = memo(function SkillMarketCard({
   isBusy: boolean
   onInstall: (entry: SkillMarketEntry) => void
   onToggle: (name: string, enabled: boolean) => void
+  onUninstall: (name: string) => void
   onOpenRepo: (url: string) => void
 }) {
   const repositoryUrl = entry.target?.sourceRepository ?? entry.source.repository
@@ -701,10 +704,15 @@ const SkillMarketCard = memo(function SkillMarketCard({
         <button type="button" className="dsh-market-link" onClick={() => onOpenRepo(`https://github.com/${repositoryUrl}`)}><ExternalLink size={12} />仓库</button>
         <span className="dsh-market-grow" />
         {entry.installed ? (
-          <label className="switch" title={entry.enabled ? '停用技能' : '启用技能'}>
-            <input type="checkbox" checked={entry.enabled} disabled={busy} onChange={event => onToggle(entry.name, event.target.checked)} />
-            <span />
-          </label>
+          <>
+            <label className="switch" title={entry.enabled ? '停用技能' : '启用技能'}>
+              <input type="checkbox" checked={entry.enabled} disabled={busy} onChange={event => onToggle(entry.name, event.target.checked)} />
+              <span />
+            </label>
+            <button type="button" className="danger-button dsh-market-action" disabled={busy || isBusy} onClick={() => onUninstall(entry.name)}>
+              {isBusy ? <LoaderCircle size={13} className="spin" /> : <Trash2 size={13} />}卸载
+            </button>
+          </>
         ) : (
           <button type="button" className="primary-command" disabled={busy || isBusy} onClick={() => onInstall(entry)}>
             {isBusy ? <LoaderCircle size={13} className="spin" /> : <Download size={13} />}安装
@@ -807,6 +815,12 @@ function SkillMarketPanel({
   const handleToggle = useCallback((name: string, enabled: boolean) => {
     void api.toggleSkill(name, enabled).then(onRefresh)
   }, [api, onRefresh])
+  const store = useLauncherStore()
+  const handleUninstall = useCallback((name: string) => {
+    const skill = installedSkills.find(item => item.name === name)
+    if (!skill) return
+    void store.uninstallSkill(skill).then(ok => { if (ok) onRefresh() })
+  }, [installedSkills, onRefresh, store])
   const handleOpenRepo = useCallback((url: string) => { void api.openExternal(url) }, [api])
 
   return (
@@ -862,9 +876,10 @@ function SkillMarketPanel({
             key={entry.key}
             entry={entry}
             busy={busy}
-            isBusy={busyName === entry.name}
+            isBusy={busyName === entry.name || store.busy === `skill-remove:${entry.name}`}
             onInstall={handleInstall}
             onToggle={handleToggle}
+            onUninstall={handleUninstall}
             onOpenRepo={handleOpenRepo}
           />
         ))}

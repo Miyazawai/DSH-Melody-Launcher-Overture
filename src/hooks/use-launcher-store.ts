@@ -669,6 +669,15 @@ export function useLauncherStore() {
     if (next) setInstalledSkills(next)
   }, [api, run])
 
+  const uninstallSkill = useCallback(async (skill: InstalledSkill): Promise<boolean> => {
+    const next = await run(`skill-remove:${skill.name}`, () => api.uninstallSkill(skill.name), {
+      success: `Skill「${skill.name}」已卸载。`,
+    })
+    if (!next) return false
+    setInstalledSkills(next)
+    return true
+  }, [api, run])
+
   const saveCustomApi = useCallback(async (input: CustomApiProviderInput): Promise<boolean> => {
     const providers = await run(BUSY.credential, () => api.saveCustomApiProvider(input), {
       success: `${input.displayName.trim() || input.route} 已保存。`,
@@ -1106,6 +1115,7 @@ export function useLauncherStore() {
     installRecommendedWebUi,
     markRecommendedWebUiPrompted,
     toggleSkill,
+    uninstallSkill,
     toggleApplication,
     uninstallApplication,
     togglePreset,

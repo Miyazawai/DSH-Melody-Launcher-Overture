@@ -45,13 +45,13 @@ import { analyzeRepository } from './plugin-catalog'
 import { prepareSubdirectoryPlugin, type PluginSourceProgress } from './plugin-source'
 import { readPluginReceipts, recordPluginInstall, removePluginReceipt } from './plugin-receipts'
 import { readPresetReceipts, recordPresetInstall } from './preset-receipts'
-import { readSkillReceipts, recordSkillInstall } from './skill-receipts'
+import { readSkillReceipts, recordSkillInstall, removeSkillReceipt } from './skill-receipts'
 import { isSafePackageName, isSafeProfileName, readProfile } from './profile'
 import { withExecutableDirectoryOnPath } from './process'
 import { buildNetworkEnvironment, NPM_OFFICIAL_REGISTRY } from './proxy'
 import { analyzeSkillRepository, analyzeSkillRepositoryFromArchive } from './skill-catalog'
 import { SKILL_MARKET_CACHE_TTL_MS, createSkillMarketCacheStore, lookupSkillMarketCache } from './skill-market-cache'
-import { readInstalledSkills as readLocalSkills, toggleInstalledSkill } from './skill-format'
+import { readInstalledSkills as readLocalSkills, toggleInstalledSkill, uninstallInstalledSkill } from './skill-format'
 import { installPresetFromRepository, readInstalledPresets as readLocalPresets, toggleInstalledPreset, uninstallInstalledPreset } from './preset-install'
 import { downloadReleaseAsset } from './release-download'
 import { installSkillFromRepository } from './skill-install'
@@ -195,6 +195,8 @@ export interface Installer {
   readInstalledSkills(): Promise<InstalledSkill[]>
   /** 启用或停用一个本地 Skill。 */
   toggleSkill(name: string, enabled: boolean): Promise<InstalledSkill[]>
+  /** 彻底卸载一个本地 Skill（删文件 + 清安装凭据）。 */
+  uninstallSkill(name: string): Promise<InstalledSkill[]>
   /** 安装一个 agent-preset（meta-repo 子模块里的预设目录）。 */
   installPreset(request: PresetInstallRequest): Promise<PresetInstallResult>
   /** 读取已安装的 agent-preset 列表。 */
@@ -946,6 +948,13 @@ export function createInstaller(options: InstallerOptions): Installer {
     async toggleSkill(name: string, enabled: boolean): Promise<InstalledSkill[]> {
       const settings = await options.readSettings()
       return toggleInstalledSkill(settings.dshHome, name, Boolean(enabled))
+    },
+
+    async uninstallSkill(name: string): Promise<InstalledSkill[]> {
+      const settings = await options.readSettings()
+      const remaining = await uninstallInstalledSkill(settings.dshHome, name)
+      await removeSkillReceipt(options.skillReceiptsPath, name).catch(() => undefined)
+      return remaining
     },
 
     async listInstalledRepositories(): Promise<string[]> {

@@ -1166,6 +1166,8 @@ export interface LauncherApi {
   skillMarketInstallByName(request: { sourceRepository: string; skillId: string }): Promise<SkillInstallResult>
   readInstalledSkills(): Promise<InstalledSkill[]>
   toggleSkill(name: string, enabled: boolean): Promise<InstalledSkill[]>
+  /** 彻底卸载一个本地 Skill（删文件 + 清安装凭据）。 */
+  uninstallSkill(name: string): Promise<InstalledSkill[]>
   installApplication(request: ApplicationInstallRequest): Promise<ApplicationInstallResult>
   readInstalledApplications(): Promise<InstalledApplicationAddon[]>
   toggleApplication(id: string, enabled: boolean): Promise<LinkedComponentToggleResult>

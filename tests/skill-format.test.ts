@@ -1,8 +1,9 @@
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { parseSkillDocument, readInstalledSkills, toggleInstalledSkill } from '../electron/skill-format'
+import { parseSkillDocument, readInstalledSkills, toggleInstalledSkill, uninstallInstalledSkill } from '../electron/skill-format'
 
 const temporaryRoots: string[] = []
 
@@ -34,8 +35,7 @@ user-invocable: no
     expect(parseSkillDocument('---\nname: valid-name\ndescription: ok\nuserInvocable: true\n---\n')).toBeNull()
   })
 
-  it('discovers only valid one-level local skills', async () => {
-    const dshHome = await mkdtemp(path.join(os.tmpdir(), 'dsh-skill-format-'))
+  it('discovers only valid one-level local skills', async () => {    const dshHome = await mkdtemp(path.join(os.tmpdir(), 'dsh-skill-format-'))
     temporaryRoots.push(dshHome)
     await mkdir(path.join(dshHome, 'skills', 'bundle-skill'), { recursive: true })
     await writeFile(path.join(dshHome, 'skills', 'bundle-skill', 'SKILL.md'), '---\nname: bundle-skill\ndescription: Bundled instructions.\n---\nBody\n')
@@ -61,5 +61,25 @@ user-invocable: no
     expect(disabled[0].path).toContain(`${path.sep}.disabled${path.sep}`)
     const enabled = await toggleInstalledSkill(dshHome, 'toggle-skill', true)
     expect(enabled).toMatchObject([{ name: 'toggle-skill', enabled: true }])
+  })
+
+  it('uninstalls a skill for good, including a disabled one', async () => {
+    const dshHome = await mkdtemp(path.join(os.tmpdir(), 'dsh-skill-uninstall-'))
+    temporaryRoots.push(dshHome)
+    await mkdir(path.join(dshHome, 'skills', 'bundle-skill'), { recursive: true })
+    await writeFile(path.join(dshHome, 'skills', 'bundle-skill', 'SKILL.md'), '---\nname: bundle-skill\ndescription: Bundled.\n---\nBody\n')
+    await writeFile(path.join(dshHome, 'skills', 'flat-skill.md'), '---\nname: flat-skill\ndescription: Flat.\n---\nBody\n')
+
+    const afterBundle = await uninstallInstalledSkill(dshHome, 'bundle-skill')
+    expect(afterBundle.map(skill => skill.name)).toEqual(['flat-skill'])
+    expect(existsSync(path.join(dshHome, 'skills', 'bundle-skill'))).toBe(false)
+
+    // 停用中的技能（文件在 .disabled 下）也能删干净。
+    await toggleInstalledSkill(dshHome, 'flat-skill', false)
+    const afterDisabled = await uninstallInstalledSkill(dshHome, 'flat-skill')
+    expect(afterDisabled).toEqual([])
+    expect(existsSync(path.join(dshHome, 'skills', '.disabled', 'flat-skill.md'))).toBe(false)
+
+    await expect(uninstallInstalledSkill(dshHome, 'ghost-skill')).rejects.toThrow('未找到本地 Skill')
   })
 })
