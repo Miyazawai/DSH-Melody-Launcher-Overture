@@ -6,12 +6,13 @@
 
 **A Windows desktop launcher for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — the C-end branch of [rirko/dsh-melody-launcher](https://github.com/rirko/dsh-melody-launcher)**
 
-Built around **modpacks**: every modpack is a truly isolated environment — its own DSH version, plugins, skills, presets, config and sessions. Download one executable and go; no Node.js required up front.
+Download one executable: the first run auto-imports the **official default modpack** — DSH itself, a full web UI, and Office document skills. Hit Launch and you can chat, build slide decks and write reports. Nothing to preinstall.
 
 [![Release](https://img.shields.io/github/v/release/Miyazawai/DSH-Melody-Launcher-Overture?style=for-the-badge&logo=github&color=6C7BFF)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases/latest)
 [![Build](https://img.shields.io/github/actions/workflow/status/Miyazawai/DSH-Melody-Launcher-Overture/build.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/actions/workflows/build.yml)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases)
 [![Upstream](https://img.shields.io/badge/upstream-rirko%2Fdsh--melody--launcher-6C7BFF?style=for-the-badge&logo=github&logoColor=white)](https://github.com/rirko/dsh-melody-launcher)
+[![Tests](https://img.shields.io/badge/tests-728%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
 
 **[简体中文](README.md) · English**
 
@@ -20,32 +21,42 @@ Built around **modpacks**: every modpack is a truly isolated environment — its
 ---
 
 > [!NOTE]
-> **Overture** is the C-end ("暴力整合包模式" / modpack-first) line of [rirko/dsh-melody-launcher](https://github.com/rirko/dsh-melody-launcher). The upstream repo hosts the mainline; this branch focuses on the first-km experience for individual players: zero-dependency onboarding, per-pack isolation, and one-click launch. See the [Chinese README](README.md) for the full documentation.
+> **Overture** is the C-end ("modpack-first") line of [rirko/dsh-melody-launcher](https://github.com/rirko/dsh-melody-launcher). The upstream repo hosts the mainline; this branch focuses on the first-km experience for individual players: zero-dependency onboarding, per-pack isolation, whole-pack sharing. See the [Chinese README](README.md) for the full documentation.
 
-## Highlights
+## What's new in v0.1.1
 
-- **Modpacks = real isolation** — each pack gets a derived home directory; DSH version, plugins, skills, presets and sessions never leak across packs. Create / import / switch / export with live counters.
-- **Zero-dependency onboarding** — the launcher downloads DSH, a portable Node.js runtime (SHA-256 verified, resumable) and a private pnpm automatically. Nothing to preinstall.
-- **Curated markets** — DSH Market (3,300+ featured plugins) and a Skill Market (1,900+ skills), with strict `SKILL.md` validation and enable/disable that never deletes files.
-- **One-click launch** — starts `dsh --profile <pack> --no-open --port N`, opens the browser when ready, and reports exit code / stderr as a toast if DSH crashes.
-- **AI Daily** — the home page aggregates the day's AI news into all sections, scrollable in place.
+- **Official default modpack** — auto-fetched and imported on first run: DSH + full web UI + Office document skills (Word / Excel / PowerPoint) + a Chinese anti-AI-slop writing skill. Deletable, and restorable anytime with one click.
+- **Snapshot export / import** — a modpack zips up whole (plugin bodies, dependencies, skills, config included). Personal data (API keys, sessions, usage) is stripped and absolute paths rewritten before shipping. Your friend imports the zip and it just runs — no network reinstall.
+- **Office skills powered by [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)** — the engine binary travels inside the pack, so "turn this quarter's data into a deck" produces an editable `.pptx` out of the box.
+- **Split launch button** — while the service runs, the home button splits: stop on the left, reopen the web page on the right.
+- **Atomic pack deletion** — deleting a pack whose files are still held by a running DSH now fails as a whole instead of half-wiping the environment.
 
 ## Screenshots
 
-| Home | DSH Versions |
+| Home | Running (split button) |
 | --- | --- |
-| ![Home](docs/screenshots/shot-01-home.png) | ![Versions](docs/screenshots/shot-02-versions.png) |
-| **DSH Market** | **Skill Market** |
-| ![DSH Market](docs/screenshots/shot-07-dsh-market.png) | ![Skill Market](docs/screenshots/shot-08-skill-market.png) |
-| **Modpacks** | **New Modpack** |
-| ![Modpacks](docs/screenshots/shot-06-packs.png) | ![New Modpack](docs/screenshots/shot-09-new-pack.png) |
+| ![Home](docs/screenshots/shot-01-home.png) | ![Running](docs/screenshots/shot-09-running-split.png) |
+| **Modpacks** (official badge + live counters) | **Delete confirmation** (arm-then-confirm, never a dialog) |
+| ![Modpacks](docs/screenshots/shot-02-packs.png) | ![Delete arm](docs/screenshots/shot-03-delete-arm.png) |
+| **Skills** (Office suite included, uninstall built in) | **Skill Market** (1,900+ skills) |
+| ![Skills](docs/screenshots/shot-05-skills-installed.png) | ![Skill Market](docs/screenshots/shot-04-skill-market.png) |
+| **Plugins** (core bundles protected) | **DSH Market** (3,400+ featured plugins) |
+| ![Plugins](docs/screenshots/shot-06-plugins.png) | ![DSH Market](docs/screenshots/shot-08-dsh-market.png) |
+
+## Highlights
+
+- **Modpacks = real isolation** — each pack gets a derived home directory; DSH version, plugins, skills, presets and sessions never leak across packs.
+- **Zero-dependency onboarding** — the launcher downloads DSH, a portable Node.js runtime (SHA-256 verified, resumable) and a private pnpm automatically. GitHub traffic goes through a mirror-first candidate chain for mainland-China networks.
+- **Curated markets** — DSH Market (3,400+ featured plugins) and a Skill Market (1,900+ skills), with strict `SKILL.md` validation and enable/disable that never deletes files.
+- **One-click launch** — starts `dsh --profile <pack> --no-open --port N`, opens the browser when ready; crashes surface as a dialog with exit code, stderr and a copyable "fix prompt".
+- **AI Daily** — the home page aggregates the day's AI news into all sections, scrollable in place.
 
 ## Getting started
 
 1. Grab `DSH-Launcher-*-portable.exe` from [**Releases**](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases). The binary is not code-signed yet, so SmartScreen may warn — verify it comes from this repo, then choose "More info → Run anyway".
-2. Click **Install DSH** on the home page (the launcher fetches everything it needs).
-3. Go to the **Modpacks** tab → **New Modpack** → name it and pick a DSH version → **Create**.
-4. Back on the home page, hit **Launch DSH**. Fill in your DeepSeek API key when prompted (stored with 0600 permissions).
+2. Wait for the first-run import of the official modpack (~128 MB, progress shown on the Modpacks page).
+3. Add your DeepSeek (or other) API key in **Settings** — keys are stored per-pack and never leave your machine in exports.
+4. Hit **Launch DSH**. Try: *"create a pptx titled Quarterly Report with one bullet slide"* — the Office skills handle it.
 
 ## Build from source
 
@@ -57,9 +68,28 @@ cd DSH-Melody-Launcher-Overture
 npm install
 npm run dev           # dev mode
 npm test              # Vitest
+npm run build         # typecheck + bundle
 npm run package:win   # portable exe
 ```
 
+> Releasing: push a `v*` tag to trigger CI (build + attach the portable exe to the Release), and upload the renamed pack export `official-pack-v<version>.zip` to the same Release — the launcher's official-pack mechanism resolves it by the `OFFICIAL_PACK_VERSION` constant.
+
+## Data locations
+
+| What | Where |
+| --- | --- |
+| Launcher state (packs.json / settings / runtimes) | `%APPDATA%\dsh-launcher` |
+| Modpack homes (incl. bundled `tools/`) | `%APPDATA%\dsh-launcher\dsh-packs\<pack-id>` |
+| DSH version cache | `%APPDATA%\dsh-launcher\dsh-runtime\versions` |
+| Machine-level managed tools (OfficeCLI fallback download) | `%APPDATA%\dsh-launcher\dsh-tools` |
+| Default DSH home | `~/.dsh` |
+
+## Upstream & contact
+
+- Mainline: [rirko/dsh-melody-launcher](https://github.com/rirko/dsh-melody-launcher) — plugin-catalog PRs still target upstream.
+- This repo: the Overture release line — portable exe and official modpack zips ship from its Releases.
+- QQ group **625155044** · issues welcome with launcher version and repro steps.
+
 ---
 
-Non-profit project. The launcher is a local tool only; all DSH-related assets belong to their respective owners.
+Non-profit side project. All DSH-related assets belong to their respective rights holders.
