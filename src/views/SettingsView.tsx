@@ -944,7 +944,7 @@ function SettingsPacks({
   const [newVersion, setNewVersion] = useState<string>('')
   const [removing, setRemoving] = useState<string | null>(null)
   /** 删除二次确认：第一次点删除进入待确认态（按钮变红），再点才真删。 */
-  const [armedRemove, setArmedRemove] = useState<{ id: string; note: string } | null>(null)
+  const [armedRemove, setArmedRemove] = useState<{ id: string; size: string | null; note: string } | null>(null)
   const createNameInputRef = useRef<HTMLInputElement>(null)
 
   const openCreateForm = () => {
@@ -955,14 +955,22 @@ function SettingsPacks({
     requestAnimationFrame(() => createNameInputRef.current?.focus())
   }
 
-  /** 第一次点删除：不弹系统对话框，改为行内进入待确认态（按钮变红「确定删除」）。 */
-  const armRemove = async (pack: PackStatus) => {
-    const bytes = await onDiskUsage(pack.id).catch(() => 0)
-    const size = bytes > 0 ? `占用 ${formatBytes(bytes)}` : ''
+  /**
+   * 第一次点删除：**立即**进入待确认态（按钮马上变红），占用大小异步补上——
+   * 统计占用要扫整个包目录（几百 MB / 上万文件），不能让它挡住按钮反馈。
+   */
+  const armRemove = (pack: PackStatus) => {
     const activeNote = activePack?.id === pack.id
       ? (packs.length === 1 ? '这是最后一个整合包：删除后启动器会引导你重新创建。' : '这是当前激活的整合包：删除后会自动切换到其它环境。')
       : ''
-    setArmedRemove({ id: pack.id, note: [size, activeNote].filter(Boolean).join('；') })
+    setArmedRemove({ id: pack.id, size: null, note: activeNote })
+    void onDiskUsage(pack.id)
+      .then(bytes => {
+        if (bytes <= 0) return
+        const size = formatBytes(bytes)
+        setArmedRemove(current => (current?.id === pack.id ? { ...current, size } : current))
+      })
+      .catch(() => undefined)
   }
 
   const confirmRemove = async (pack: PackStatus) => {
@@ -1095,7 +1103,10 @@ function SettingsPacks({
                 )}
                 <span className={armedRemove?.id === pack.id ? 'settings-pack-danger-note' : undefined}>
                   {armedRemove?.id === pack.id
-                    ? `将删除它的插件、技能、预设、配置与会话，不可恢复；共享的 DSH 版本保留。${armedRemove.note ? `（${armedRemove.note}）` : ''}`
+                    ? `将删除它的插件、技能、预设、配置与会话，不可恢复；共享的 DSH 版本保留。${(() => {
+                        const details = [armedRemove.size ? `占用 ${armedRemove.size}` : '', armedRemove.note].filter(Boolean)
+                        return details.length > 0 ? `（${details.join('；')}）` : ''
+                      })()}`
                     : <>
                         {pack.dshVersion ? `DSH ${pack.dshVersion}` : 'DSH 未绑定'}
                         {counts ? ` · ${counts}` : ' · 空白环境'}
@@ -1125,7 +1136,7 @@ function SettingsPacks({
                         <button type="button" className="icon-button" disabled={busy} onClick={() => setArmedRemove(null)} title="取消删除" aria-label="取消删除"><X size={15} /></button>
                       </>
                     ) : (
-                      <button type="button" className="icon-button" disabled={busy} onClick={() => { void armRemove(pack) }} title="删除整合包（连同环境数据）" aria-label="删除整合包"><Trash2 size={15} /></button>
+                      <button type="button" className="icon-button" disabled={busy} onClick={() => armRemove(pack)} title="删除整合包（连同环境数据）" aria-label="删除整合包"><Trash2 size={15} /></button>
                     )}
                   </>
                 )}
