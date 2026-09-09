@@ -29,14 +29,15 @@ export interface PackInstallLogEntry {
   text: string
 }
 
-/** item-start / item-done 驱动的逐项进度。 */
+/** item-start / item-done / extract 驱动的进度；unit 决定文案是「组件」还是「文件」。 */
 export interface PackItemProgress {
   current: string | null
   done: number
   total: number
+  unit: 'component' | 'file'
 }
 
-const IDLE_ITEM_PROGRESS: PackItemProgress = { current: null, done: 0, total: 0 }
+const IDLE_ITEM_PROGRESS: PackItemProgress = { current: null, done: 0, total: 0, unit: 'component' }
 
 export function usePackInstall(onSettled: () => void, showToast: (toast: ToastState) => void) {
   const api = useLauncherApi()
@@ -87,7 +88,7 @@ export function usePackInstall(onSettled: () => void, showToast: (toast: ToastSt
     if (settledRef.current) return
     setResult(next)
     setPhase('done')
-    setItemProgress(current => ({ current: null, done: next.installed.length, total: current.total || next.installed.length }))
+    setItemProgress(current => ({ current: null, done: next.installed.length, total: current.total || next.installed.length, unit: current.unit }))
     const failureText = next.failures.length > 0 ? `，${next.failures.length} 个失败` : ''
     appendLog('success', `完成：成功安装 ${next.installed.length} 个组件${failureText}。`)
     finish()
@@ -113,12 +114,16 @@ export function usePackInstall(onSettled: () => void, showToast: (toast: ToastSt
         case 'phase':
           setItemProgress(current => ({ ...current, total: event.itemTotal ?? current.total }))
           break
+        case 'extract':
+          // 快照包解压：按文件数推进进度条（没有逐项安装事件）。
+          setItemProgress({ current: null, done: event.done, total: event.total, unit: 'file' })
+          break
         case 'item-start':
-          setItemProgress(current => ({ ...current, current: event.packageName, total: current.total || 0 }))
+          setItemProgress(current => ({ ...current, current: event.packageName, total: current.total || 0, unit: 'component' }))
           appendLog('item', `开始安装 ${event.packageName}${event.offline ? '（离线本体）' : ''}…`)
           break
         case 'item-done':
-          setItemProgress(current => ({ current: null, done: current.done + 1, total: current.total }))
+          setItemProgress(current => ({ current: null, done: current.done + 1, total: current.total, unit: current.unit }))
           appendLog(
             event.ok ? 'success' : 'error',
             event.ok ? `已安装 ${event.packageName}` : `安装 ${event.packageName} 失败：${event.reason ?? '未知原因'}`,
@@ -132,7 +137,7 @@ export function usePackInstall(onSettled: () => void, showToast: (toast: ToastSt
           setResult(event.result)
           setPhase('done')
           // done 事件不覆盖逐项累计的 done 计数：item-done 已按项累加，结果里只统计成功的数量。
-          setItemProgress(current => ({ current: null, done: current.done, total: current.total }))
+          setItemProgress(current => ({ current: null, done: current.done, total: current.total, unit: current.unit }))
           appendLog('success', `整合包处理完成：成功安装 ${event.result.installed.length} 个组件。`)
           finish()
           break
@@ -164,7 +169,7 @@ export function usePackInstall(onSettled: () => void, showToast: (toast: ToastSt
   ): Promise<boolean> => {
     resetTask()
     setPhase('installing')
-    setItemProgress({ current: null, done: 0, total: packageNames.length + presetNames.length + skillNames.length + applicationIds.length })
+    setItemProgress({ current: null, done: 0, total: packageNames.length + presetNames.length + skillNames.length + applicationIds.length, unit: 'component' })
     appendLog('status', `开始创建整合包「${name}」…`)
     try {
       const next = await api.createPack({ name, description, packageNames, presetNames, skillNames, applicationIds })
@@ -202,7 +207,7 @@ export function usePackInstall(onSettled: () => void, showToast: (toast: ToastSt
     setEvents([])
     setResult(null)
     setError(null)
-    setItemProgress({ current: null, done: 0, total: selectedItems.length })
+    setItemProgress({ current: null, done: 0, total: selectedItems.length, unit: 'component' })
     setHasSnapshot(false)
     setPhase('installing')
     appendLog('status', `开始导入整合包（${selectedItems.length} 个组件）…`)

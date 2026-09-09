@@ -1,5 +1,6 @@
-import { createWriteStream, existsSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync } from 'node:fs'
 import { cp, lstat, mkdir, readdir, readFile, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { Transform } from 'node:stream'
 import path from 'node:path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import yazl from 'yazl'
@@ -60,6 +61,8 @@ export interface SnapshotPlanEntry {
   rel: string
   /** 源文件绝对路径；与 `data` 二选一。 */
   source?: string
+  /** 源文件字节数（用于进度总量）。 */
+  size?: number
   /** 已重写好的内容；与 `source` 二选一。 */
   data?: Buffer
 }
@@ -210,9 +213,8 @@ async function walk(home: string, current: string, plan: SnapshotPlan): Promise<
     if (!dirent.isFile()) continue
     const info = await lstat(full).catch(() => null)
     if (!info) continue
-    plan.totalBytes += info.size
     if (rel.length > SNAPSHOT_WARN_PATH_LENGTH && plan.longPaths.length < 50) plan.longPaths.push(rel)
-    plan.entries.push({ rel, source: full })
+    plan.entries.push({ rel, source: full, size: info.size })
   }
 }
 
@@ -273,6 +275,8 @@ async function rewriteEntries(home: string, packId: string, plan: SnapshotPlan):
   }
 
   if (drop.size > 0) plan.entries = plan.entries.filter(entry => !drop.has(entry.rel))
+  // 按最终条目重算总量：被丢弃的条目（如含绝对路径的 lockfile）不能算进进度分母。
+  plan.totalBytes = plan.entries.reduce((sum, entry) => sum + (entry.data?.length ?? entry.size ?? 0), 0)
 }
 
 /**
@@ -356,8 +360,7 @@ async function collectDirectory(sourceDir: string, targetRel: string, plan: Snap
       if (!dirent.isFile()) continue
       const info = await lstat(full).catch(() => null)
       if (!info) continue
-      plan.totalBytes += info.size
-      plan.entries.push({ rel, source: full })
+      plan.entries.push({ rel, source: full, size: info.size })
       added += 1
     }
   }
@@ -365,23 +368,49 @@ async function collectDirectory(sourceDir: string, targetRel: string, plan: Snap
 }
 
 export interface WriteSnapshotOptions {
-  onProgress?: (done: number, total: number) => void
+  /** 按已读取的原始字节回调（限流：默认最多每 500ms 一次，结束时必报）。 */
+  onProgress?: (writtenBytes: number, totalBytes: number) => void
 }
 
-/** 把快照计划写成 zip（流式，zip64 自动）。 */
+/** 把快照计划写成 zip（流式，zip64 自动）。进度按真实读取字节数上报。 */
 export async function writeSnapshotZip(
   plan: SnapshotPlan,
   targetZipPath: string,
   options: WriteSnapshotOptions = {},
 ): Promise<void> {
   const zip = new yazl.ZipFile()
-  const total = plan.entries.length + 1
-  let done = 0
+  const totalBytes = plan.totalBytes || plan.entries.reduce((sum, entry) => sum + (entry.data?.length ?? 0), 0)
+  let written = 0
+  let lastReportAt = 0
+  const report = (force = false): void => {
+    const now = Date.now()
+    if (!force && now - lastReportAt < 500) return
+    lastReportAt = now
+    options.onProgress?.(written, totalBytes)
+  }
   for (const entry of plan.entries) {
-    if (entry.data) zip.addBuffer(entry.data, entry.rel)
-    else if (entry.source) zip.addFile(entry.source, entry.rel)
-    done += 1
-    options.onProgress?.(done, total)
+    if (entry.data) {
+      zip.addBuffer(entry.data, entry.rel)
+      written += entry.data.length
+      report()
+      continue
+    }
+    if (!entry.source) continue
+    const info = await stat(entry.source).catch(() => null)
+    if (!info) continue
+    // 自己串一个计数流统计真实进度（yazl 的 addFile 不暴露读取进度；
+    // 直接监听源流会抢在 yazl 之前把数据流干，必须用 Transform 让 yazl 消费它的可读端）。
+    const counter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        written += chunk.length
+        report()
+        callback(null, chunk)
+      },
+    })
+    const source = createReadStream(entry.source)
+    source.on('error', error => counter.destroy(error instanceof Error ? error : new Error(String(error))))
+    source.pipe(counter)
+    zip.addReadStream(counter, entry.rel, { size: info.size })
   }
   const meta: SnapshotMeta = {
     format: SNAPSHOT_FORMAT_VERSION,
@@ -392,7 +421,7 @@ export async function writeSnapshotZip(
     warnings: plan.warnings,
   }
   zip.addBuffer(Buffer.from(`${JSON.stringify(meta, null, 2)}\n`, 'utf8'), SNAPSHOT_META_FILENAME)
-  options.onProgress?.(total, total)
+  report(true)
   await new Promise<void>((resolve, reject) => {
     const output = createWriteStream(targetZipPath)
     output.on('error', reject)
@@ -401,6 +430,7 @@ export async function writeSnapshotZip(
     zip.outputStream.pipe(output)
     zip.end()
   })
+  report(true)
 }
 
 export interface SnapshotInspection {

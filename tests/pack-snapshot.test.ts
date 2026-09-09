@@ -176,7 +176,12 @@ describe('快照导出 / 导入闭环', () => {
 
     const plan = await planSnapshot(home, { packId: 'pack-a' })
     const zipPath = path.join(await temporaryDirectory('dsh-snapshot-out-'), 'pack-a.zip')
-    await writeSnapshotZip(plan, zipPath)
+    const progress: Array<[number, number]> = []
+    await writeSnapshotZip(plan, zipPath, { onProgress: (written, total) => progress.push([written, total]) })
+    // 进度按真实读取字节上报：结束时必须报满，且总字节数大于 0。
+    expect(progress.length).toBeGreaterThan(0)
+    expect(progress.at(-1)?.[0]).toBe(progress.at(-1)?.[1])
+    expect(progress.at(-1)?.[1]).toBeGreaterThan(0)
 
     const entries = new AdmZip(zipPath).getEntries().map(entry => entry.entryName)
     expect(entries).toContain('dsh-snapshot.json')

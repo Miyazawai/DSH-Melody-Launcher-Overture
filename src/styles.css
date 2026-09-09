@@ -8106,6 +8106,16 @@ input:focus-visible {
   color: var(--quiet);
 }
 
+/* 删除待确认：行内警示文案 + 红色确定按钮（替代系统 confirm 弹窗）。 */
+.settings-pack-copy span.settings-pack-danger-note {
+  color: var(--danger, #d64545);
+}
+
+.settings-pack-actions .danger-button {
+  padding: 5px 12px;
+  font-size: 12.5px;
+}
+
 .settings-pack-actions {
   display: inline-flex;
   align-items: center;

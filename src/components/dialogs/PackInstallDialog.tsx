@@ -359,15 +359,16 @@ function ProgressPanel({ phase, itemProgress }: {
   itemProgress: PackItemProgress
 }) {
   const ratio = itemProgress.total > 0 ? Math.round(itemProgress.done / itemProgress.total * 100) : 0
+  const unit = itemProgress.unit === 'file' ? '个文件' : '个组件'
   return (
     <div className="pack-progress-panel">
       <div className="pack-progress-line">
         {phase === 'installing' ? <LoaderCircle className="spin" size={14} /> : <CircleCheck size={14} />}
-        <span>{itemProgress.current ? `正在安装 ${itemProgress.current}…` : itemProgress.total > 0 ? `已完成 ${itemProgress.done}/${itemProgress.total} 个组件` : '准备中…'}</span>
+        <span>{itemProgress.current ? `正在安装 ${itemProgress.current}…` : itemProgress.total > 0 ? `已完成 ${itemProgress.done}/${itemProgress.total} ${unit}` : '准备中…'}</span>
         <strong>{itemProgress.total > 0 ? `${ratio}%` : '—'}</strong>
       </div>
       <div className="progress-track pack-progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={itemProgress.total > 0 ? ratio : undefined}>
-        <span style={itemProgress.total > 0 ? { width: `${ratio}%` } : undefined} />
+        <span style={{ width: `${itemProgress.total > 0 ? ratio : 0}%` }} />
       </div>
     </div>
   )

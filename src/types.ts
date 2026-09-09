@@ -1037,6 +1037,7 @@ export interface PackInstallResult {
 export type PackProgressEvent =
   | { kind: 'status'; message: string }
   | { kind: 'phase'; phase: string; itemIndex?: number; itemTotal?: number }
+  | { kind: 'extract'; done: number; total: number }
   | { kind: 'item-start'; packageName: string; offline: boolean }
   | { kind: 'item-done'; packageName: string; ok: boolean; reason?: string }
   | { kind: 'snapshot' }

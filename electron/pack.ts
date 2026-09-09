@@ -1130,8 +1130,8 @@ export function createPackManager(options: PackManagerOptions): PackManager {
               const extracted = await extractSnapshot(filePath, homePath, {
                 newId: packId,
                 onProgress: (done, total) => {
-                  if (done % 500 === 0 || done === total) {
-                    options.emitEvent({ kind: 'status', message: `解压中：${done}/${total}` })
+                  if (done % 200 === 0 || done === total) {
+                    options.emitEvent({ kind: 'extract', done, total })
                   }
                 },
               })
@@ -1699,10 +1699,9 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         const sizeMb = Math.round(plan.totalBytes / (1024 * 1024))
         options.emitEvent({ kind: 'status', message: `正在打包 ${plan.entries.length} 个文件（约 ${sizeMb}MB）…` })
         await writeSnapshotZip(plan, zipPath, {
-          onProgress: (done, total) => {
-            if (done % 500 === 0 || done === total) {
-              options.emitEvent({ kind: 'status', message: `打包中：${done}/${total}` })
-            }
+          onProgress: (written, total) => {
+            const toMb = (value: number): number => Math.round(value / (1024 * 1024))
+            options.emitEvent({ kind: 'status', message: `打包中：${toMb(written)}/${toMb(total)}MB` })
           },
         })
         return { zipPath, fileName: path.basename(zipPath) }
