@@ -133,6 +133,9 @@ describe('快照导出 / 导入闭环', () => {
     await mkdir(path.join(home, 'skills', 'my-skill'), { recursive: true })
     await mkdir(path.join(home, 'sessions', 'abc'), { recursive: true })
     await mkdir(path.join(home, 'skin-center', 'wallpapers'), { recursive: true })
+    // 官方预设包形态：包自带 officecli 二进制，必须原样随快照搬运。
+    await mkdir(path.join(home, 'tools', 'officecli'), { recursive: true })
+    await writeFile(path.join(home, 'tools', 'officecli', 'officecli.exe'), 'MZ-fake-binary')
     await writeFile(path.join(home, '.credentials.yaml'), 'records:\n  ALI_API_KEY: secret\n')
     await writeFile(path.join(home, 'sessions', 'abc', 'session.json'), '{"secret":true}')
     await writeFile(path.join(home, 'settings.yaml'), 'ui-onboarding:\n  v: 1\npet:\n  petId: whale-girl\n')
@@ -190,6 +193,7 @@ describe('快照导出 / 导入闭环', () => {
     expect(entries).toContain('profiles/pack-a/node_modules/alpha/index.js')
     expect(entries).toContain('profiles/pack-a/.dsh-launcher-plugin-bodies/alpha/index.js')
     expect(entries).toContain('skin-center/wallpapers/a.png')
+    expect(entries).toContain('tools/officecli/officecli.exe')
     // 个人数据一个都不在。
     expect(entries.some(name => name.startsWith('sessions/'))).toBe(false)
     expect(entries).not.toContain('.credentials.yaml')
@@ -222,6 +226,8 @@ describe('快照导出 / 导入闭环', () => {
     expect(existsSync(path.join(target, 'profiles', 'pack-b', 'node_modules', 'alpha', 'index.js'))).toBe(true)
     expect(existsSync(path.join(target, 'profiles', 'pack-b', '.dsh-launcher-plugin-bodies', 'alpha', 'index.js'))).toBe(true)
     expect(existsSync(path.join(target, 'skills', 'my-skill', 'SKILL.md'))).toBe(true)
+    // 包自带工具原样落地（官方预设包「导入即用」的硬承诺）。
+    expect((await readFile(path.join(target, 'tools', 'officecli', 'officecli.exe'))).toString('utf8')).toBe('MZ-fake-binary')
     expect(existsSync(path.join(target, 'sessions'))).toBe(false)
     expect(existsSync(path.join(target, '.credentials.yaml'))).toBe(false)
     expect(existsSync(path.join(target, 'profiles', 'pack-a'))).toBe(false)
