@@ -2,7 +2,7 @@
 
 本文件记录 DSH 旋律启动器（dsh-melody-launcher）的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本语义遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [未发布] — 轮椅模式 / 暴力整合包模式（开发分支）
+## [v0.1.1] - 2026-09-09 — 真隔离整合包 · 快照搬运 · 官方默认包
 
 ### 新增功能
 
@@ -29,6 +29,7 @@
 
 ### 修复
 
+- **删除整合包可能"半删毁包"**：DSH 进程还活着时删除（尤其启动器热重启后已不认识那个子进程、删除守卫失效），`rm` 删到一半被锁文件卡死——注册表记录还在、环境内容却没了。现在删除改为**原子回收站**：先把包目录 rename 成 `.deleting-<时间戳>`（占用时 rename 必然整体失败，原目录分毫未动），成功后再物理清除；rename 失败即报错中止，记录与目录都完整保留；被锁的回收站残骸由列表页启动清扫兜底。
 - **启动器自更新指向错仓库**：更新检测此前查上游 `rirko/dsh-melody-launcher`，序曲独立发布线（Overture）的新版永远查不到。新增 `LAUNCHER_RELEASE_REPOSITORY` 常量指向 Overture 仓库供自更新与官方包使用；`LAUNCHER_REPOSITORY`（插件目录 PR 的上游）保持不动，两个语义拆分。
 - **更新详情弹窗没有更新内容**：自更新弹窗只显示版本号与安装包大小。现在把 Release 正文（自动生成的更新说明，截 4000 字符）以「更新内容」块展示。
 - AI 日报 404（换用正确订阅源 daily.juya.uk + 浏览器 UA + 缓存版本升级强制重拉）。

@@ -7,7 +7,7 @@
 // Installer，测试注入 stub）。
 
 import { existsSync } from 'node:fs'
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type {
   AppSettings,
@@ -202,6 +202,24 @@ async function resolvePackDshVersion(settings: AppSettings, requested?: string):
 
 function assertSafePackId(packId: string): void {
   if (typeof packId !== 'string' || !isSafeProfileName(packId)) throw new Error('整合包标识无效。')
+}
+
+/**
+ * 原子删除目录：先 rename 到同级 `.deleting-<时间戳>` 回收站名，再 rm。
+ * rename 失败（目录被占用——DSH 进程还活着，哪怕启动器热重启后已不认识它）
+ * 时抛错且**原目录分毫未动**，杜绝「记录还在、内容已被删了一半」的毁包状态；
+ * rename 成功但 rm 失败（回收站内仍有锁文件）时原目录已离开原位，删除照常成立，
+ * 残留回收站交给 listPacks 的启动清扫兜底。
+ */
+async function removeDirectoryAtomically(dirPath: string): Promise<void> {
+  if (!existsSync(dirPath)) return
+  const trash = `${dirPath}.deleting-${Date.now()}`
+  try {
+    await rename(dirPath, trash)
+  } catch (error) {
+    throw new Error(`无法删除：包内文件正被占用（DSH 可能仍在后台运行）。${asErrorMessage(error)}`)
+  }
+  await rm(trash, { recursive: true, force: true }).catch(() => undefined)
 }
 
 /**
@@ -711,6 +729,14 @@ export function createPackManager(options: PackManagerOptions): PackManager {
   return {
     async listPacks() {
       const settings = await options.readSettings()
+      // 启动清扫：回收上次删除中断（回收站目录被锁文件卡住 rm）留下的 `.deleting-*`，尽力而为不阻塞。
+      void (async () => {
+        for (const entry of await readdir(packsRoot, { withFileTypes: true }).catch(() => [])) {
+          if (entry.isDirectory() && entry.name.includes('.deleting-')) {
+            await rm(path.join(packsRoot, entry.name), { recursive: true, force: true }).catch(() => undefined)
+          }
+        }
+      })()
       const records = await readPackRegistry(options.registryPath)
       await Promise.all(records.map(record => writeRecordManifest(record).catch(() => undefined)))
       const statuses = await Promise.all(records.map(async record => {
@@ -1740,10 +1766,10 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         const stored = options.readStoredSettings ? await options.readStoredSettings() : settings
         if (record.homePath && !samePath(record.homePath, stored.dshHome)) {
           // 私有家目录：整个环境连会话、登录、插件一并删除（共享的 DSH 版本二进制不动）。
-          await rm(record.homePath, { recursive: true, force: true })
+          await removeDirectoryAtomically(record.homePath)
         } else {
           const home = stored.dshHome
-          await rm(path.join(home, 'profiles', packId), { recursive: true, force: true })
+          await removeDirectoryAtomically(path.join(home, 'profiles', packId))
           await rm(packBodiesDir(home, packId), { recursive: true, force: true }).catch(() => undefined)
         }
         const profileReceipts = (await readPluginReceipts(options.pluginReceiptsPath)).filter(item => item.packId === packId)
