@@ -1,7 +1,7 @@
 import { spawn as nodeSpawn } from 'node:child_process'
 import { mkdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { LAUNCHER_REPOSITORY } from '../src/constants'
+import { LAUNCHER_RELEASE_REPOSITORY } from '../src/constants'
 import type { LauncherUpdateProgress, LauncherUpdateStatus } from '../src/types'
 import { compareVersions, normalizeVersion } from './dsh-update'
 import { downloadReleaseAsset } from './release-download'
@@ -33,6 +33,8 @@ interface GitHubReleaseAsset {
 interface GitHubLatestRelease {
   tag_name?: unknown
   html_url?: unknown
+  /** Release 正文（发布时自动生成的更新说明）。 */
+  body?: unknown
   assets?: unknown
 }
 
@@ -63,8 +65,8 @@ export function resolvePortableAsset(release: GitHubLatestRelease): ResolvedLaun
   }
 }
 
-async function fetchLatestRelease(fetchImpl: typeof fetch): Promise<{ tag: string; htmlUrl: string; asset: ResolvedLauncherAsset }> {
-  const endpoint = `${GITHUB_API_ROOT}/repos/${LAUNCHER_REPOSITORY}/releases/latest`
+async function fetchLatestRelease(fetchImpl: typeof fetch): Promise<{ tag: string; htmlUrl: string; notes: string | null; asset: ResolvedLauncherAsset }> {
+  const endpoint = `${GITHUB_API_ROOT}/repos/${LAUNCHER_RELEASE_REPOSITORY}/releases/latest`
   const candidates = [endpoint, ...GITHUB_API_MIRRORS.map(prefix => `${prefix}${endpoint}`)]
   const failures: string[] = []
   for (const url of candidates) {
@@ -78,9 +80,12 @@ async function fetchLatestRelease(fetchImpl: typeof fetch): Promise<{ tag: strin
       }
       const release = await response.json() as GitHubLatestRelease
       const asset = resolvePortableAsset(release)
+      const rawNotes = typeof release.body === 'string' ? release.body.trim() : ''
       return {
         tag: typeof release.tag_name === 'string' ? release.tag_name : '',
         htmlUrl: typeof release.html_url === 'string' ? release.html_url : '',
+        // 正文截到 4000 字符：详情弹窗展示用，超长部分去 Release 页看。
+        notes: rawNotes ? rawNotes.slice(0, 4000) : null,
         asset,
       }
     } catch (error) {
@@ -122,6 +127,7 @@ async function readUpdate(getVersion: () => string, fetchImpl: typeof fetch): Pr
           localVersion,
           remoteVersion,
           releaseUrl: release.htmlUrl || null,
+          releaseNotes: release.notes,
           assetName: release.asset.name,
           assetSize: release.asset.size || null,
           checkedAt: checkedAt(),

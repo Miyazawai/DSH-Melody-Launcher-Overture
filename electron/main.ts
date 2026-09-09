@@ -3,7 +3,7 @@ import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/pr
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { AppSettings, RuntimeOutput, WindowMode } from '../src/types'
+import type { AppSettings, PackInstallResult, RuntimeOutput, WindowMode } from '../src/types'
 import { ACP_RUNTIME_DIRNAME, CREDENTIALS_LOCK_DIRNAME, createAiInstaller, healCredentialsLock, type AiInstaller } from './ai-install'
 import { createApplicationAddonManager, type ApplicationAddonManager } from './application-addons'
 import { applyWindowMode, createMainWindow, createRendererChannel } from './app-window'
@@ -30,6 +30,7 @@ import {
 } from './node-runtime'
 import { createProxyAwareFetch } from './network'
 import { packUsesOfficeCliSkills, resolveOfficeCliExecutable } from './officecli-tool'
+import { ensureOfficialPack } from './official-pack'
 import { createPackManager, type InstallInstaller, type PackInstallTarget, type PackManager } from './pack'
 import { migrateToPackHomesV2 } from './pack-migration'
 import { readPackRegistry } from './pack-registry'
@@ -89,6 +90,10 @@ interface Services {
   runtimeVersions: RuntimeVersionService
   profiles: ProfileService
   profilePoolReady: Promise<void>
+  /** 手动恢复官方整合包（整合包页按钮）；失败抛错给渲染层。 */
+  restoreOfficialPack: () => Promise<PackInstallResult>
+  /** 首启/更新后的自动获取：静默进行，进度走 packProgress 事件。 */
+  officialPackBootstrap: () => Promise<void>
 }
 
 // app.getPath 依赖 app 就绪，因此服务在 whenReady 之后才装配。
@@ -705,6 +710,57 @@ function createServices(): Services {
     },
   })
 
+  /**
+   * 官方默认整合包：首启/更新后自动核对当前版本的包是否存在，缺失则从
+   * GitHub Release 拉 `official-pack-v<版本>.zip` 导入（快照管线原样复用）。
+   * 进度走 packProgress status 事件（整合包页横幅），导入成功广播 done
+   * 让渲染层刷新列表；任何失败只记日志，不打扰启动。
+   */
+  const runOfficialPack = async (announce: boolean): Promise<PackInstallResult | null> => {
+    const current = await settings.read()
+    let lastProgressAt = 0
+    const outcome = await ensureOfficialPack({
+      registryPath: packsJsonPath,
+      importPack: (filePath, items, options) => packManager!.importPack(filePath, items, options),
+      fetchImpl: proxyAwareFetch,
+      mirror: current.network?.githubMirror,
+      downloadDir: path.join(userData, 'pack-snapshots'),
+      onProgress: (received, total) => {
+        const now = Date.now()
+        const finished = total != null && received >= total
+        if (now - lastProgressAt < 1_500 && !finished) return
+        lastProgressAt = now
+        const percent = total && total > 0 ? `：${Math.floor((received / total) * 100)}%` : ''
+        events.packProgress({ kind: 'status', message: `正在获取官方整合包${percent}…` })
+      },
+    })
+    events.packProgress({ kind: 'status', message: '' })
+    if (outcome.outcome === 'imported' && outcome.result) {
+      events.packProgress({ kind: 'done', result: outcome.result })
+      return outcome.result
+    }
+    if (announce) {
+      if (outcome.outcome === 'present') throw new Error('当前版本的官方整合包已存在。')
+      throw new Error(outcome.message ?? '官方整合包获取失败。')
+    }
+    if (outcome.outcome === 'failed') {
+      events.output('plugin', 'error', `官方整合包自动获取失败：${outcome.message ?? '未知原因'}`)
+    }
+    return null
+  }
+  const restoreOfficialPack = async (): Promise<PackInstallResult> => {
+    const result = await runOfficialPack(true)
+    if (!result) throw new Error('官方整合包获取失败。')
+    return result
+  }
+  const officialPackBootstrap = async () => {
+    try {
+      await runOfficialPack(false)
+    } catch (error) {
+      events.output('plugin', 'error', `官方整合包自动获取失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   const launcherUpdater = createLauncherUpdater({
     getVersion: () => app.getVersion(),
     userDataPath: userData,
@@ -740,7 +796,7 @@ function createServices(): Services {
     })
   }).catch(error => events.output('plugin', 'error', `旧整合包/插件池迁移失败：${error instanceof Error ? error.message : String(error)}`))
 
-  return { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager: packManager!, githubAuth, applicationAddons, catalogSync, dshMarket, recommendedWebUi, runtimeVersions, profiles: profileService, profilePoolReady }
+  return { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager: packManager!, githubAuth, applicationAddons, catalogSync, dshMarket, recommendedWebUi, runtimeVersions, profiles: profileService, profilePoolReady, restoreOfficialPack, officialPackBootstrap }
 }
 
 function openMainWindow(): void {
@@ -810,6 +866,8 @@ app.whenReady().then(async () => {
   })
   await services.profilePoolReady
   openMainWindow()
+  // 官方整合包首启/更新核对：后台进行，不挡窗口。
+  void services.officialPackBootstrap()
   tray = createTray({ iconPath: launcherIconPath, showMainWindow })
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) openMainWindow()

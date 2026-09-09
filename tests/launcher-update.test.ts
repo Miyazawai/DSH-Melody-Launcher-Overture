@@ -9,6 +9,7 @@ import {
   createLauncherUpdater,
   resolvePortableAsset,
 } from '../electron/launcher-update'
+import { LAUNCHER_RELEASE_REPOSITORY } from '../src/constants'
 
 const PORTABLE = 'DSH-Launcher-0.1.10-portable.exe'
 
@@ -26,7 +27,7 @@ function releaseBody(remoteTag = 'v0.1.10', assetName = PORTABLE, assetSize = 9)
 function latestFetch(body: unknown, status = 200): typeof fetch {
   return (async input => {
     const url = String(input)
-    if (url.endsWith('/repos/rirko/dsh-melody-launcher/releases/latest')) {
+    if (url.endsWith(`/repos/${LAUNCHER_RELEASE_REPOSITORY}/releases/latest`)) {
       return new Response(status === 200 ? JSON.stringify(body) : '', { status })
     }
     return new Response('', { status: 404 })
@@ -62,6 +63,12 @@ describe('checkLauncherUpdate', () => {
       assetSize: 9,
       releaseUrl: 'https://github.com/rirko/dsh-melody-launcher/releases/tag/v0.1.10',
     })
+  })
+
+  it('把 Release 正文带进 update-available 状态（详情弹窗的「更新内容」）', async () => {
+    const status = await checkLauncherUpdate(() => '0.1.9', latestFetch({ ...(releaseBody() as object), body: '### v0.1.10\n- 修复官方整合包' }))
+    expect(status.state).toBe('update-available')
+    expect(status.releaseNotes).toBe('### v0.1.10\n- 修复官方整合包')
   })
 
   it('reports up-to-date when versions match (leading v tolerated)', async () => {

@@ -166,6 +166,7 @@ function LauncherShell() {
                     }}
                     onImportPack={() => void handlePackImport()}
                     onImportPackPath={path => { void packInstall.startImport(path) }}
+                    onRestoreOfficialPack={() => { void store.restoreOfficialPack() }}
                     onInstallDshVersion={async version => {
                       const ok = await store.installDshVersion(version)
                       // 装版本会自动补发同名整合包（零包时还会自动激活成为当前包），

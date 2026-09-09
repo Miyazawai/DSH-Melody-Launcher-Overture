@@ -340,6 +340,8 @@ export interface LauncherUpdateStatus {
   localVersion: string | null
   remoteVersion: string | null
   releaseUrl: string | null
+  /** Release 正文（自动生成的更新说明），详情弹窗展示；旧缓存可能缺省。 */
+  releaseNotes?: string | null
   assetName: string | null
   assetSize: number | null
   checkedAt: string | null
@@ -961,6 +963,8 @@ export interface PackStatus {
   enabled: boolean
   /** 安装 DSH 版本时自动生成的包。 */
   auto?: boolean
+  /** 官方默认整合包的版本号（有值 = 官方包，可删可恢复）。 */
+  officialVersion?: string
   state: 'complete' | 'partial' | 'failed'
   plugins: PackInstalledPlugin[]
   skills?: PackInstalledSkill[]
@@ -1212,6 +1216,8 @@ export interface LauncherApi {
   analyzePackImport(path: string): Promise<PackAnalysis>
   importPack(path: string, items?: string[], options?: PackImportOptions): Promise<PackInstallResult>
   exportPack(packId: string): Promise<string | null>
+  /** 恢复当前版本的官方默认整合包（从 GitHub Release 下载导入）；失败抛错。 */
+  restoreOfficialPack(): Promise<PackInstallResult>
   pickPackFile(): Promise<string | null>
   /** 把拖拽进入窗口的 .zip File 解析为磁盘绝对路径（preload 通过 webUtils 还原）。 */
   getDroppedFilePath(file: File): string

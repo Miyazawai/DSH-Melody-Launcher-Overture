@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  Sparkles,
   Store,
   Trash2,
   TrendingUp,
@@ -22,6 +23,7 @@ import {
   X,
 } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { OFFICIAL_PACK_VERSION } from '../constants'
 import { useLauncherApi } from '../api/client'
 import { resolveLauncherApi } from '../api/client'
 import { useLauncherStore } from '../hooks/use-launcher-store'
@@ -96,6 +98,7 @@ interface SettingsPanelsProps {
   onRenamePack: (packId: string, name: string) => Promise<boolean>
   onCreateBlankPack: (name: string, dshVersion: string | null) => Promise<PackStatus | undefined>
   onPackDiskUsage: (packId: string) => Promise<number>
+  onRestoreOfficialPack: () => void
   onRemovePack: (packId: string) => Promise<boolean>
   onExportPack: (packId: string) => Promise<string | null>
   onOpenDshFolder: () => void
@@ -133,6 +136,7 @@ export function SettingsPanels({
   onRenamePack,
   onCreateBlankPack,
   onPackDiskUsage,
+  onRestoreOfficialPack,
   onRemovePack,
   onExportPack,
   onOpenDshFolder,
@@ -262,6 +266,8 @@ export function SettingsPanels({
                 onRemove={onRemovePack}
                 onDiskUsage={onPackDiskUsage}
                 onNavigateTab={onNavigateTab}
+                onRestoreOfficial={onRestoreOfficialPack}
+                restoringOfficial={busy === 'official-restore'}
               />
             </div>
           )}
@@ -938,6 +944,8 @@ function SettingsPacks({
   onRemove,
   onDiskUsage,
   onNavigateTab,
+  onRestoreOfficial,
+  restoringOfficial,
 }: {
   packs: PackStatus[]
   activePack: PackStatus | null
@@ -952,7 +960,11 @@ function SettingsPacks({
   onRemove: (packId: string) => Promise<boolean>
   onDiskUsage: (packId: string) => Promise<number>
   onNavigateTab: (tab: HomeTab) => void
+  onRestoreOfficial: () => void
+  restoringOfficial: boolean
 }) {
+  // 当前版本的官方包缺失时（被删、或首启还没拉下来）给出「恢复」入口。
+  const hasOfficialPack = packs.some(pack => pack.officialVersion === OFFICIAL_PACK_VERSION)
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
@@ -1013,6 +1025,11 @@ function SettingsPacks({
         <div className="settings-panel-title"><Package size={17} /><span>整合包</span>{packs.length > 0 && <span className="settings-count">{packs.length}</span>}</div>
         <div className="settings-market-heading-actions">
           <PanelRefresh onClick={onRefresh} disabled={busy} />
+          {!hasOfficialPack && (
+            <button type="button" className="secondary-button" onClick={onRestoreOfficial} disabled={busy || restoringOfficial} title={`从 GitHub Release 重新获取官方默认整合包 ${OFFICIAL_PACK_VERSION}`}>
+              {restoringOfficial ? <LoaderCircle size={15} className="spin" /> : <Sparkles size={15} />}恢复官方整合包
+            </button>
+          )}
           <button type="button" className="secondary-button" onClick={() => { creating ? setCreating(false) : openCreateForm() }} disabled={busy}>新建整合包</button>
           <button type="button" className="primary-command" onClick={onImport} disabled={busy}><Download size={15} />导入整合包</button>
         </div>
@@ -1113,6 +1130,7 @@ function SettingsPacks({
                   <span className="settings-pack-title-line">
                     <strong>{pack.name}</strong>
                     <span className="settings-pack-badge">DSH {pack.dshVersion ?? '未绑定'}</span>
+                    {pack.officialVersion && <span className="settings-pack-badge settings-pack-official-badge" title={`官方默认整合包 ${pack.officialVersion}：可删除，可随时一键恢复`}>官方</span>}
                     <button type="button" className="icon-button settings-pack-edit" onClick={() => setRenaming({ id: pack.id, value: pack.name })} title="重命名" aria-label="重命名"><Pencil size={13} /></button>
                   </span>
                 )}

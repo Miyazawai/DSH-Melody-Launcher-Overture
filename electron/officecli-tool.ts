@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { createReadStream, existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { applyGitHubMirror } from './github-archive'
+import { githubCandidateUrls } from './github-archive'
 import { parseNodeArchiveChecksum } from './node-runtime'
 import { downloadReleaseAsset } from './release-download'
 
@@ -19,8 +19,6 @@ import { downloadReleaseAsset } from './release-download'
 
 export const OFFICECLI_RELEASE_REPO = 'iOfficeAI/OfficeCLI'
 const GITHUB_API_ROOT = 'https://api.github.com'
-/** 与 launcher-update 同款：直连限流/黑洞时镜像用自己的出口读同一份数据。 */
-const GITHUB_API_MIRRORS = ['https://gh-proxy.com/', 'https://ghfast.top/', 'https://ghproxy.net/'] as const
 const GITHUB_HEADERS = {
   Accept: 'application/vnd.github+json',
   'User-Agent': 'DSH-Launcher',
@@ -44,6 +42,7 @@ export function officeCliAssetName(
 }
 
 /** GitHub 资产名只允许版本号字符集，挡掉 `../` 之类的 tag 注入。 */
+
 function safeVersionTag(tag: string): string | null {
   const trimmed = tag.trim()
   return /^v?[0-9][0-9A-Za-z._-]{0,63}$/.test(trimmed) ? trimmed : null
@@ -79,15 +78,7 @@ async function writeActive(root: string, pointer: ActivePointer): Promise<void> 
   await writeFile(path.join(root, 'active.json'), `${JSON.stringify(pointer, null, 2)}\n`, 'utf8')
 }
 
-/** 候选下载顺序：用户配置的 GitHub 镜像 → 直连 → 内置公共镜像。 */
-function candidateUrls(url: string, mirror?: string): string[] {
-  const list: string[] = []
-  const trimmed = mirror?.trim()
-  if (trimmed) list.push(applyGitHubMirror(url, trimmed))
-  list.push(url)
-  for (const prefix of GITHUB_API_MIRRORS) list.push(`${prefix}${url}`)
-  return list
-}
+// 候选下载顺序（用户镜像 → 直连 → 内置公共镜像）统一来自 github-archive.githubCandidateUrls。
 
 interface ResolvedOfficeCliRelease {
   tag: string
@@ -101,7 +92,7 @@ async function resolveLatestRelease(
   options: { mirror?: string; fetchImpl: typeof fetch },
 ): Promise<ResolvedOfficeCliRelease | null> {
   const endpoint = `${GITHUB_API_ROOT}/repos/${OFFICECLI_RELEASE_REPO}/releases/latest`
-  for (const url of candidateUrls(endpoint, options.mirror)) {
+  for (const url of githubCandidateUrls(endpoint, options.mirror)) {
     try {
       const response = await options.fetchImpl(url, { headers: GITHUB_HEADERS, signal: AbortSignal.timeout(12_000) })
       if (!response.ok) continue
@@ -219,7 +210,7 @@ async function ensureOfficeCliInner(toolsRoot: string, options: OfficeCliEnsureO
   // 校验基准优先取官方 SHA256SUMS；清单不可得时退回 release 资产 size。
   let expectedHash: string | null = null
   if (release.sumsUrl) {
-    for (const url of candidateUrls(release.sumsUrl, options.mirror)) {
+    for (const url of githubCandidateUrls(release.sumsUrl, options.mirror)) {
       try {
         const text = (await downloadWithStallGuard(url, SUMS_MAX_BYTES, { ...options, onProgress: undefined })).toString('utf8')
         expectedHash = parseNodeArchiveChecksum(text, asset.asset)
@@ -232,7 +223,7 @@ async function ensureOfficeCliInner(toolsRoot: string, options: OfficeCliEnsureO
   if (!expectedHash && release.binarySize <= 0) return staleUsable()
 
   await mkdir(path.dirname(target), { recursive: true })
-  for (const url of candidateUrls(release.binaryUrl, options.mirror)) {
+  for (const url of githubCandidateUrls(release.binaryUrl, options.mirror)) {
     try {
       const buffer = await downloadWithStallGuard(url, OFFICECLI_MAX_BYTES, options)
       if (expectedHash) {

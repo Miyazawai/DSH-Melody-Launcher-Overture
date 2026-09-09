@@ -8187,6 +8187,40 @@ input:focus-visible {
   color: var(--accent);
 }
 
+/* 启动器更新详情：Release 正文（Markdown 原样展示，不解析）。 */
+.update-notes {
+  margin: 12px 0 0;
+}
+
+.update-notes h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.update-notes pre {
+  margin: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 官方默认整合包徽标：与 auto 同色系，但用实心强调以示来源可信。 */
+.settings-pack-badge.settings-pack-official-badge {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .settings-pack-edit {
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-out);

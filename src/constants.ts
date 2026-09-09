@@ -4,8 +4,24 @@
 /** DSH 本体的 GitHub 仓库。出现在插件列表中时按本体而非普通插件处理。 */
 export const DSH_REPOSITORY = 'deepseek-ai/deepseek-harness'
 
-/** 启动器自身的 GitHub 仓库。自更新检测以它的 Release 页为准。 */
+/**
+ * 插件目录（meta-repo catalog）所在的上游仓库：目录同步与 PR 提交以它为准。
+ * 注意与下面的 LAUNCHER_RELEASE_REPOSITORY（序曲独立发布线）区分。
+ */
 export const LAUNCHER_REPOSITORY = 'rirko/dsh-melody-launcher'
+
+/**
+ * 序曲（Overture）分支的独立发布仓库：启动器自更新检测与官方整合包发布
+ * 都以它的 Release 页为准（v0.1.x 版本线、official-pack-v*.zip 资产）。
+ */
+export const LAUNCHER_RELEASE_REPOSITORY = 'Miyazawai/DSH-Melody-Launcher-Overture'
+
+/**
+ * 官方默认整合包的版本号：与发布到 LAUNCHER_RELEASE_REPOSITORY Release 的
+ * `official-pack-v<版本>.zip` 资产名同步。启动器首启/更新后按此版本核对，
+ * 本地没有同版本官方包就自动获取导入；界面上「恢复官方整合包」走同一条链。
+ */
+export const OFFICIAL_PACK_VERSION = '0.1.1'
 
 /** DSH 本体的 npm 包名。检测与安装都以它为准。 */
 export const DSH_PACKAGE_NAME = '@deepseek-ai/dsh'
@@ -131,6 +147,7 @@ export const IPC = {
   packsAnalyzeImport: 'packs:analyze-import',
   packsImport: 'packs:import',
   packsExport: 'packs:export',
+  packsRestoreOfficial: 'packs:restore-official',
   packsPickFile: 'packs:pick-file',
   packsActivate: 'packs:activate',
   packsRename: 'packs:rename',

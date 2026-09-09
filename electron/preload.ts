@@ -145,6 +145,7 @@ const api: LauncherApi = {
   analyzePackImport: path => ipcRenderer.invoke(IPC.packsAnalyzeImport, path),
   importPack: (path, items, options) => ipcRenderer.invoke(IPC.packsImport, path, items, options?.name),
   exportPack: packId => ipcRenderer.invoke(IPC.packsExport, packId),
+  restoreOfficialPack: () => ipcRenderer.invoke(IPC.packsRestoreOfficial),
   pickPackFile: () => ipcRenderer.invoke(IPC.packsPickFile),
   getDroppedFilePath: (file: File) => webUtils.getPathForFile(file),
   activatePack: packId => ipcRenderer.invoke(IPC.packsActivate, packId),

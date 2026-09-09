@@ -1663,6 +1663,7 @@ export const demoApi: LauncherApi = {
     const pack = demoPacks.find(item => item.id === packId)
     return pack ? `C:\\Users\\demo\\Desktop\\${pack.name}.zip` : null
   },
+  restoreOfficialPack: async () => ({ id: 'pack-official-demo', installed: [], failures: [], state: 'complete' }),
   pickPackFile: async () => 'C:\\Users\\demo\\Downloads\\example-pack.zip',
   getDroppedFilePath: file => (file as File & { path?: string }).path ?? 'C:\\Users\\demo\\Downloads\\example-pack.zip',
   activatePack: async packId => {

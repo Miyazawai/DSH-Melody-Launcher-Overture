@@ -893,13 +893,22 @@ export function useLauncherStore() {
     return next !== undefined
   }, [api, refreshPacks, refreshProfile, refreshSecondaryResources, run, setSettings])
 
+  /** 恢复官方默认整合包（下载导入在当前主进程完成后经 done 事件刷新列表，这里再兜一次）。 */
+  const restoreOfficialPack = useCallback(async (): Promise<boolean> => {
+    const result = await run('official-restore', () => api.restoreOfficialPack(), { success: '官方整合包已恢复。' })
+    if (result) await Promise.all([refreshPacks(), refreshProfile()])
+    return result !== undefined
+  }, [api, run, refreshPacks, refreshProfile])
+
   // 整合包后台活动（导出打包进度等）：来自主进程 packProgress 状态事件，面板上展示，
   // 否则导出这类长任务在 UI 上毫无反馈、看起来像卡死。
   const [packActivity, setPackActivity] = useState<string | null>(null)
   useEffect(() => api.onPackProgress(event => {
     if (event.kind === 'status') setPackActivity(event.message)
     else if (event.kind === 'done' || event.kind === 'error') setPackActivity(null)
-  }), [api])
+    // 主进程侧的导入（官方整合包首启自动获取等）完成后刷新列表，无需用户手动切页。
+    if (event.kind === 'done') void refreshPacks()
+  }), [api, refreshPacks])
 
   const exportPack = useCallback(async (packId: string): Promise<string | null> => {
     setPackActivity('正在导出整合包：正在打包插件与离线依赖（可能需要几分钟），完成后自动保存…')
@@ -1136,6 +1145,7 @@ export function useLauncherStore() {
     createBlankPack,
     packDiskUsage,
     removePack,
+    restoreOfficialPack,
     exportPack,
     exportProfile,
     addPackPlugin,

@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { copyFile, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { IPC, IPC_EVENTS } from '../src/constants'
-import type { AiSessionCreateInput, ApplicationInstallRequest, AppSettings, CustomApiProviderInput, PackCreateRequest, PluginInstallRequest, PresetInstallRequest, SkillInstallRequest, SkillInstallTarget, WindowMode, ProfileRepositoryImportMode, PackPluginEntry } from '../src/types'
+import type { AiSessionCreateInput, ApplicationInstallRequest, AppSettings, CustomApiProviderInput, PackCreateRequest, PackInstallResult, PluginInstallRequest, PresetInstallRequest, SkillInstallRequest, SkillInstallTarget, WindowMode, ProfileRepositoryImportMode, PackPluginEntry } from '../src/types'
 import type { ApplicationAddonManager } from './application-addons'
 import type { RecommendedWebUiService } from './recommended-web-ui'
 import { isWindowMode } from './app-window'
@@ -75,12 +75,14 @@ export interface IpcDependencies {
   skillsShIndexPath: string
   /** juya AI 日报 RSS 磁盘缓存路径（userData/juya-news-cache.json）。 */
   newsCachePath: string
+  /** 恢复当前版本的官方默认整合包（下载导入走快照管线）；失败抛错。 */
+  restoreOfficialPack: () => Promise<PackInstallResult>
   getWindow: () => BrowserWindow | null
   setWindowMode: (mode: WindowMode) => void
 }
 
 export function registerIpcHandlers(deps: IpcDependencies): void {
-  const { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager, githubAuth, applicationAddons, catalogSync, dshMarket, recommendedWebUi, runtimeVersions, profiles, skillsShIndexPath, newsCachePath } = deps
+  const { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager, githubAuth, applicationAddons, catalogSync, dshMarket, recommendedWebUi, runtimeVersions, profiles, skillsShIndexPath, newsCachePath, restoreOfficialPack } = deps
   const linkedComponents = createLinkedComponentController({
     readSettings: () => settings.read(),
     readProfile,
@@ -960,6 +962,11 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     if (result.canceled || !result.filePath) return null
     await packManager.exportPack(packId, undefined, result.filePath)
     return result.filePath
+  })
+
+  ipcMain.handle(IPC.packsRestoreOfficial, async () => {
+    assertProfileMutationAvailable()
+    return restoreOfficialPack()
   })
 
   ipcMain.handle(IPC.packsPickFile, async () => {

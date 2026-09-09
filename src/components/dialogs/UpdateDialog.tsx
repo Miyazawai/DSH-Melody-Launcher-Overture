@@ -42,6 +42,13 @@ export function UpdateDialog({ status, progress, busy, onDownload, onApply, onCl
             {status.assetSize != null && status.assetSize > 0 && <div><dt>安装包大小</dt><dd>{formatBytes(status.assetSize)}</dd></div>}
           </dl>
 
+          {status.releaseNotes && (
+            <div className="update-notes">
+              <h3>更新内容</h3>
+              <pre>{status.releaseNotes}</pre>
+            </div>
+          )}
+
           {failed ? (
             <p className="update-message">{status.message}</p>
           ) : downloading ? (
