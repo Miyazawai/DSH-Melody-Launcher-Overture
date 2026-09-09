@@ -284,10 +284,6 @@ function NewsCard() {
     if (!today) body = <span className="widget-muted">今日暂无日报条目</span>
     else if (sections.length > 0) body = (
       <div className="widget-news-wrap">
-        {/* 卡片标题已是「AI 日报」，这里不再重复今日早报，只留日期；栏目名在各自分组上。 */}
-        <div className="widget-news-head">
-          <small>{shortDate(today.pubDate) || today.title}</small>
-        </div>
         <div className="widget-news-scroll">
           {sections.map(section => (
             <div key={section.title} className="widget-news-section">
@@ -315,10 +311,6 @@ function NewsCard() {
     )
     else body = (
       <div className="widget-news-wrap">
-        <div className="widget-news-head">
-          <span>今日要闻</span>
-          <small>{shortDate(today.pubDate) || today.title}</small>
-        </div>
         <ul className="widget-news">
           {headlines.slice(0, 5).map(headline => (
             <li key={headline.link}>
@@ -332,8 +324,15 @@ function NewsCard() {
       </div>
     )
   }
+  // 日期进卡片标题行（右上角），正文里不再单独占一行。
+  const todayItem = result?.status === 'ok' ? result.items[0] : undefined
+  const dateLabel = todayItem ? shortDate(todayItem.pubDate) : ''
   return (
-    <WidgetCard icon={<Newspaper size={15} />} title="AI 日报">
+    <WidgetCard
+      icon={<Newspaper size={15} />}
+      title="AI 日报"
+      actions={dateLabel ? <small className="widget-card-meta">{dateLabel}</small> : undefined}
+    >
       {body}
     </WidgetCard>
   )
