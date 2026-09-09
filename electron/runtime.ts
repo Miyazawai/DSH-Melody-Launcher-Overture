@@ -119,6 +119,8 @@ export async function findAvailableWebPort(
 }
 
 const STDERR_CAPTURE_LIMIT = 24_000
+/** officecli 工具首次准备（含 33MB 下载）等待启动的硬顶，超时后台继续。 */
+const OFFICE_CLI_PREPARE_TIMEOUT_MS = 180_000
 
 export interface RuntimeControllerOptions {
   readSettings: () => Promise<AppSettings>
@@ -138,6 +140,11 @@ export interface RuntimeControllerOptions {
   packageStoreRoot?: string
   /** DSH 子进程应使用的 npm 镜像源（默认 npmmirror）。 */
   npmRegistry?: string
+  /**
+   * 准备机器级外部工具 officecli（含 officecli 技能的整合包首次启动时经镜像下载），
+   * 返回可执行文件绝对路径或 null（不需要/拿不到）。永不抛异常。
+   */
+  prepareOfficeCliTool?: (settings: AppSettings, onProgress: (received: number, totalBytes: number | null) => void) => Promise<string | null>
 }
 
 export interface RuntimeController {
@@ -221,9 +228,45 @@ export function createRuntimeController(options: RuntimeControllerOptions): Runt
     await Promise.allSettled(running.map(killProcessTree))
   }
 
+  /**
+   * 启动前准备机器级 officecli 工具：3 分钟硬顶（慢网下不无限拖住「启动」按钮），
+   * 超时/失败按 null 走——后台那次下载仍会完成，下次启动直接命中缓存。
+   */
+  const prepareOfficeCliToolForLaunch = async (settings: AppSettings): Promise<string | null> => {
+    if (!options.prepareOfficeCliTool) return null
+    let lastBucket = -1
+    const attempt = (async (): Promise<string | null> => {
+      try {
+        return await options.prepareOfficeCliTool!(settings, (received, total) => {
+          const bucket = total && total > 0 ? Math.floor((received / total) * 20) : -1
+          if (bucket !== lastBucket) {
+            lastBucket = bucket
+            const percent = total && total > 0 ? `（${Math.floor((received / total) * 100)}%）` : ''
+            options.emitOutput('info', `Office 工具下载中${percent}`)
+          }
+        })
+      } catch {
+        return null
+      }
+    })()
+    let timer: NodeJS.Timeout | null = null
+    const capped = await Promise.race<string | null>([
+      attempt,
+      new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), OFFICE_CLI_PREPARE_TIMEOUT_MS) }),
+    ])
+    if (timer) clearTimeout(timer)
+    if (capped === null) {
+      attempt.then(exe => {
+        if (exe) options.emitOutput('info', 'Office 工具已在后台准备完成，下次启动整合包即可使用。')
+      }).catch(() => undefined)
+    }
+    return capped
+  }
+
   const startCompanions = (
     specs: ApplicationLaunchSpec[],
     settings: AppSettings,
+    extraPathExecutable: string | null = null,
   ): void => {
     if (companionTimer) {
       clearTimeout(companionTimer)
@@ -232,7 +275,8 @@ export function createRuntimeController(options: RuntimeControllerOptions): Runt
     for (const spec of specs) {
       if (companions.has(spec.id)) continue
       try {
-        const environment = withExecutableDirectoryOnPath(spec.executable, runtimeEnv(settings, process.env))
+        let environment = withExecutableDirectoryOnPath(spec.executable, runtimeEnv(settings, process.env))
+        if (extraPathExecutable) environment = withExecutableDirectoryOnPath(extraPathExecutable, environment)
         const companion = startProcess(spec.executable, spec.args, { cwd: spec.cwd, env: environment })
         companions.set(spec.id, companion)
         options.emitOutput('info', `伴随应用命令：${formatCommandLine(spec.executable, spec.args)}\n工作目录：${spec.cwd}`)
@@ -269,6 +313,8 @@ export function createRuntimeController(options: RuntimeControllerOptions): Runt
       executable = resolveNodeExecutable(executable, nodeRuntime)
       environment = withExecutableDirectoryOnPath(nodeRuntime.node, environment)
     }
+    const officeCliExe = await prepareOfficeCliToolForLaunch(settings)
+    if (officeCliExe) environment = withExecutableDirectoryOnPath(officeCliExe, environment)
     // A replacement host is commonly launched as `node entry.js`. Probe the
     // entry script, not node.exe, so an add-on's bundled DSH version can select
     // the correct credentials schema.
@@ -333,13 +379,13 @@ export function createRuntimeController(options: RuntimeControllerOptions): Runt
           browserOpened = true
           options.openExternal(foundUrl)
         }
-        startCompanions(applicationPlan.companions, settings)
+        startCompanions(applicationPlan.companions, settings, officeCliExe)
       }
     }
 
     const scheduleCompanions = () => {
       if (applicationPlan.companions.length === 0) return
-      companionTimer = setTimeout(() => startCompanions(applicationPlan.companions, settings), 5_000)
+      companionTimer = setTimeout(() => startCompanions(applicationPlan.companions, settings, officeCliExe), 5_000)
       companionTimer.unref()
     }
 

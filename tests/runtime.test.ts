@@ -194,6 +194,58 @@ describe('应用加载项运行模式', () => {
     await runtime.stop()
   })
 
+  it('officecli 工具就绪后，其目录注入 DSH 子进程 PATH 首位', async () => {
+    const settings = controllerSettings()
+    const child = fakeChild(4160)
+    const spawnProcess = vi.fn(
+      (_executable: string, _args: string[], _options: { cwd: string; env: NodeJS.ProcessEnv }) => child,
+    )
+    const toolExe = path.join(process.cwd(), 'dsh-tools', 'officecli', 'versions', 'v1.0.0', 'officecli.exe')
+    const progress = vi.fn((received: number, total: number | null) => { void received; void total })
+    const runtime = createRuntimeController({
+      readSettings: async () => settings,
+      prepareNodeRuntime: async () => managedNode(),
+      fallbackWorkspace: () => process.cwd(),
+      emitOutput: () => {},
+      emitState: () => {},
+      openExternal: () => {},
+      spawnProcess,
+      prepareOfficeCliTool: async (_s, onProgress) => {
+        onProgress(1, 2)
+        progress(1, 2)
+        return toolExe
+      },
+    })
+    await runtime.start()
+    expect(progress).toHaveBeenCalledTimes(1)
+    const environment = spawnProcess.mock.calls[0][2].env
+    const pathKey = Object.keys(environment).find(key => key.toUpperCase() === 'PATH') ?? 'PATH'
+    expect(environment[pathKey]?.startsWith(`${path.dirname(toolExe)}${path.delimiter}`)).toBe(true)
+    await runtime.stop()
+  })
+
+  it('未配置 officecli 工具准备时启动行为不受影响', async () => {
+    const settings = controllerSettings()
+    const child = fakeChild(4161)
+    const spawnProcess = vi.fn(
+      (_executable: string, _args: string[], _options: { cwd: string; env: NodeJS.ProcessEnv }) => child,
+    )
+    const runtime = createRuntimeController({
+      readSettings: async () => settings,
+      prepareNodeRuntime: async () => managedNode(),
+      fallbackWorkspace: () => process.cwd(),
+      emitOutput: () => {},
+      emitState: () => {},
+      openExternal: () => {},
+      spawnProcess,
+    })
+    await runtime.start()
+    const environment = spawnProcess.mock.calls[0][2].env
+    const pathKey = Object.keys(environment).find(key => key.toUpperCase() === 'PATH') ?? 'PATH'
+    expect(environment[pathKey] ?? '').not.toContain('dsh-tools')
+    await runtime.stop()
+  })
+
   it('使用替代宿主入口，并完全绕过设置中的 dsh web', async () => {
     const settings = controllerSettings()
     const nodeRuntime = managedNode()

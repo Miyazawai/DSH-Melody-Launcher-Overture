@@ -29,6 +29,7 @@ import {
   type PnpmRuntime,
 } from './node-runtime'
 import { createProxyAwareFetch } from './network'
+import { ensureOfficeCli, packUsesOfficeCliSkills } from './officecli-tool'
 import { createPackManager, type InstallInstaller, type PackInstallTarget, type PackManager } from './pack'
 import { migrateToPackHomesV2 } from './pack-migration'
 import { readPackRegistry } from './pack-registry'
@@ -106,6 +107,8 @@ function createServices(): Services {
   const applicationRoot = path.join(userData, 'application-addons')
   const packsJsonPath = path.join(userData, 'packs.json')
   const packsRoot = path.join(userData, 'dsh-packs')
+  // 机器级外部工具（officecli 等）的托管根目录：跨整合包共享，不随快照进包。
+  const officeCliToolsRoot = path.join(userData, 'dsh-tools')
   const proxyAwareFetch = createProxyAwareFetch((input, init) => net.fetch(input, init))
   const githubAuth = createGitHubAuthService({
     filePath: path.join(userData, 'github-auth.bin'),
@@ -161,6 +164,39 @@ function createServices(): Services {
     }, (level, text) => events.output(source, level, text))
   }
 
+  /**
+   * 启动前准备 officecli：包里有 officecli 技能才动；下载进度既写日志
+   * （runtime 通道，由控制器输出）也进整合包活动横幅（packActivity，5% 分桶节流），
+   * 结束（成功或失败）清空横幅。永不抛异常。
+   */
+  const prepareOfficeCliTool = async (
+    current: AppSettings,
+    onProgress: (received: number, total: number | null) => void,
+  ): Promise<string | null> => {
+    let bannerShown = false
+    let lastPercent = -1
+    try {
+      if (!(await packUsesOfficeCliSkills(current.dshHome))) return null
+      return await ensureOfficeCli(officeCliToolsRoot, {
+        mirror: current.network?.githubMirror,
+        fetchImpl: proxyAwareFetch,
+        onProgress: (received, total) => {
+          onProgress(received, total)
+          const percent = total && total > 0 ? Math.floor((received / total) * 100) : -1
+          if (percent !== lastPercent) {
+            lastPercent = percent
+            bannerShown = true
+            events.packProgress({ kind: 'status', message: `正在准备 Office 工具（首次约 33MB）${percent >= 0 ? `：${percent}%` : ''}，完成后自动继续启动…` })
+          }
+        },
+      })
+    } catch {
+      return null
+    } finally {
+      if (bannerShown) events.packProgress({ kind: 'status', message: '' })
+    }
+  }
+
   settings = createSettingsStore({
     filePath: path.join(userData, 'settings.json'),
     createDefaults: () => defaultSettings({
@@ -194,6 +230,7 @@ function createServices(): Services {
     resolveApplicationLaunchPlan: () => applicationAddons.launchPlan(),
     legacyCredentialsBackupRoot: path.join(userData, 'dsh-credentials-compat'),
     packageStoreRoot: path.join(userData, 'plugin-store'),
+    prepareOfficeCliTool,
   })
   const profileService = createProfileService({
     dshHome: () => settings.read().then(value => value.dshHome),
