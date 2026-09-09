@@ -283,7 +283,7 @@ export function createPluginTrialManager(options: PluginTrialManagerOptions): Pl
       url: null,
     }
     options.emitResult(active)
-    options.emitOutput('info', `插件试运行：${packageName}（来源 Profile：${profileName}）`)
+    options.emitOutput('info', `插件试运行：${packageName}（来源整合包：${profileName}）`)
 
     const sessionRoot = path.join(options.trialRoot, `${Date.now()}-${process.pid}`)
     const trialHome = path.join(sessionRoot, 'dsh-home')
@@ -342,7 +342,7 @@ export function createPluginTrialManager(options: PluginTrialManagerOptions): Pl
       )
       const diagnostics = [
         `插件：${packageName}`,
-        `来源 Profile：${profileName}`,
+        `来源整合包：${profileName}`,
         `依赖声明：${specifier}`,
         `隔离命令：${commandLine}`,
         `结果：${outcome.message}`,
@@ -371,7 +371,7 @@ export function createPluginTrialManager(options: PluginTrialManagerOptions): Pl
         profileName,
         phase: 'failed',
         message,
-        diagnostics: `插件：${packageName}\n来源 Profile：${profileName}\n结果：${message}`,
+        diagnostics: `插件：${packageName}\n来源整合包：${profileName}\n结果：${message}`,
         startedAt,
         testedAt: new Date().toISOString(),
         durationMs: Date.now() - startedMs,

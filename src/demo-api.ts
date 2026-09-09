@@ -944,7 +944,7 @@ export const demoApi: LauncherApi = {
     selected: true,
   }],
   createProfile: async request => {
-    if (request.name === demoSettings.profileName) throw new Error(`Profile「${request.name}」已存在。`)
+    if (request.name === demoSettings.profileName) throw new Error(`整合包「${request.name}」已存在。`)
     return {
       id: request.name,
       name: request.name,
@@ -972,7 +972,7 @@ export const demoApi: LauncherApi = {
     return demoSettings
   },
   deleteProfile: async profileName => {
-    if (profileName === demoSettings.profileName) throw new Error('当前 Profile 不能删除。')
+    if (profileName === demoSettings.profileName) throw new Error('当前整合包不能删除。')
   },
   readProfileMetadata: async profileName => {
     const list = await demoApi.listProfiles()

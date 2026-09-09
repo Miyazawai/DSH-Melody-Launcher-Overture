@@ -80,7 +80,7 @@ describe('validateSettings', () => {
   })
 
   it('rejects a profile name with path separators', () => {
-    expect(() => validateSettings({ ...baseSettings, profileName: '../escape' })).toThrow(/配置名称/)
+    expect(() => validateSettings({ ...baseSettings, profileName: '../escape' })).toThrow(/整合包名称/)
   })
 
   it('rejects relative directories', () => {

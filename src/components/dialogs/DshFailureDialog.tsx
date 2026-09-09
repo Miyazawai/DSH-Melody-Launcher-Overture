@@ -55,7 +55,7 @@ export function DshFailureDialog({ failure, onClose }: DshFailureDialogProps) {
       '',
       '## 环境',
       `- 启动器：DSH 旋律启动器（序曲 Overture）v${packageMetadata.version}`,
-      `- 整合包 / Profile：${failure.profileName || '未知'}`,
+      `- 整合包：${failure.profileName || '未知'}`,
       `- 失败时间：${time}`,
       '',
       '## 诊断输出',
@@ -81,7 +81,7 @@ export function DshFailureDialog({ failure, onClose }: DshFailureDialogProps) {
         <div className="modal-content">
           <p className="dsh-failure-headline">{headline}</p>
           <div className="dsh-failure-meta">
-            <span className="dsh-failure-chip">Profile：{failure.profileName || '未知'}</span>
+            <span className="dsh-failure-chip">整合包：{failure.profileName || '未知'}</span>
             <span className="dsh-failure-chip">{new Date(failure.failedAt).toLocaleString('zh-CN', { hour12: false })}</span>
           </div>
           <pre className="dsh-failure-log" role="log">{failure.diagnostics.trim()}</pre>

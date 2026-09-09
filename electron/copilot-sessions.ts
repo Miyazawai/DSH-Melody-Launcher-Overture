@@ -397,7 +397,7 @@ export function createCopilotSessionManager(options: CopilotSessionManagerOption
         value.snapshot = snapshot
         value.session.hasSnapshot = true
         options.emitEvent({ kind: 'snapshot', sessionId: waiter.sessionId, snapshotId: snapshot.id })
-        appendMessage(waiter.sessionId, 'tool', `已对 Profile「${settings.profileName}」建立修改前快照。`)
+        appendMessage(waiter.sessionId, 'tool', `已对整合包「${settings.profileName}」建立修改前快照。`)
       }
       emitSession(waiter.sessionId)
       await persist()

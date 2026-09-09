@@ -74,7 +74,7 @@ describe('Profile service', () => {
   it('blocks deleting the selected Profile', async () => {
     const env = await fixture()
     const service = createProfileService(env.options)
-    await expect(service.remove('web')).rejects.toThrow('当前 Profile 不能删除')
+    await expect(service.remove('web')).rejects.toThrow('当前整合包不能删除')
   })
 
   it('requires explicit repair confirmation before switching to a Profile with missing links', async () => {

@@ -107,7 +107,7 @@ export function samePath(left: string, right: string): boolean {
 /** 校验并归一化一份来自渲染层的设置。任何一项不合法都直接抛错。 */
 export function validateSettings(input: AppSettings): AppSettings {
   if (!input || typeof input !== 'object') throw new Error('设置格式无效。')
-  if (!isSafeProfileName(input.profileName)) throw new Error('配置名称只能包含字母、数字、点、横线或下划线。')
+  if (!isSafeProfileName(input.profileName)) throw new Error('整合包名称只能包含字母、数字、点、横线或下划线。')
   if (!path.isAbsolute(input.dshInstallPath) || !path.isAbsolute(input.dshHome) || !path.isAbsolute(input.workspace)) {
     throw new Error('目录必须使用完整路径。')
   }

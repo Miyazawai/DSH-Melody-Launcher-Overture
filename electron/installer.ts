@@ -1053,7 +1053,7 @@ export function createInstaller(options: InstallerOptions): Installer {
           ? await readProfile(settings.dshHome, profileName, options.pluginReceiptsPath)
           : await readProfile(settings.dshHome, settings.profileName, options.pluginReceiptsPath)
         const dshInstallation = await detectDsh()
-        emit({ repository: fullName, kind: 'plugin', phase: 'complete', percent: 100, message: `插件已安装到 ${profileName} Profile` })
+        emit({ repository: fullName, kind: 'plugin', phase: 'complete', percent: 100, message: `插件已安装到整合包 ${profileName}` })
         return {
           kind: 'plugin',
           profile,
@@ -1117,7 +1117,7 @@ export function createInstaller(options: InstallerOptions): Installer {
           ? await readProfile(settings.dshHome, profileName, options.pluginReceiptsPath)
           : await readProfile(settings.dshHome, settings.profileName, options.pluginReceiptsPath)
         const dshInstallation = await detectDsh()
-        emit({ repository, kind: 'plugin', phase: 'complete', percent: 100, message: `插件已安装到 ${profileName} Profile` })
+        emit({ repository, kind: 'plugin', phase: 'complete', percent: 100, message: `插件已安装到整合包 ${profileName}` })
         return { kind: 'plugin', profile, settings, dshInstallation, installedProfileName: profileName, packageName: request.packageName }
       } catch (error) {
         emit({ repository, kind: 'plugin', phase: 'error', percent: currentPercent(0), message: error instanceof Error ? error.message : '安装失败' })

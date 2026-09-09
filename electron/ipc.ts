@@ -288,15 +288,15 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
           }
         : await githubAuth.createRepository({
             name: `dsh-pack-${payload.profileName}`,
-            description: `DSH Profile：${payload.profileName}`,
+            description: `DSH 整合包：${payload.profileName}`,
             private: payload.repositoryPrivate === true,
           })
       const inspection = await inspectPackZipFromPath(zipPath)
       await githubAuth.upsertRepositoryFile(repo.fullName, 'dsh-pack.yaml', serializePackManifest(inspection.manifest), `更新整合包 ${payload.profileName}` , repo.defaultBranch)
-      await githubAuth.upsertRepositoryFile(repo.fullName, 'README.md', `# DSH Profile ${payload.profileName}\n\n此仓库由 DSH Launcher 管理。\n`, `更新 Profile ${payload.profileName} 说明`, repo.defaultBranch)
+      await githubAuth.upsertRepositoryFile(repo.fullName, 'README.md', `# DSH 整合包 ${payload.profileName}\n\n此仓库由 DSH Launcher 管理。\n`, `更新 Profile ${payload.profileName} 说明`, repo.defaultBranch)
       // Repository imports use one stable canonical archive name. Local
       // downloads keep the Profile-specific filename for backward compatibility.
-      await githubAuth.upsertRepositoryFile(repo.fullName, 'profile.zip', await readFile(zipPath), `更新 Profile ${payload.profileName} 完整包`, repo.defaultBranch)
+      await githubAuth.upsertRepositoryFile(repo.fullName, 'profile.zip', await readFile(zipPath), `更新整合包 ${payload.profileName} 完整包`, repo.defaultBranch)
       await writeProfileMetadata(currentSettings.dshHome, payload.profileName, {
         source: { kind: 'github', repository: repo.fullName, branch: repo.defaultBranch },
         exportedAt: new Date().toISOString(),
@@ -307,7 +307,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     const window = deps.getWindow()
     if (!window) return null
     try {
-      const result = await dialog.showSaveDialog(window, { defaultPath: fileName, filters: [{ name: 'Profile / 整合包', extensions: ['zip'] }] })
+      const result = await dialog.showSaveDialog(window, { defaultPath: fileName, filters: [{ name: '整合包', extensions: ['zip'] }] })
       if (result.canceled || !result.filePath) return null
       await copyFile(zipPath, result.filePath)
       return result.filePath

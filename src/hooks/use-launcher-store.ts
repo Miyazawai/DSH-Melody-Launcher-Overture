@@ -317,7 +317,7 @@ export function useLauncherStore() {
           channel: 'test',
           level: result.phase === 'failed' ? 'error' : result.phase === 'passed' ? 'success' : 'info',
           text: result.phase === 'running'
-            ? `插件试运行：${result.packageName}（来源 Profile：${result.profileName}）`
+            ? `插件试运行：${result.packageName}（来源整合包：${result.profileName}）`
             : result.message,
         })
       }),
@@ -824,7 +824,7 @@ export function useLauncherStore() {
   }, [api, profiles, refreshProfiles, refreshProfile, run])
 
   const deleteProfile = useCallback(async (profileName: string) => {
-    const next = await run(`profile-delete:${profileName}`, () => api.deleteProfile(profileName), { success: `Profile「${profileName}」已删除。` })
+    const next = await run(`profile-delete:${profileName}`, () => api.deleteProfile(profileName), { success: `整合包「${profileName}」已删除。` })
     if (next !== undefined) await refreshProfiles()
     return next !== undefined
   }, [api, refreshProfiles, run])

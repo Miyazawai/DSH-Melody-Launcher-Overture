@@ -74,7 +74,7 @@ function safeSubdirectory(value: string): boolean {
 export function packProfileName(name: string): string {
   if (!name || !name.trim()) throw new Error('整合包名称不能为空。')
   const derived = `${PACK_PROFILE_PREFIX}${name.toLowerCase().replace(/[^a-z0-9._-]/g, '-')}`
-  if (!isSafeProfileName(derived)) throw new Error('整合包名称无法生成安全的 Profile 名。')
+  if (!isSafeProfileName(derived)) throw new Error('整合包名称无法生成安全的标识。')
   return derived
 }
 

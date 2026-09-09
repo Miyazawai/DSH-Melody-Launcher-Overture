@@ -88,7 +88,7 @@ function metadataPath(profileDir: string): string {
 }
 
 function profileDirFor(dshHome: string, name: string): string {
-  if (!isSafeProfileName(name)) throw new Error('Profile 名称只能包含字母、数字、点、横线或下划线。')
+  if (!isSafeProfileName(name)) throw new Error('整合包名称只能包含字母、数字、点、横线或下划线。')
   return path.join(dshHome, 'profiles', name)
 }
 
@@ -506,7 +506,7 @@ export async function switchProfile(options: ProfileServiceOptions, profileName:
   if (options.isRuntimeRunning?.()) throw new Error('请先停止 DSH，再切换整合包。')
   const dshHome = await homeOf(options)
   const targetDir = profileDirFor(dshHome, profileName)
-  if (!await exists(targetDir)) throw new Error(`Profile「${profileName}」不存在。`)
+  if (!await exists(targetDir)) throw new Error(`整合包「${profileName}」不存在。`)
   const profile = await readProfile(dshHome, profileName, options.pluginReceiptsPath)
   const initialMissing = profile.initialized ? await missingDependencies(profile) : []
   // Materialize links for packages that already exist in another Profile or
@@ -522,10 +522,10 @@ export async function switchProfile(options: ProfileServiceOptions, profileName:
       : fillMissing === true && options.fillMissingDependencies
         ? (items: string[]) => options.fillMissingDependencies!(profileName, items)
         : null
-    if (!repair) throw new Error(`Profile「${profileName}」缺少插件：${missing.join('、')}。确认补齐依赖后再切换。`)
+    if (!repair) throw new Error(`整合包「${profileName}」缺少插件：${missing.join('、')}。确认补齐依赖后再切换。`)
     await repair(missing)
     const afterRepair = await missingDependencies(await readProfile(dshHome, profileName, options.pluginReceiptsPath))
-    if (afterRepair.length > 0) throw new Error(`Profile「${profileName}」仍缺少插件：${afterRepair.join('、')}`)
+    if (afterRepair.length > 0) throw new Error(`整合包「${profileName}」仍缺少插件：${afterRepair.join('、')}`)
   }
   const settings = await options.readSettings()
   const metadata = await readProfileMetadata(dshHome, profileName)
@@ -538,7 +538,7 @@ export async function switchProfile(options: ProfileServiceOptions, profileName:
 export async function deleteProfile(options: ProfileServiceOptions, profileName: string): Promise<void> {
   if (options.isRuntimeRunning?.()) throw new Error('请先停止 DSH，再删除整合包。')
   const current = await options.readSettings()
-  if (current.profileName === profileName) throw new Error('当前 Profile 不能删除。')
+  if (current.profileName === profileName) throw new Error('当前整合包不能删除。')
   const dshHome = await homeOf(options)
   await rm(profileDirFor(dshHome, profileName), { recursive: true, force: true })
   // Receipts are profile-scoped source metadata. Removing them prevents a
@@ -689,7 +689,7 @@ export function createProfileService(options: ProfileServiceOptions): ProfileSer
     async metadata(profileName) {
       const all = await listProfiles(options)
       const result = all.find(item => item.id === profileName)
-      if (!result) throw new Error(`Profile「${profileName}」不存在。`)
+      if (!result) throw new Error(`整合包「${profileName}」不存在。`)
       return result
     },
   }
