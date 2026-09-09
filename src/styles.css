@@ -932,6 +932,11 @@ input:focus-visible {
   font-weight: 650;
 }
 
+.widget-news-head small {
+  margin-left: auto;
+  font-weight: 500;
+}
+
 .widget-news-dot {
   flex: none;
   width: 6px;
