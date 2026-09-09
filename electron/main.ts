@@ -186,7 +186,7 @@ function createServices(): Services {
           if (percent !== lastPercent) {
             lastPercent = percent
             bannerShown = true
-            events.packProgress({ kind: 'status', message: `正在准备 Office 工具（首次约 33MB）${percent >= 0 ? `：${percent}%` : ''}，完成后自动继续启动…` })
+            events.packProgress({ kind: 'status', message: `正在准备 Office 工具（首次约 33MB）${percent >= 0 ? `：${percent}%` : ''}…` })
           }
         },
       })

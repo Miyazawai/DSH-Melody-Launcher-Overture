@@ -137,6 +137,7 @@ function LauncherShell() {
                       const pack = store.packs.find(item => item.id === settings.activePackId)
                       return pack ? { name: pack.name, dshVersion: pack.dshVersion } : null
                     })()}
+                    launchActivity={store.packActivity}
                     onToggleRuntime={toggleRuntime}
                     onVersionSelect={() => navigation.goHome('packs')}
                     onUpdateDsh={() => { void store.updateDsh() }}

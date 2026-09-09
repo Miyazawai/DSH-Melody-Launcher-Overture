@@ -24,6 +24,8 @@ interface LauncherHomeProps {
   presetCount: number
   /** 当前激活整合包（名称 + 绑定 DSH 版本），显示在「切换整合包」入口上。 */
   activePack: { name: string; dshVersion: string | null } | null
+  /** 启动过程中主进程的后台活动（如 Office 工具下载进度），非空时顶替「正在启动本地工作台」小字。 */
+  launchActivity?: string | null
   onToggleRuntime: () => void
   onVersionSelect: () => void
   onUpdateDsh: () => void
@@ -46,6 +48,7 @@ export function LauncherHome({
   skillCount,
   presetCount,
   activePack,
+  launchActivity,
   onToggleRuntime,
   onVersionSelect,
   onUpdateDsh,
@@ -103,7 +106,7 @@ export function LauncherHome({
           >
             {busy ? <LoaderCircle className="spin" size={24} /> : noPack ? <Package size={24} /> : runtime.running ? <CircleStop size={24} /> : needsInstallation ? <Download size={24} /> : <Play size={25} fill="currentColor" />}
             <span>
-              <small>{busy ? (installingDsh ? installProgress?.message ?? '正在准备本地 DSH' : runtime.running ? '正在停止本地服务' : '正在启动本地工作台') : noPack ? '先创建一个整合包环境' : runtime.running ? '结束本地服务' : needsInstallation ? '首次使用需要完成本地部署' : activeRuntimeReplacement ? '由应用加载项托管 DSH' : '启动本地工作台'}</small>
+              <small>{busy ? (installingDsh ? installProgress?.message ?? '正在准备本地 DSH' : runtime.running ? '正在停止本地服务' : launchActivity ?? '正在启动本地工作台') : noPack ? '先创建一个整合包环境' : runtime.running ? '结束本地服务' : needsInstallation ? '首次使用需要完成本地部署' : activeRuntimeReplacement ? '由应用加载项托管 DSH' : '启动本地工作台'}</small>
               <strong>{runtime.running ? `停止 ${runtime.applicationAddonName ?? 'DSH'}` : noPack ? '新建整合包' : installingDsh ? installProgress?.indeterminate ? '安装进行中' : `安装 DSH ${installProgress?.percent ?? 0}%` : needsInstallation ? '下载安装 DSH' : busy ? '请稍候…' : activeRuntimeReplacement ? `启动 ${activeRuntimeReplacement.name}` : '启动 DSH'}</strong>
             </span>
           </button>

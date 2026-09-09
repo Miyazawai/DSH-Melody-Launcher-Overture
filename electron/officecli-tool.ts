@@ -141,6 +141,34 @@ export interface OfficeCliEnsureOptions {
   platform?: NodeJS.Platform
   architecture?: string
   now?: () => number
+  /** 单源断流判定（连续无字节即掐掉换源）与单源硬顶；默认 15s / 300s。 */
+  stallMs?: number
+  candidateMaxMs?: number
+}
+
+/** 带断流看门狗的下载：慢但仍在动的源不限速（镜像吞吐差异大），彻底停摆才掐。 */
+async function downloadWithStallGuard(
+  url: string,
+  maxBytes: number,
+  options: OfficeCliEnsureOptions,
+): Promise<Buffer> {
+  const stallMs = options.stallMs ?? 15_000
+  const hardMs = options.candidateMaxMs ?? 300_000
+  const controller = new AbortController()
+  const hard = AbortSignal.timeout(hardMs)
+  hard.addEventListener('abort', () => controller.abort())
+  let lastByteAt = Date.now()
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastByteAt > stallMs) controller.abort()
+  }, Math.max(500, Math.floor(stallMs / 4)))
+  try {
+    return await downloadReleaseAsset(url, maxBytes, (received, total) => {
+      lastByteAt = Date.now()
+      options.onProgress?.(received, total)
+    }, options.fetchImpl ?? fetch, controller.signal)
+  } finally {
+    clearInterval(watchdog)
+  }
 }
 
 /** 同一托管根目录的 ensure 并发合并成一次下载（启动重试 / 双窗口场景）。 */
@@ -193,7 +221,7 @@ async function ensureOfficeCliInner(toolsRoot: string, options: OfficeCliEnsureO
   if (release.sumsUrl) {
     for (const url of candidateUrls(release.sumsUrl, options.mirror)) {
       try {
-        const text = (await downloadReleaseAsset(url, SUMS_MAX_BYTES, undefined, fetchImpl)).toString('utf8')
+        const text = (await downloadWithStallGuard(url, SUMS_MAX_BYTES, { ...options, onProgress: undefined })).toString('utf8')
         expectedHash = parseNodeArchiveChecksum(text, asset.asset)
         if (expectedHash) break
       } catch {
@@ -206,7 +234,7 @@ async function ensureOfficeCliInner(toolsRoot: string, options: OfficeCliEnsureO
   await mkdir(path.dirname(target), { recursive: true })
   for (const url of candidateUrls(release.binaryUrl, options.mirror)) {
     try {
-      const buffer = await downloadReleaseAsset(url, OFFICECLI_MAX_BYTES, options.onProgress, fetchImpl)
+      const buffer = await downloadWithStallGuard(url, OFFICECLI_MAX_BYTES, options)
       if (expectedHash) {
         const actual = createHash('sha256').update(buffer).digest('hex')
         if (actual !== expectedHash) continue

@@ -19,12 +19,15 @@ export async function downloadReleaseAsset(
   maxBytes: number,
   onProgress?: (received: number, total: number | null) => void,
   fetchImpl?: typeof fetch,
+  /** 外部中断（断流看门狗/总超时）：abort 后 reader 抛错，调用方换下一个源。 */
+  signal?: AbortSignal,
 ): Promise<Buffer> {
   assertHttpsReleaseUrl(url)
   const doFetch = fetchImpl ?? fetch
   const response = await doFetch(url, {
     headers: { 'User-Agent': 'DSH-Launcher' },
     redirect: 'follow',
+    signal,
   })
   if (!response.ok || !response.body) {
     throw new Error(`下载 Release 资产失败（HTTP ${response.status}）。`)

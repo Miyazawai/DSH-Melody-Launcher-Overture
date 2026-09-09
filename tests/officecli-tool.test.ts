@@ -186,6 +186,31 @@ describe('ensureOfficeCli', () => {
     expect(second.attempts.some(url => url.includes('officecli-win-x64.exe'))).toBe(false)
   })
 
+  it('断流的源被看门狗掐掉后自动换下一个源（直连挂起 → 镜像成功）', async () => {
+    const root = await tempRoot()
+    const attempts: string[] = []
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : String(input)
+      attempts.push(url)
+      if (url === LATEST_ENDPOINT) return latestResponse()
+      if (url.endsWith('/SHA256SUMS')) return sumsResponse()
+      if (url === BINARY_URL) {
+        // 模拟"握手成功但永不回数据"的直连黑洞：只响应 abort。
+        return await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+        })
+      }
+      if (url.startsWith('https://gh-proxy.com/')) {
+        return new Response(Uint8Array.from(BINARY), { status: 200, headers: { 'content-length': String(BINARY.length) } })
+      }
+      throw new Error(`unexpected ${url}`)
+    }) as typeof fetch
+    const exe = await win32Ensure(root, { fetchImpl, now: () => 1_000, stallMs: 60, candidateMaxMs: 5_000 })
+    expect(exe).not.toBeNull()
+    expect(attempts).toContain(BINARY_URL)
+    expect(attempts.some(url => url.startsWith('https://gh-proxy.com/'))).toBe(true)
+  })
+
   it('并发调用合并成一次下载（单飞）', async () => {
     const root = await tempRoot()
     const { fetchImpl, attempts } = spyFetch(url => {
