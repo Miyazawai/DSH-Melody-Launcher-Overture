@@ -1,4 +1,4 @@
-import { ChevronRight, CircleStop, Download, LoaderCircle, Package, Play, Settings } from 'lucide-react'
+import { ChevronRight, CircleStop, Download, LoaderCircle, Package, Play, Settings, SquareArrowOutUpRight } from 'lucide-react'
 import packageMetadata from '../../package.json'
 import { WidgetZone } from './WidgetZone'
 import type { DshInstallationStatus, DshUpdateStatus, HomeTab, InstallProgress, InstalledApplicationAddon, LauncherUpdateStatus, RuntimeState } from '../types'
@@ -27,6 +27,8 @@ interface LauncherHomeProps {
   /** 启动过程中主进程的后台活动（如 Office 工具下载进度），非空时顶替「正在启动本地工作台」小字。 */
   launchActivity?: string | null
   onToggleRuntime: () => void
+  /** 服务运行中把网页重新拉起来（网页窗口被用户关掉后的唯一找回入口，与顶栏同源）。 */
+  onOpenWeb: () => void
   onVersionSelect: () => void
   onUpdateDsh: () => void
   onOpenLauncherUpdate: () => void
@@ -50,6 +52,7 @@ export function LauncherHome({
   activePack,
   launchActivity,
   onToggleRuntime,
+  onOpenWeb,
   onVersionSelect,
   onUpdateDsh,
   onOpenLauncherUpdate,
@@ -110,6 +113,16 @@ export function LauncherHome({
               <strong>{runtime.running ? `停止 ${runtime.applicationAddonName ?? 'DSH'}` : noPack ? '新建整合包' : installingDsh ? installProgress?.indeterminate ? '安装进行中' : `安装 DSH ${installProgress?.percent ?? 0}%` : needsInstallation ? '下载安装 DSH' : busy ? '请稍候…' : activeRuntimeReplacement ? `启动 ${activeRuntimeReplacement.name}` : '启动 DSH'}</strong>
             </span>
           </button>
+          {/* 运行中的第二分段：网页窗口被关掉后，这里是一键找回的入口（与左侧停止段等宽同构）。 */}
+          {runtime.running && runtime.url && (
+            <button type="button" className="launcher-start-button launcher-open-web" onClick={onOpenWeb} disabled={busy} title="在浏览器中重新打开 DSH 网页工作台">
+              <SquareArrowOutUpRight size={24} />
+              <span>
+                <small>浏览器中访问</small>
+                <strong>打开网页</strong>
+              </span>
+            </button>
+          )}
         </div>
         <button type="button" className="launcher-utility-button home-version-button" onClick={onVersionSelect} title={activePack ? '切换到其它整合包' : '创建或导入整合包'}>
           <Package size={20} className="home-version-icon" />

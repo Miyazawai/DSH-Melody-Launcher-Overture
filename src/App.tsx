@@ -139,6 +139,7 @@ function LauncherShell() {
                     })()}
                     launchActivity={store.packActivity}
                     onToggleRuntime={toggleRuntime}
+                    onOpenWeb={openHarness}
                     onVersionSelect={() => navigation.goHome('packs')}
                     onUpdateDsh={() => { void store.updateDsh() }}
                     onOpenLauncherUpdate={() => setUpdateOpen(true)}
