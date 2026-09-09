@@ -261,9 +261,53 @@ async function ensureOfficeCliInner(toolsRoot: string, options: OfficeCliEnsureO
   return staleUsable()
 }
 
+/** 包内自带二进制的约定位置：<包家目录>/tools/officecli/officecli.exe，随快照原样搬运。 */
+export function bundledOfficeCliPath(
+  dshHome: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return path.join(dshHome, 'tools', 'officecli', platform === 'win32' ? 'officecli.exe' : 'officecli')
+}
+
+/** 系统 PATH 里是否已经有一个 officecli（用户自装 / 技能自愈装过）——有就复用，不再下载。 */
+export function findOfficeCliOnSystem(
+  environment: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  const exe = platform === 'win32' ? 'officecli.exe' : 'officecli'
+  const entries = (environment.PATH ?? environment.Path ?? environment.path ?? '')
+    .split(path.delimiter)
+    .filter(Boolean)
+  for (const entry of entries) {
+    const candidate = path.join(entry.replace(/^"|"$/g, ''), exe)
+    if (existsSync(candidate)) return candidate
+  }
+  return null
+}
+
+/**
+ * 解析可用的 officecli 可执行文件，优先级：
+ * 1. 整合包自带（tools/officecli/）——官方预设包的主路径，导入即有、零网络；
+ * 2. 系统 PATH 已有——用户自装过，直接复用；
+ * 3. 启动器托管目录（24h 缓存，未命中走镜像下载链）——野生包兜底。
+ * 任何一级拿不到都安静落到下一级，全拿不到返回 null。
+ */
+export async function resolveOfficeCliExecutable(
+  dshHome: string,
+  toolsRoot: string,
+  options: OfficeCliEnsureOptions & { environment?: NodeJS.ProcessEnv } = {},
+): Promise<string | null> {
+  const platform = options.platform ?? process.platform
+  const bundled = bundledOfficeCliPath(dshHome, platform)
+  if (existsSync(bundled)) return bundled
+  const system = findOfficeCliOnSystem(options.environment ?? process.env, platform)
+  if (system) return system
+  return ensureOfficeCli(toolsRoot, options)
+}
+
 /**
  * 这个整合包是否用到了 officecli 技能（技能目录名前缀判定，不看内容不解析，
- * 出错一律当作"不需要"）。启用的与 .disabled 里的都算——重新启用就不该再等下载。
+ * 出错一律当作"不需要"）。启用的与 .disabled/ 里的都算——重新启用就不该再等下载。
  */
 export async function packUsesOfficeCliSkills(dshHome: string): Promise<boolean> {
   for (const dir of [path.join(dshHome, 'skills'), path.join(dshHome, 'skills', '.disabled')]) {

@@ -29,7 +29,7 @@ import {
   type PnpmRuntime,
 } from './node-runtime'
 import { createProxyAwareFetch } from './network'
-import { ensureOfficeCli, packUsesOfficeCliSkills } from './officecli-tool'
+import { packUsesOfficeCliSkills, resolveOfficeCliExecutable } from './officecli-tool'
 import { createPackManager, type InstallInstaller, type PackInstallTarget, type PackManager } from './pack'
 import { migrateToPackHomesV2 } from './pack-migration'
 import { readPackRegistry } from './pack-registry'
@@ -177,7 +177,7 @@ function createServices(): Services {
     let lastPercent = -1
     try {
       if (!(await packUsesOfficeCliSkills(current.dshHome))) return null
-      return await ensureOfficeCli(officeCliToolsRoot, {
+      return await resolveOfficeCliExecutable(current.dshHome, officeCliToolsRoot, {
         mirror: current.network?.githubMirror,
         fetchImpl: proxyAwareFetch,
         onProgress: (received, total) => {

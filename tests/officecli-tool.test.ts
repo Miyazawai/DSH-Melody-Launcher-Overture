@@ -1,12 +1,15 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  bundledOfficeCliPath,
   ensureOfficeCli,
+  findOfficeCliOnSystem,
   officeCliAssetName,
   packUsesOfficeCliSkills,
+  resolveOfficeCliExecutable,
   OFFICECLI_RELEASE_REPO,
 } from '../electron/officecli-tool'
 
@@ -224,6 +227,52 @@ describe('ensureOfficeCli', () => {
     ])
     expect(left).toBe(right)
     expect(attempts.filter(url => url === LATEST_ENDPOINT)).toHaveLength(1)
+  })
+})
+
+describe('resolveOfficeCliExecutable', () => {
+  it('整合包自带 tools/officecli/ 二进制时优先使用，零网络', async () => {
+    const home = await tempRoot()
+    const tools = await tempRoot()
+    const bundled = bundledOfficeCliPath(home, 'win32')
+    await mkdir(path.dirname(bundled), { recursive: true })
+    await writeFile(bundled, 'BUNDLED')
+    const { fetchImpl, attempts } = spyFetch(() => { throw new Error('no network') })
+    const exe = await resolveOfficeCliExecutable(home, tools, {
+      platform: 'win32', fetchImpl, environment: { PATH: '' }, now: () => 1_000,
+    })
+    expect(exe).toBe(bundled)
+    expect(attempts).toHaveLength(0)
+  })
+
+  it('系统 PATH 已有 officecli 时直接复用，不碰镜像链', async () => {
+    const home = await tempRoot()
+    const tools = await tempRoot()
+    const sysDir = await tempRoot()
+    const sysExe = path.join(sysDir, 'officecli.exe')
+    await writeFile(sysExe, 'SYSTEM')
+    expect(findOfficeCliOnSystem({ PATH: sysDir }, 'win32')).toBe(sysExe)
+    const { fetchImpl, attempts } = spyFetch(() => { throw new Error('no network') })
+    const exe = await resolveOfficeCliExecutable(home, tools, {
+      platform: 'win32', fetchImpl, environment: { PATH: sysDir }, now: () => 1_000,
+    })
+    expect(exe).toBe(sysExe)
+    expect(attempts).toHaveLength(0)
+  })
+
+  it('包内没有、PATH 没有时落到托管下载链（镜像候选）', async () => {
+    const home = await tempRoot()
+    const tools = await tempRoot()
+    const { fetchImpl } = spyFetch(url => {
+      if (url === LATEST_ENDPOINT) return latestResponse()
+      if (url === SUMS_URL) return sumsResponse()
+      if (url === BINARY_URL) return new Response(Uint8Array.from(BINARY), { status: 200, headers: { 'content-length': String(BINARY.length) } })
+      throw new Error(`unexpected ${url}`)
+    })
+    const exe = await resolveOfficeCliExecutable(home, tools, {
+      platform: 'win32', fetchImpl, environment: { PATH: '' }, now: () => 1_000,
+    })
+    expect(exe).toBe(path.join(tools, 'officecli', 'versions', 'v1.0.0', 'officecli.exe'))
   })
 })
 
