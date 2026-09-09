@@ -221,5 +221,7 @@ export async function collectDependencyTarballs(
   await Promise.all(workers)
   // 部分失败可容忍：失败名单随结果返回，导入端用 --prefer-offline 对缺失依赖自动联网补齐。
   const hasOutput = failed.length < targets.length
+  // 不交付给调用方的收集目录要自己收尾，否则会在快照目录里留下几十 MB 的残留。
+  if (!hasOutput) await rm(outputDir, { recursive: true, force: true }).catch(() => undefined)
   return { tarballDir: hasOutput ? outputDir : null, lockfileText, total: targets.length, failed }
 }

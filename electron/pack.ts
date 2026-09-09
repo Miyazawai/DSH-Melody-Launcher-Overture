@@ -1564,6 +1564,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       if (reason) throw new Error(reason)
       active = true
       let exportDir: string | null = null
+      let offline: { tarballDir: string; lockfileText: string } | undefined
       try {
         const settings = await options.readSettings()
         // 导出的读取根 = 该包的家目录（私有包用自己的目录，不再依赖当前激活包）。
@@ -1677,7 +1678,6 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           // not inflate the lightweight archive.
           : manifest.plugins.filter(entry => entry.source === 'local' || (!entry.repository && entry.source !== 'npm')).map(entry => entry.packageName)
         // 全离线支持：把 profile 依赖打成 tarball + 携带 lockfile；收集失败不阻塞导出（导入回退在线）。
-        let offline: { tarballDir: string; lockfileText: string } | undefined
         try {
           if (options.getNodeExecutable) {
             const nodeExe = await options.getNodeExecutable()
@@ -1710,6 +1710,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         }
         return { zipPath, fileName: path.basename(zipPath) }
       } catch (error) {
+        if (offline) await rm(offline.tarballDir, { recursive: true, force: true }).catch(() => undefined)
         if (exportDir) await rm(exportDir, { recursive: true, force: true }).catch(() => undefined)
         throw error
       } finally {
