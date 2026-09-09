@@ -41,7 +41,7 @@ import { assertMeaningfulPackName, assertPackDshVersion, isValidPackDshVersion, 
 import { extractOfflineSupportFromPath, extractPackBodiesFromPath, extractPresetBodiesFromPath, findManifestInArchiveFromPath, inspectPackZipFromPath } from './pack-zip'
 import { validateFullArchive } from './profile-repository-import'
 import { cleanPackNameHint, extractRawPluginBodiesFromPath, extractRawPresetSourcesFromPath, extractRawSkillSourcesFromPath, scanRawPackZipFromPath, type ExtractByteBudget } from './pack-scan'
-import { buildPackExportToFile, collectDependencyTarballs } from './pack-export'
+import { describeSnapshotZip, extractSnapshot, planSnapshot, writeSnapshotZip } from './pack-snapshot'
 import { parseDocument } from 'yaml'
 import {
   readPackRegistry,
@@ -875,6 +875,21 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       }
       const manifestText = await findManifestInArchiveFromPath(filePath)
       if (!manifestText) {
+        // 快照包：家目录镜像（含 node_modules），整包导入，不做逐项重装。
+        const snapshotInfo = await describeSnapshotZip(filePath)
+        if (snapshotInfo) {
+          const nameHint = cleanPackNameHint(path.basename(filePath)) ?? snapshotInfo.profileId ?? ''
+          const sizeMb = Math.round(snapshotInfo.unpackedBytes / (1024 * 1024))
+          return {
+            id: nameHint ? packProfileName(nameHint) : '',
+            name: nameHint,
+            description: `快照整合包：${snapshotInfo.fileCount} 个文件，解压约 ${sizeMb}MB。`,
+            version: '1.0.0',
+            dshVersion: snapshotInfo.dshVersion,
+            source: 'snapshot' as const,
+            items: snapshotInfo.pluginNames.map(packageName => ({ packageName, available: true, offline: true })),
+          }
+        }
         // 非标准包：扫描包内的标准插件目录与技能，合成为我们格式的整合包。
         const scan = await scanRawPackZipFromPath(filePath)
         const nameHint = cleanPackNameHint(path.basename(filePath)) ?? cleanPackNameHint(scan.topName ?? '') ?? ''
@@ -1061,6 +1076,104 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         // 也能走 catch → finally 复位 active，避免整合包子系统永久卡在「进行中」。
         const manifestText = await findManifestInArchiveFromPath(filePath)
         if (!manifestText) {
+          // ---- 快照分支：家目录镜像 + node_modules 随包，解开即用。----
+          const snapshotInfo = await describeSnapshotZip(filePath)
+          if (snapshotInfo) {
+            const snapshotSettings = await options.readSettings()
+            const snapshotExisting = await readPackRegistry(options.registryPath)
+            const snapshotHome = await getDshHome()
+            const packName = (importOptions?.name ?? '').trim() || snapshotInfo.profileId || cleanPackNameHint(path.basename(filePath)) || ''
+            if (!packName) throw new Error('无法确定整合包名称，请在预览中手动命名。')
+            // 快照包优先沿用源包 id（分享/回导时环境路径不漂移），重名时自动加后缀。
+            const idBase = snapshotInfo.profileId && isSafeProfileName(snapshotInfo.profileId)
+              ? snapshotInfo.profileId
+              : assertMeaningfulPackName(packName)
+            const packId = await resolveImportedProfileId(idBase, snapshotHome, snapshotExisting, importOptions)
+            const dshVersion = snapshotInfo.dshVersion ?? await resolvePackDshVersion(snapshotSettings)
+            const displayName = importPackDisplayName(packId, packName)
+            const homePath = path.join(packsRoot, packId)
+            await mkdir(homePath, { recursive: true })
+            try {
+              if (dshVersion && options.ensureDshVersionInstalled) {
+                await options.ensureDshVersionInstalled(dshVersion)
+                const before = await options.readSettings()
+                if (before.dshVersion !== dshVersion && options.selectDshVersion) {
+                  try {
+                    await options.selectDshVersion(dshVersion)
+                  } catch (error) {
+                    log('error', `切换 DSH ${dshVersion} 失败，导入继续使用当前版本：${asErrorMessage(error)}`)
+                  }
+                }
+              }
+              const startedAt = new Date().toISOString()
+              const stored = options.readStoredSettings ? await options.readStoredSettings() : snapshotSettings
+              await upsertPackRecord(options.registryPath, {
+                id: packId,
+                name: displayName,
+                description: snapshotInfo.description ?? '',
+                version: '1.0.0',
+                ...(dshVersion ? { dshVersion } : {}),
+                homePath,
+                source: 'snapshot',
+                installedAt: startedAt,
+                updatedAt: startedAt,
+                state: 'partial',
+                plugins: [],
+              })
+              await options.saveSettings({
+                ...stored,
+                activePackId: packId,
+                profileName: packId,
+                ...(dshVersion ? { dshVersion } : {}),
+              })
+              options.emitEvent({ kind: 'status', message: `正在解压快照包「${displayName}」…` })
+              const extracted = await extractSnapshot(filePath, homePath, {
+                newId: packId,
+                onProgress: (done, total) => {
+                  if (done % 500 === 0 || done === total) {
+                    options.emitEvent({ kind: 'status', message: `解压中：${done}/${total}` })
+                  }
+                },
+              })
+              if (extracted.longPaths.length > 0) {
+                log('error', `有 ${extracted.longPaths.length} 个文件因路径过长被跳过（如 ${extracted.longPaths[0]}）。把整合包名字改短一点再导入可以避免。`)
+              }
+              const profile = await options.installer.readProfile(homePath, packId)
+              const plugins = profile.plugins
+                .filter(plugin => !plugin.builtin)
+                .map(plugin => ({ packageName: plugin.packageName, enabled: plugin.enabled !== false }))
+              const finishedAt = new Date().toISOString()
+              const record: PackRecord = {
+                id: packId,
+                name: displayName,
+                description: snapshotInfo.description ?? '',
+                version: '1.0.0',
+                ...(dshVersion ? { dshVersion } : {}),
+                homePath,
+                source: 'snapshot',
+                installedAt: startedAt,
+                updatedAt: finishedAt,
+                state: 'complete',
+                plugins,
+              }
+              await upsertPackRecord(options.registryPath, record)
+              await writeRecordManifest(record, {
+                name: displayName,
+                description: record.description,
+                version: record.version,
+                ...(dshVersion ? { dshVersion } : {}),
+                plugins: plugins.map(plugin => ({ packageName: plugin.packageName, enabled: plugin.enabled })),
+              })
+              const result = { id: packId, installed: plugins.map(plugin => plugin.packageName), failures: [], state: 'complete' as const }
+              options.emitEvent({ kind: 'done', result })
+              return result
+            } catch (error) {
+              // 解压失败：清掉半成品家目录与记录，别在列表里留个坏包。
+              await rm(homePath, { recursive: true, force: true }).catch(() => undefined)
+              await removePackRecord(options.registryPath, packId).catch(() => undefined)
+              throw error
+            }
+          }
           // ---- raw 分支：扫描非标准包内的插件与技能，离线安装，注册为我们格式的整合包。----
           const scan = await scanRawPackZipFromPath(filePath)
           if (scan.plugins.length === 0 && scan.skills.length === 0 && scan.presets.length === 0) {
@@ -1559,158 +1672,41 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       }
     },
 
-    async exportPack(packId, exportMode: ProfileExportMode = 'light', targetZipPath?: string) {
+    async exportPack(packId, _exportMode: ProfileExportMode = 'light', targetZipPath?: string) {
       const reason = guarded()
       if (reason) throw new Error(reason)
       active = true
       let exportDir: string | null = null
-      let offline: { tarballDir: string; lockfileText: string } | undefined
       try {
-        const settings = await options.readSettings()
-        // 导出的读取根 = 该包的家目录（私有包用自己的目录，不再依赖当前激活包）。
         const record = await findRecord(packId)
         const dshHome = await homeOfRecord(record)
-        const currentProfile = await options.installer.readProfile(dshHome, options.unifiedProfiles ? packId : settings.profileName)
-        const exportProfileName = options.unifiedProfiles ? packId : settings.profileName
-        // 安装凭据只用于“来源/版本”信息，不再决定“导出什么”：
-        // 导出清单一律以该包家目录里 profile 的 package.json 依赖为真实依据（幽灵记录自动消失）。
-        const allReceipts = await readPluginReceipts(options.pluginReceiptsPath)
-        const receiptByName = new Map<string, PluginInstallReceipt>()
-        for (const item of allReceipts) {
-          const existing = receiptByName.get(item.packageName)
-          if (!existing || item.packId === exportProfileName) receiptByName.set(item.packageName, item)
+        if (!existsSync(dshHome)) throw new Error(`整合包「${packId}」的家目录不存在：${dshHome}`)
+        options.emitEvent({ kind: 'status', message: '正在扫描整合包目录…' })
+        // 快照式导出：家目录镜像（剔除个人数据、file: 依赖相对化），没有清单。
+        const plan = await planSnapshot(dshHome, { packId })
+        if (plan.entries.length === 0) throw new Error(`整合包「${packId}」没有可导出的内容。`)
+        for (const warning of plan.warnings) log('info', warning)
+        if (plan.longPaths.length > 0) {
+          log('info', `有 ${plan.longPaths.length} 个路径较长（如 ${plan.longPaths[0]}），导入到更深的目录时可能失败。`)
         }
-        const profilePlugins = currentProfile.plugins.filter(plugin => !plugin.builtin)
-        const plugins: PackManifest['plugins'] = profilePlugins.map(plugin => {
-          const receipt = receiptByName.get(plugin.packageName)
-          const entry: PackManifest['plugins'][number] = { packageName: plugin.packageName, enabled: plugin.enabled !== false }
-          if (receipt?.source === 'github' || receipt?.source === 'archive-subdirectory') {
-            entry.source = 'github'
-            if (receipt.repository) entry.repository = receipt.repository
-            if (receipt.subdirectory) entry.subdirectory = receipt.subdirectory
-            if (receipt.commit) entry.commit = receipt.commit
-            if (receipt.defaultBranch) entry.defaultBranch = receipt.defaultBranch
-            if (receipt.targetId) entry.targetId = receipt.targetId
-          } else if (receipt?.source === 'local-directory') {
-            entry.source = 'local'
-            if (receipt.version) entry.version = receipt.version
-          } else if (receipt) {
-            entry.source = 'npm'
-            if (receipt.version) entry.version = receipt.version
-          } else if (plugin.repositoryFullName) {
-            // 无凭据但带仓库源：github 源，commit 无法固定时走本地本体兜底（见下）。
-            entry.source = 'github'
-            entry.repository = plugin.repositoryFullName
-          } else {
-            // 无凭据且非 git 源：npm 源 + 已装版本号钉住。
-            entry.source = 'npm'
-            if (plugin.version) entry.version = plugin.version
-          }
-          return entry
-        })
-        // 技能 / 预设：同样以“本包家目录里真实存在”为准（receipt 只提供在线来源），
-        // 而不是看 record 里可能过期的列表。
-        const skillReceipts: SkillInstallReceipt[] = []
-        for (const receipt of await readSkillReceipts(options.skillReceiptsPath)) {
-          const skillTarget = receipt.format === 'bundle'
-            ? path.join(dshHome, 'skills', receipt.name)
-            : path.join(dshHome, 'skills', `${receipt.name}.md`)
-          if (existsSync(skillTarget)) skillReceipts.push(receipt)
+        let zipPath = targetZipPath
+        if (!zipPath) {
+          const exportRoot = path.join(options.snapshotRoot, 'exports')
+          await mkdir(exportRoot, { recursive: true })
+          exportDir = await mkdtemp(path.join(exportRoot, 'pack-'))
+          zipPath = path.join(exportDir, `${packId}.zip`)
         }
-        const presetReceipts: PresetInstallReceipt[] = []
-        for (const receipt of await readPresetReceipts(options.presetReceiptsPath)) {
-          if (existsSync(path.join(dshHome, '.agent-presets', receipt.name))) presetReceipts.push(receipt)
-        }
-        const applicationIds = new Set((record.applications ?? []).map(addon => addon.id))
-        const applicationAddons = (await options.applicationAddons.list())
-          .filter(addon => applicationIds.has(addon.id))
-        const dshVersion = isValidPackDshVersion(record.dshVersion)
-          ? normalizePackDshVersion(record.dshVersion)
-          : await resolvePackDshVersion(settings)
-        const manifest: PackManifest = {
-          name: manifestNameFromPackId(packId),
-          description: `由 DSH Launcher 从已安装组件导出（${plugins.length} 个插件${presetReceipts.length > 0 ? `、${presetReceipts.length} 个预设` : ''}${skillReceipts.length > 0 ? `、${skillReceipts.length} 个技能` : ''}）。`,
-          version: '1.0.0',
-          dshVersion,
-          plugins,
-          ...(presetReceipts.length > 0 ? { presets: presetReceipts.map(receipt => ({ name: receipt.name, repository: receipt.repository, sourcePath: receipt.sourcePath, revision: receipt.revision })) } : {}),
-          ...(skillReceipts.length > 0 ? { skills: skillReceipts.map(receipt => ({ name: receipt.name, format: receipt.format, repository: receipt.repository, sourcePath: receipt.sourcePath, revision: receipt.revision })) } : {}),
-          ...(applicationAddons.length > 0 ? { applications: applicationAddons.map(addon => ({ id: addon.id, name: addon.name, repository: addon.repository, packageName: addon.packageName, version: addon.version, binName: addon.binName, launchMode: addon.launchMode, launchArgs: addon.launchArgs, provides: addon.provides })) } : {}),
-        }
-        const unresolvedRemote: string[] = []
-        manifest.plugins = manifest.plugins.map(entry => {
-          const pinned = entry.source === 'npm'
-            ? Boolean(entry.version)
-            : entry.source === 'github'
-              ? Boolean(entry.repository && entry.commit)
-              : true
-          if (pinned) return entry
-          const localDirectory = path.join(dshHome, 'profiles', exportProfileName, 'node_modules', ...entry.packageName.split('/'))
-          if (!existsSync(localDirectory)) {
-            unresolvedRemote.push(entry.packageName)
-            return entry
-          }
-          // A source that cannot be pinned is made self-contained for light
-          // exports instead of silently installing a moving @latest/HEAD.
-          return { ...entry, source: 'local', version: entry.version }
-        })
-        if (unresolvedRemote.length > 0) {
-          throw new Error(`导出整合包「${packId}」失败：无法固定插件来源（${unresolvedRemote.join('、')}），且本地没有可携带的插件本体。`)
-        }
-        // 只收集 manifest 引用的插件本体：profile 里可能混入未被选入包的手动安装插件，不应进包。
-        const packageNames = manifest.plugins.map(entry => entry.packageName)
-        // 预设本体也打进 zip：换机导入时可完全离线安装（以上述磁盘存在性筛选的 receipt 为准）。
-        const presetDirs = new Map<string, string>()
-        for (const preset of presetReceipts) {
-          const dir = path.join(dshHome, '.agent-presets', preset.name)
-          if (existsSync(dir)) presetDirs.set(preset.name, dir)
-        }
-        const packProfileDir = path.join(dshHome, 'profiles', options.unifiedProfiles ? packId : settings.profileName)
-        const exportRoot = path.join(options.snapshotRoot, 'exports')
-        await mkdir(exportRoot, { recursive: true })
-        exportDir = targetZipPath ? null : await mkdtemp(path.join(exportRoot, 'pack-'))
-        // 指定了目标路径（用户已通过保存对话框选好）就直接写入；否则走临时目录。
-        const zipPath = targetZipPath ?? path.join(exportDir!, `${packId}.zip`)
-        const bodyNames = exportMode === 'full'
-          ? packageNames
-          // Lightweight exports carry only local/unmatched bodies. npm
-          // entries remain reinstallable from the registry and therefore do
-          // not inflate the lightweight archive.
-          : manifest.plugins.filter(entry => entry.source === 'local' || (!entry.repository && entry.source !== 'npm')).map(entry => entry.packageName)
-        // 全离线支持：把 profile 依赖打成 tarball + 携带 lockfile；收集失败不阻塞导出（导入回退在线）。
-        try {
-          if (options.getNodeExecutable) {
-            const nodeExe = await options.getNodeExecutable()
-            if (nodeExe) {
-              options.emitEvent({ kind: 'status', message: '正在收集离线依赖（把依赖打包进压缩包，可能需要几分钟）…' })
-              const collection = await collectDependencyTarballs(packProfileDir, path.join(exportRoot, `.offline-${Date.now()}`), {
-                nodeExecutable: nodeExe,
-                onProgress: (done, total) => {
-                  if (done % 20 === 0 || done === total) {
-                    options.emitEvent({ kind: 'status', message: `离线依赖打包中：${done}/${total}` })
-                  }
-                },
-              })
-              if (collection.tarballDir && collection.lockfileText) {
-                offline = { tarballDir: collection.tarballDir, lockfileText: collection.lockfileText }
-              } else if (collection.failed.length > 0) {
-                log('info', `离线依赖收集不完整（${collection.failed.length} 个失败），该包导入时将回退在线安装。`)
-              }
+        const sizeMb = Math.round(plan.totalBytes / (1024 * 1024))
+        options.emitEvent({ kind: 'status', message: `正在打包 ${plan.entries.length} 个文件（约 ${sizeMb}MB）…` })
+        await writeSnapshotZip(plan, zipPath, {
+          onProgress: (done, total) => {
+            if (done % 500 === 0 || done === total) {
+              options.emitEvent({ kind: 'status', message: `打包中：${done}/${total}` })
             }
-          }
-        } catch (error) {
-          log('info', `离线依赖收集失败，导出包退化为在线导入：${asErrorMessage(error)}`)
-        }
-        const { missing } = await buildPackExportToFile(packProfileDir, manifest, bodyNames, zipPath, presetDirs, undefined, offline)
-        if (offline) await rm(offline.tarballDir, { recursive: true, force: true }).catch(() => undefined)
-        if (missing.length > 0) {
-          const message = `导出整合包「${packId}」失败：以下插件缺少本地本体（${missing.join('、')}），无法生成${exportMode === 'full' ? '全量' : '离线'}包。`
-          log('error', message)
-          throw new Error(message)
-        }
+          },
+        })
         return { zipPath, fileName: path.basename(zipPath) }
       } catch (error) {
-        if (offline) await rm(offline.tarballDir, { recursive: true, force: true }).catch(() => undefined)
         if (exportDir) await rm(exportDir, { recursive: true, force: true }).catch(() => undefined)
         throw error
       } finally {

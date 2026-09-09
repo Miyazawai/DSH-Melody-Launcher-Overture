@@ -53,6 +53,7 @@ const SOURCE_LABEL: Record<string, string> = {
   zip: '离线包',
   manifest: '清单包',
   raw: '扫描导入',
+  snapshot: '快照包',
 }
 
 export function PackInstallDialog({
@@ -115,10 +116,13 @@ export function PackInstallDialog({
     }
     dshVersionAckRef.current = null
     setPendingDshVersion(null)
-    const items = analysis?.items
-      .filter(item => item.available && selected.has(item.packageName))
-      .map(item => item.packageName) ?? []
-    onConfirmImport(items, analysis?.source === 'raw' ? nameInput.trim() : undefined)
+    const editableName = analysis?.source === 'raw' || analysis?.source === 'snapshot'
+    const items = analysis?.source === 'snapshot'
+      ? [] // 快照包整包导入，不做部分勾选。
+      : analysis?.items
+        .filter(item => item.available && selected.has(item.packageName))
+        .map(item => item.packageName) ?? []
+    onConfirmImport(items, editableName ? nameInput.trim() : undefined)
   }
 
   const confirmDshDownload = () => {
@@ -127,8 +131,8 @@ export function PackInstallDialog({
     confirmImport()
   }
 
-  /** raw 来源要求一个能派生出有意义包标识的名字（含字母或数字）。 */
-  const rawNameValid = analysis?.source !== 'raw' || /[a-zA-Z0-9]/.test(nameInput)
+  /** raw / 快照来源要求一个能派生出有意义包标识的名字（含字母或数字）。 */
+  const rawNameValid = (analysis?.source !== 'raw' && analysis?.source !== 'snapshot') || /[a-zA-Z0-9]/.test(nameInput)
 
   const title = phase === 'preview' || phase === 'idle'
     ? '导入整合包'
@@ -206,16 +210,18 @@ export function PackInstallDialog({
           )}
           {phase === 'preview' && !pendingDshVersion && (
             <>
-              <span className="pack-footer-note">共 {selected.size} 个组件将安装</span>
+              <span className="pack-footer-note">
+                {analysis?.source === 'snapshot' ? '快照包整包导入（含依赖本体，无需联网）' : `共 ${selected.size} 个组件将安装`}
+              </span>
               <button type="button" className="secondary-button" onClick={onClose}>取消</button>
               <button
                 type="button"
                 className="primary-command"
-                disabled={selected.size === 0 || !rawNameValid}
+                disabled={(analysis?.source !== 'snapshot' && selected.size === 0) || !rawNameValid}
                 onClick={confirmImport}
                 title={rawNameValid ? undefined : '整合包名称需包含字母或数字'}
               >
-                <Download size={16} />开始安装
+                <Download size={16} />{analysis?.source === 'snapshot' ? '导入整合包' : '开始安装'}
               </button>
             </>
           )}
@@ -250,6 +256,7 @@ function PreviewPanel({ analysis, selected, nameInput, onNameChange, onToggle }:
   onToggle: (packageName: string) => void
 }) {
   const isRaw = analysis.source === 'raw'
+  const isSnapshot = analysis.source === 'snapshot'
   return (
     <div className="pack-preview">
       <div className="pack-preview-head">
@@ -259,7 +266,7 @@ function PreviewPanel({ analysis, selected, nameInput, onNameChange, onToggle }:
         </div>
         <span className="pack-source-badge">{SOURCE_LABEL[analysis.source] ?? analysis.source}</span>
       </div>
-      {isRaw && (
+      {(isRaw || isSnapshot) && (
         <label className="pack-preview-name">
           <span>整合包名称</span>
           <input
@@ -272,20 +279,45 @@ function PreviewPanel({ analysis, selected, nameInput, onNameChange, onToggle }:
           <small>{/[a-zA-Z0-9]/.test(nameInput) ? '名称将作为整合包标识。' : '名称需包含字母或数字，否则无法生成包标识。'}</small>
         </label>
       )}
-      <p className="pack-preview-meta">
-        版本 {analysis.version} · 要求 DSH {analysis.dshVersion ?? '当前版本'} ·{' '}
-        {analysis.items.length === 0
-          ? '包里没有任何可装的组件——大概率是原整合包数据已被清理或导出时没带任何内容。'
-          : `${analysis.items.length} 个组件，勾选要安装的项；离线本体从包内安装，其余走在线源。`}
-      </p>
-      <div className="pack-item-list">
-        {analysis.items.map(item => {
-          const checked = selected.has(item.packageName)
-          return (
-            <PreviewRow key={item.packageName} item={item} checked={checked} onToggle={() => onToggle(item.packageName)} />
-          )
-        })}
-      </div>
+      {isSnapshot ? (
+        <>
+          <p className="pack-preview-meta">
+            快照整合包 · 要求 DSH {analysis.dshVersion ?? '当前版本'} · 整包导入（插件、配置、依赖本体一起落地，导入后无需联网安装）
+          </p>
+          <p className="pack-preview-meta">
+            凭据、会话记录、用量统计等个人数据不在包内；对方首次启动后需要自己填 API key。
+          </p>
+          {analysis.items.length > 0 && (
+            <div className="pack-item-list">
+              {analysis.items.map(item => (
+                <label key={item.packageName} className="pack-item-row checked">
+                  <span className="pack-item-main">
+                    <code>{item.packageName}</code>
+                    <span className="pack-item-flags"><span className="pack-item-offline">随包</span></span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="pack-preview-meta">
+            版本 {analysis.version} · 要求 DSH {analysis.dshVersion ?? '当前版本'} ·{' '}
+            {analysis.items.length === 0
+              ? '包里没有任何可装的组件——大概率是原整合包数据已被清理或导出时没带任何内容。'
+              : `${analysis.items.length} 个组件，勾选要安装的项；离线本体从包内安装，其余走在线源。`}
+          </p>
+          <div className="pack-item-list">
+            {analysis.items.map(item => {
+              const checked = selected.has(item.packageName)
+              return (
+                <PreviewRow key={item.packageName} item={item} checked={checked} onToggle={() => onToggle(item.packageName)} />
+              )
+            })}
+          </div>
+        </>
+      )}
     </div>
   )
 }

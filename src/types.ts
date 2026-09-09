@@ -761,7 +761,7 @@ export interface AiInstallResult {
 
 // ===================== 整合包（Pack）管理 =====================
 
-export type PackSource = 'created' | 'zip' | 'manifest' | 'raw'
+export type PackSource = 'created' | 'zip' | 'manifest' | 'raw' | 'snapshot'
 
 export interface PackPluginEntry {
   packageName: string

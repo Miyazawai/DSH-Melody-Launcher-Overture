@@ -378,12 +378,17 @@ describe('pack E2E · 标准包生命周期（真隔离）', () => {
     const reEnabled = await manager.togglePackItem('pack-alpha-pack', 'alpha', true)
     expect(reEnabled.plugins.find(p => p.packageName === 'alpha')?.enabled).toBe(true)
 
-    // 导出：从包自己的家目录读取。
+    // 导出：快照 = 家目录镜像（无清单，node_modules 随包一起走）。
     const { zipPath: exportedZipPath } = await manager.exportPack('pack-alpha-pack')
     const exportedBytes = await readFile(exportedZipPath)
-    const inspection = inspectPackZip(exportedBytes)
-    expect(inspection.hasBodies).toBe(true)
-    expect(inspection.bodyPackageNames).toEqual(['alpha'])
+    const snapshotEntries = new AdmZip(exportedBytes).getEntries().map(entry => entry.entryName)
+    expect(snapshotEntries).toContain('dsh-snapshot.json')
+    expect(snapshotEntries).toContain('profiles/pack-alpha-pack/package.json')
+    expect(snapshotEntries).toContain('profiles/pack-alpha-pack/profile.yaml')
+    expect(snapshotEntries).toContain('profiles/pack-alpha-pack/node_modules/alpha/package.json')
+    // 旧格式的清单与依赖 tarball 不再出现。
+    expect(snapshotEntries.some(name => name.startsWith('plugin-bodies/'))).toBe(false)
+    expect(snapshotEntries).not.toContain('dsh-pack.yaml')
 
     // 删除激活中的包：允许；没有其它包时进入零包引导态（指针置空，不自动新建兜底包）。
     const removed = await manager.removePack('pack-alpha-pack')

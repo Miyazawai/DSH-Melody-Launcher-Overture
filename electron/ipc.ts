@@ -940,11 +940,14 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
 
   ipcMain.handle(IPC.packsExport, async (_event, packId: string) => {
     if (!isSafeProfileName(packId)) throw new Error('整合包标识无效。')
-    // 先让用户选保存位置，再开始打包（离线依赖收集可能需要几分钟，对话框立刻给反馈）。
+    // 先让用户选保存位置，再开始打包（整包快照要打包上百 MB，对话框立刻给反馈）。
     const window = deps.getWindow()
     if (!window) return null
+    // 快照包名取文件名：用整合包的显示名做默认文件名，对方导入时看到的就是这个名字。
+    const displayName = (await packManager.listPacks()).find(pack => pack.id === packId)?.name ?? packId
+    const safeFileName = displayName.replace(/[\\/:*?"<>|]/g, '_').trim() || packId
     const result = await dialog.showSaveDialog(window, {
-      defaultPath: `${packId}.zip`,
+      defaultPath: `${safeFileName}.zip`,
       filters: [{ name: '整合包', extensions: ['zip'] }],
     })
     if (result.canceled || !result.filePath) return null
