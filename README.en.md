@@ -23,6 +23,10 @@ Download one executable: the first run auto-imports the **official default modpa
 > [!NOTE]
 > **Overture** is the C-end ("modpack-first") line of [rirko/dsh-melody-launcher](https://github.com/rirko/dsh-melody-launcher). The upstream repo hosts the mainline; this branch focuses on the first-km experience for individual players: zero-dependency onboarding, per-pack isolation, whole-pack sharing. See the [Chinese README](README.md) for the full documentation.
 
+## What's new in v0.1.2
+
+- **Plugin auto-update works again** — the update panel used to show "Local development mode" forever and refuse to update: the launcher wrote a non-official manifest name for the modpack Profile, which plugins read as a local dev link. Names now follow DSH's own convention, and **existing modpacks are migrated automatically on startup — no reinstall needed**.
+
 ## What's new in v0.1.1
 
 - **Official default modpack** — auto-fetched and imported on first run: DSH + full web UI + Office document skills (Word / Excel / PowerPoint) + a Chinese anti-AI-slop writing skill. Deletable, and restorable anytime with one click.
