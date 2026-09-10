@@ -173,8 +173,44 @@ export async function ensureProfileWorkspaceConfig(profileDir: string): Promise<
   }
 }
 
+/** The manifest `name` DSH and its plugins expect for a Profile directory. */
+export function profileManifestName(profileName: string): string {
+  return `dsh-profile-${profileName}`
+}
+
+/**
+ * Keep a Profile's manifest named the way DSH names it.
+ *
+ * `dsh` itself scaffolds profiles as `dsh-profile-${basename(dir)}` (see
+ * `initProfile` in `@deepseek-ai/dsh-app-boot`). Third-party plugins rely on
+ * that prefix to tell a profile install apart from a local dev link: for
+ * example `dsh-remote-web-ui`'s update checker walks up from an installed
+ * package looking for an ancestor manifest whose name starts with
+ * `dsh-profile-`, and reports "local development mode" — refusing to
+ * auto-update — when it finds none.
+ *
+ * This launcher used to seed `dsh-pack-*`, which made every launcher-managed
+ * Profile look like a dev link. Normalize on load so existing installs heal
+ * without a reinstall; bundles and dependencies are left untouched.
+ */
+export async function ensureProfileManifestName(profileDir: string): Promise<void> {
+  const manifestPath = path.join(profileDir, 'package.json')
+  let manifest: Record<string, unknown>
+  try {
+    const parsed = JSON.parse(await readFile(manifestPath, 'utf8')) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return
+    manifest = parsed as Record<string, unknown>
+  } catch {
+    return
+  }
+  const expected = profileManifestName(path.basename(profileDir))
+  if (manifest.name === expected) return
+  await writeFile(manifestPath, `${JSON.stringify({ ...manifest, name: expected }, null, 2)}\n`, 'utf8')
+}
+
 /** Restore the runtime-owned core bundles without adding them to dependencies. */
 export async function ensureProfileCoreBundles(profileDir: string): Promise<void> {
+  await ensureProfileManifestName(profileDir)
   const manifestPath = path.join(profileDir, 'package.json')
   let manifest: Record<string, unknown>
   try {
@@ -315,8 +351,12 @@ export async function listProfiles(options: ProfileServiceOptions): Promise<Prof
   if (!names.includes(current.profileName)) names.push(current.profileName)
   // Existing installations predate profile.yaml. Materialize metadata lazily
   // while scanning so every visible Profile is self-contained afterwards.
+  // The manifest name is normalized in the same pass: profiles seeded by older
+  // launcher builds carry `dsh-pack-*`, which third-party plugins read as a
+  // local dev link and therefore refuse to auto-update.
   for (const name of names) {
     const directory = profileDirFor(dshHome, name)
+    await ensureProfileManifestName(directory)
     if (!await exists(metadataPath(directory))) await writeProfileMetadata(dshHome, name, { dshVersion: current.dshVersion ?? null, source: { kind: 'local' } })
   }
   const scoped = { ...options, dshHome }
@@ -483,7 +523,7 @@ export async function createProfile(options: ProfileServiceOptions, input: Profi
     } catch {
       // An empty pool is valid before the first plugin is installed.
     }
-    await writeFile(path.join(directory, 'package.json'), `${JSON.stringify({ name: `dsh-pack-${input.name}`, private: true, dependencies, dsh: { profile: { bundles: [] } } }, null, 2)}\n`, 'utf8')
+    await writeFile(path.join(directory, 'package.json'), `${JSON.stringify({ name: profileManifestName(input.name), private: true, dependencies, dsh: { profile: { bundles: [] } } }, null, 2)}\n`, 'utf8')
   }
   // Clones may carry a legacy workspace file as well; normalize both creation
   // paths before the first switch or install can invoke pnpm.
@@ -586,7 +626,7 @@ function migratedPackageManifest(profileName: string, record: PackRecord, base?:
     if (plugin.enabled) bundles.push(plugin.packageName)
   }
   return {
-    name: `dsh-profile-${profileName}`,
+    name: profileManifestName(profileName),
     private: true,
     dependencies,
     dsh: { profile: { bundles } },

@@ -201,4 +201,59 @@ describe('Profile service', () => {
     expect(manifest.dependencies['@deepseek-ai/dsh-base']).toBeUndefined()
     expect(manifest.dependencies['@deepseek-ai/dsh-web-app']).toBeUndefined()
   })
+
+  it('把历史 dsh-pack-* 清单名迁移成 DSH 认的 dsh-profile-*', async () => {
+    const env = await fixture()
+    const manifestPath = path.join(env.dshHome, 'profiles', 'web', 'package.json')
+    await writeFile(manifestPath, JSON.stringify({
+      name: 'dsh-pack-web',
+      private: true,
+      dependencies: { '@demo/plugin': '1.0.0' },
+      dsh: { profile: { bundles: ['@demo/plugin'] } },
+    }), 'utf8')
+
+    await ensureProfileCoreBundles(path.dirname(manifestPath))
+
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      name: string
+      private: boolean
+      dependencies: Record<string, string>
+      dsh: { profile: { bundles: string[] } }
+    }
+    // dsh-remote-web-ui 的更新检查靠这个前缀区分「Profile 安装」和「本地开发链接」。
+    expect(manifest.name).toBe('dsh-profile-web')
+    // 迁移不得动依赖、私有标记与 bundle 顺序。
+    expect(manifest.private).toBe(true)
+    expect(manifest.dependencies).toEqual({ '@demo/plugin': '1.0.0' })
+    expect(manifest.dsh.profile.bundles).toContain('@demo/plugin')
+
+    // 已经是正确名字时保持原样（幂等）。
+    await ensureProfileCoreBundles(path.dirname(manifestPath))
+    expect((JSON.parse(await readFile(manifestPath, 'utf8')) as { name: string }).name).toBe('dsh-profile-web')
+  })
+
+  it('新建 Profile 直接落 dsh-profile-* 清单名', async () => {
+    const env = await fixture()
+    await createProfile(env.options, { name: 'beta' })
+
+    const manifest = JSON.parse(await readFile(path.join(env.dshHome, 'profiles', 'beta', 'package.json'), 'utf8')) as { name: string }
+    expect(manifest.name).toBe('dsh-profile-beta')
+  })
+
+  it('启动扫描（listProfiles）就地把历史清单名迁移成 dsh-profile-*', async () => {
+    const env = await fixture()
+    const manifestPath = path.join(env.dshHome, 'profiles', 'web', 'package.json')
+    await writeFile(manifestPath, JSON.stringify({
+      name: 'dsh-pack-web',
+      private: true,
+      dependencies: { '@demo/plugin': '1.0.0' },
+      dsh: { profile: { bundles: ['@demo/plugin'] } },
+    }), 'utf8')
+
+    await listProfiles(env.options)
+
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as { name: string; dependencies: Record<string, string> }
+    expect(manifest.name).toBe('dsh-profile-web')
+    expect(manifest.dependencies).toEqual({ '@demo/plugin': '1.0.0' })
+  })
 })

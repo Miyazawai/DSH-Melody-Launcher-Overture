@@ -143,7 +143,7 @@ describe('快照导出 / 导入闭环', () => {
     await writeFile(path.join(home, 'skills', 'my-skill', 'SKILL.md'), '# skill')
     await writeFile(path.join(home, 'profiles', 'pack-a', 'profile.yaml'), 'name: pack-a\ndshVersion: 0.1.2-rc.1\nsource:\n  kind: local\n  path: C:\\old\n')
     await writeFile(path.join(home, 'profiles', 'pack-a', 'package.json'), JSON.stringify({
-      name: 'dsh-pack-pack-a',
+      name: 'dsh-profile-pack-a',
       private: true,
       dependencies: { alpha: 'file:C:/dsh-import-bodies/body-abc123' },
       dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', 'alpha'] } },
@@ -171,7 +171,7 @@ describe('快照导出 / 导入闭环', () => {
     const externalBody = await makeExternalBody()
     // 让 file: 指向包外的真实本体，验证本体被收进包内并相对化。
     await writeFile(path.join(home, 'profiles', 'pack-a', 'package.json'), JSON.stringify({
-      name: 'dsh-pack-pack-a',
+      name: 'dsh-profile-pack-a',
       private: true,
       dependencies: { alpha: `file:${externalBody.replace(/\\/g, '/')}` },
       dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', 'alpha'] } },
@@ -232,7 +232,7 @@ describe('快照导出 / 导入闭环', () => {
     expect(existsSync(path.join(target, '.credentials.yaml'))).toBe(false)
     expect(existsSync(path.join(target, 'profiles', 'pack-a'))).toBe(false)
     const importedPackage = JSON.parse(await readFile(path.join(target, 'profiles', 'pack-b', 'package.json'), 'utf8')) as { name: string; dependencies: Record<string, string> }
-    expect(importedPackage.name).toBe('dsh-pack-pack-b')
+    expect(importedPackage.name).toBe('dsh-profile-pack-b')
     expect(importedPackage.dependencies.alpha).toBe('file:./.dsh-launcher-plugin-bodies/alpha')
     const importedProfileYaml = await readFile(path.join(target, 'profiles', 'pack-b', 'profile.yaml'), 'utf8')
     expect(importedProfileYaml).toContain('name: pack-b')
@@ -247,7 +247,7 @@ describe('快照导出 / 导入闭环', () => {
     archive.addFile('profiles/node_modules/.bin/dsh', Buffer.from('shim'))
     archive.addFile('profiles/node_modules/pnpm-workspace.yaml', Buffer.from('packages:\n  - .\n'))
     archive.addFile('profiles/pack-a/profile.yaml', Buffer.from('name: pack-a\ndshVersion: 0.1.2-rc.1\n'))
-    archive.addFile('profiles/pack-a/package.json', Buffer.from('{"name":"dsh-pack-pack-a","dependencies":{"alpha":"file:./.dsh-launcher-plugin-bodies/alpha"}}'))
+    archive.addFile('profiles/pack-a/package.json', Buffer.from('{"name":"dsh-profile-pack-a","dependencies":{"alpha":"file:./.dsh-launcher-plugin-bodies/alpha"}}'))
     archive.writeZip(zipPath)
     const description = await describeSnapshotZip(zipPath)
     expect(description?.profileId).toBe('pack-a')
@@ -257,7 +257,7 @@ describe('快照导出 / 导入闭环', () => {
   it('本体已不在磁盘时保留原 spec 并给出警告', async () => {    const home = await temporaryDirectory('dsh-snapshot-home2-')
     await mkdir(path.join(home, 'profiles', 'pack-a'), { recursive: true })
     await writeFile(path.join(home, 'profiles', 'pack-a', 'package.json'), JSON.stringify({
-      name: 'dsh-pack-pack-a',
+      name: 'dsh-profile-pack-a',
       dependencies: { ghost: 'file:C:/gone/body-zzz' },
     }))
     const plan = await planSnapshot(home, { packId: 'pack-a' })

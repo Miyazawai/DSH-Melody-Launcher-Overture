@@ -5,6 +5,7 @@ import path from 'node:path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import yazl from 'yazl'
 import { assertInside, openZipPathFromFile, safeArchivePath, type OpenZipPath } from './pack-zip'
+import { profileManifestName } from './profile-service'
 
 /**
  * 快照式整合包：导出 = 把整合包家目录（DSH_HOME）原样打成 zip（剔除个人数据、绝对路径相对化），
@@ -643,7 +644,7 @@ async function finalizeExtractedProfile(home: string, newId: string): Promise<vo
   if (packageText === null) return
   try {
     const parsed = JSON.parse(packageText) as { name?: unknown }
-    parsed.name = `dsh-pack-${newId}`
+    parsed.name = profileManifestName(newId)
     await writeFile(packageJson, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8')
   } catch {
     // 坏 JSON 留给启动诊断去报。

@@ -65,7 +65,7 @@ import { createProfileSnapshot, restoreProfileSnapshot, type ProfileSnapshot } f
 import { isSafePackageName, isSafeProfileName, reorderPlugins } from './profile'
 import { samePath } from './settings'
 import { DEFAULT_PROFILE_NAME } from '../src/constants'
-import { ensureProfileCoreBundles, readProfileMetadata, writeProfileMetadata } from './profile-service'
+import { ensureProfileCoreBundles, profileManifestName, readProfileMetadata, writeProfileMetadata } from './profile-service'
 import { readPackManifest, removePackManifest, writePackManifest } from './pack-manifest-store'
 
 /** 扩展 PluginInstallTarget：携带 GitHub 仓库名，供 github / npm 源重建安装目标。 */
@@ -250,7 +250,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       if (!existsSync(targetFile) && existsSync(sourceFile)) await cp(sourceFile, targetFile)
     }
     if (!existsSync(path.join(target, 'package.json'))) {
-      await writeFile(path.join(target, 'package.json'), `${JSON.stringify({ name: `dsh-pack-${profileName}`, private: true, dependencies: {}, dsh: { profile: { bundles: [] } } }, null, 2)}\n`, 'utf8')
+      await writeFile(path.join(target, 'package.json'), `${JSON.stringify({ name: profileManifestName(profileName), private: true, dependencies: {}, dsh: { profile: { bundles: [] } } }, null, 2)}\n`, 'utf8')
     }
     await ensureProfileCoreBundles(target)
     await writeProfileMetadata(dshHome, profileName, {
