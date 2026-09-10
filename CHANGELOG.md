@@ -2,6 +2,13 @@
 
 本文件记录 DSH 旋律启动器（dsh-melody-launcher）的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本语义遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [v0.1.2] - 2026-09-10 — 检查更新修复 · 便携版 logo 修复
+
+### 修复
+
+- **「检查更新」永久停在「本地开发模式」，无法自动更新（启动器全量用户）**：启动器此前把整合包 Profile 的清单名播种成 `dsh-pack-<包id>`，而 DSH 官方约定是 `dsh-profile-<目录名>`（见 `@deepseek-ai/dsh-app-boot` 的 `initProfile`）；`dsh-remote-web-ui` 的更新检查靠这个前缀区分「Profile 安装」与「本地开发链接」，找不到 `dsh-profile-` 前缀就直接判定为本地链接，面板于是恒显示「当前为本地开发模式 / npm 上最新版本：-」，且拒绝自动更新。报错文案指向「同步本地仓库 / 移除重复链接」，与真实原因无关，用户无从自查。现在新建、导入、快照改名三处播种点统一使用 `dsh-profile-*`；**启动扫描时会把现存整合包就地迁移**，老装机无需重装即可恢复自动更新。迁移只改清单 `name` 字段，依赖、`private` 与 bundle 顺序原样保留，可反复执行。真机验证：迁移后 `/api/update/status` 由 `{"mode":"link","packages":[]}` 变为 `{"mode":"npm",...}`，20 个插件包全部正常比对版本。
+- **便携版首页品牌 logo 缺失**：logo 改用 `BASE_URL` 相对拼接。此前用根路径 `/launcher-logo.png`，在便携版 `file://` 加载下会被解析到磁盘根，dev 的 HTTP 伺服掩盖了这个问题。
+
 ## [v0.1.1] - 2026-09-09 — 真隔离整合包 · 快照搬运 · 官方默认包
 
 ### 新增功能
