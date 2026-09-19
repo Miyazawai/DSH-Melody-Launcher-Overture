@@ -23,6 +23,12 @@ Download one executable: the first run auto-imports the **official default modpa
 > [!NOTE]
 > **Overture** is the C-end ("modpack-first") line of [rirko/dsh-melody-launcher](https://github.com/rirko/dsh-melody-launcher). The upstream repo hosts the mainline; this branch focuses on the first-km experience for individual players: zero-dependency onboarding, per-pack isolation, whole-pack sharing. See the [Chinese README](README.md) for the full documentation.
 
+## What's new in v0.1.3
+
+- **Pick the official modpack version you want** — the Modpacks page now has an "official modpack" stack listing every published version (latest marked *Recommended*, each row showing the **DSH version it targets** and its size). Re-downloading a version gives you a `(2)` copy; a new release only raises a badge — nothing heavy is downloaded behind your back.
+- **The whole download is visible, and a slow link switches itself** — a progress bar with live speed and source ("50% · 3.4 MB/s · via gh-proxy.com"), followed by the import stages (installing the missing DSH runtime, unpacking ~16k files), so it no longer looks stuck at 100%. Direct connections that stall for 8s, break for 20s, or drop under 300 KB/s **fail over to a mirror automatically** — no proxy fiddling required.
+- **Easier network setup** — the GitHub mirror setting is now a dropdown (Auto / gh-proxy.com / ghfast.top / ghproxy.net / Custom); "Auto" is the failover described above.
+
 ## What's new in v0.1.2
 
 - **Plugin auto-update works again** — the update panel used to show "Local development mode" forever and refuse to update: the launcher wrote a non-official manifest name for the modpack Profile, which plugins read as a local dev link. Names now follow DSH's own convention, and **existing modpacks are migrated automatically on startup — no reinstall needed**.
@@ -40,17 +46,19 @@ Download one executable: the first run auto-imports the **official default modpa
 | Home | Running (split button) |
 | --- | --- |
 | ![Home](docs/screenshots/shot-01-home.png) | ![Running](docs/screenshots/shot-09-running-split.png) |
-| **Modpacks** (official badge + live counters) | **Delete confirmation** (arm-then-confirm, never a dialog) |
-| ![Modpacks](docs/screenshots/shot-02-packs.png) | ![Delete arm](docs/screenshots/shot-03-delete-arm.png) |
-| **Skills** (Office suite included, uninstall built in) | **Skill Market** (1,900+ skills) |
-| ![Skills](docs/screenshots/shot-05-skills-installed.png) | ![Skill Market](docs/screenshots/shot-04-skill-market.png) |
-| **Plugins** (core bundles protected) | **DSH Market** (3,400+ featured plugins) |
-| ![Plugins](docs/screenshots/shot-06-plugins.png) | ![DSH Market](docs/screenshots/shot-08-dsh-market.png) |
+| **Modpacks** (official stack with every version) | **Download progress** (speed, source, stage — auto failover) |
+| ![Modpacks](docs/screenshots/shot-02-packs.png) | ![Download progress](docs/screenshots/shot-10-official-pack-download.png) |
+| **Delete confirmation** (arm-then-confirm, never a dialog) | **Skills** (Office suite included, uninstall built in) |
+| ![Delete arm](docs/screenshots/shot-03-delete-arm.png) | ![Skills](docs/screenshots/shot-05-skills-installed.png) |
+| **Skill Market** (1,900+ skills) | **Plugins** (core bundles protected) |
+| ![Skill Market](docs/screenshots/shot-04-skill-market.png) | ![Plugins](docs/screenshots/shot-06-plugins.png) |
+| **DSH Market** (3,400+ featured plugins) | **DSH versions** (installed vs. available) |
+| ![DSH Market](docs/screenshots/shot-08-dsh-market.png) | ![DSH versions](docs/screenshots/shot-07-versions.png) |
 
 ## Highlights
 
 - **Modpacks = real isolation** — each pack gets a derived home directory; DSH version, plugins, skills, presets and sessions never leak across packs.
-- **Zero-dependency onboarding** — the launcher downloads DSH, a portable Node.js runtime (SHA-256 verified, resumable) and a private pnpm automatically. GitHub traffic goes through a mirror-first candidate chain for mainland-China networks.
+- **Zero-dependency onboarding** — the launcher downloads DSH, a portable Node.js runtime (SHA-256 verified, resumable) and a private pnpm automatically. GitHub traffic goes through a mirror-first candidate chain, and the 100 MB+ official modpack additionally **fails over by measured speed**: a stalled first byte, a 20s silence or an average below 300 KB/s switches to the next source.
 - **Curated markets** — DSH Market (3,400+ featured plugins) and a Skill Market (1,900+ skills), with strict `SKILL.md` validation and enable/disable that never deletes files.
 - **One-click launch** — starts `dsh --profile <pack> --no-open --port N`, opens the browser when ready; crashes surface as a dialog with exit code, stderr and a copyable "fix prompt".
 - **AI Daily** — the home page aggregates the day's AI news into all sections, scrollable in place.
@@ -58,7 +66,7 @@ Download one executable: the first run auto-imports the **official default modpa
 ## Getting started
 
 1. Grab `DSH-Launcher-*-portable.exe` from [**Releases**](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases). The binary is not code-signed yet, so SmartScreen may warn — verify it comes from this repo, then choose "More info → Run anyway".
-2. Wait for the first-run import of the official modpack (~128 MB, progress shown on the Modpacks page).
+2. Wait for the first-run import of the official modpack (~128 MB; the Modpacks page shows a progress bar with speed and source, then the import stages).
 3. Add your DeepSeek (or other) API key in **Settings** — keys are stored per-pack and never leave your machine in exports.
 4. Hit **Launch DSH**. Try: *"create a pptx titled Quarterly Report with one bullet slide"* — the Office skills handle it.
 
@@ -92,7 +100,7 @@ npm run package:win   # portable exe
 
 - Mainline: [rirko/dsh-melody-launcher](https://github.com/rirko/dsh-melody-launcher) — plugin-catalog PRs still target upstream.
 - This repo: the Overture release line — portable exe and official modpack zips ship from its Releases.
-- QQ group **625155044** · issues welcome with launcher version and repro steps.
+- Issues welcome with launcher version and repro steps.
 
 ---
 

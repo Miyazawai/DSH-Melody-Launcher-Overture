@@ -14,7 +14,7 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/Miyazawai/DSH-Melody-Launcher-Overture/build.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/actions/workflows/build.yml)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases)
 [![Upstream](https://img.shields.io/badge/上游-rirko%2Fdsh--melody--launcher-6C7BFF?style=for-the-badge&logo=github&logoColor=white)](https://github.com/rirko/dsh-melody-launcher)
-[![Tests](https://img.shields.io/badge/tests-728%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
+[![Tests](https://img.shields.io/badge/tests-768%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
 
 [![Electron](https://img.shields.io/badge/Electron-43-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
@@ -50,13 +50,19 @@
 | 把自己的配置折腾半天分享给朋友 | 导出 = 整个环境打包成 zip，对方导入即可启动 |
 | 开终端、记命令、盯输出 | 一个按钮启动，进程与日志全程托管 |
 
+## v0.1.3 更新亮点
+
+- **官方整合包按版本可选** —— 整合包页顶部多了一个「官方整合包」堆叠入口，展开是所有历史版本（最新版标「推荐」，每行写着它**适配哪个 DSH 版本**与体积）。想装哪个装哪个，同一个版本重复下载会得到「(2)」副本；发现新版本只挂「有新版本」徽标提醒，不会在后台偷偷下几百 MB。
+- **下载全程可见，慢了自己换源** —— 下载时是带速度与来源的进度条（「50% · 3.4 MB/s · 经 gh-proxy.com」），下载完接着显示导入阶段（补装 DSH 运行时、解压一万多个文件），不再有「卡在 100%」的错觉。直连 8 秒无响应、20 秒断流、或速度低于 300KB/s 会**自动切到镜像**，不必再手动折腾代理。
+- **设置页网络更好配** —— 「GitHub 镜像」从裸文本框改成下拉（自动 / gh-proxy.com / ghfast.top / ghproxy.net / 自定义），选「自动」即走上一条的换源逻辑。
+
 ## v0.1.2 更新亮点
 
 - **「检查更新」修好了** —— 此前插件更新面板恒显示「当前为本地开发模式」并拒绝自动更新：启动器把整合包 Profile 的清单名写成了非官方前缀，被插件误判为本地开发链接。现已统一为 DSH 官方命名，**已有整合包会在启动时自动迁移，无需重装**。
 
 ## v0.1.1 更新亮点
 
-- **官方默认整合包** —— 首次启动自动获取导入：DSH 本体 + Web 全家桶界面 + Office 文档技能（Word / Excel / PPT）+ AI 去味写作技能，开箱即用。可以删，删了随时一键「恢复官方整合包」。
+- **官方默认整合包** —— 首次启动自动获取导入：DSH 本体 + Web 全家桶界面 + Office 文档技能（Word / Excel / PPT）+ AI 去味写作技能，开箱即用。可以删，删了在「官方整合包」里一点即可重新下载。
 - **快照式导出 / 导入** —— 把整合包连插件本体、依赖、技能、配置整个打成 zip；导出前自动剔除 API Key、会话记录等个人数据，绝对路径自动改写。**对方导入即可启动，全程不联网重装依赖。**
 - **Office 文档能力** —— 官方包内置 [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) 技能四件套与引擎本体（随包搬运）：对 AI 说一句「把这季度数据做成汇报 PPT」，就能拿到可继续编辑的 `.pptx` / `.docx` / `.xlsx`。
 - **运行态分段按钮** —— 浏览器页面关掉了？首页大按钮左段停止服务、右段一键重开网页。
@@ -68,22 +74,22 @@
 | --- | --- |
 | **启动页** —— AI 日报全栏目滚动、一键启动、当前整合包快切 | **运行中** —— 左段停止服务，右段一键重开网页 |
 | ![启动页](docs/screenshots/shot-01-home.png) | ![运行态](docs/screenshots/shot-09-running-split.png) |
-| **整合包** —— 官方默认包带「官方」徽标，计数实时探测 | **删除二次确认** —— 点删除变红「确定删除」，说清删什么留什么 |
-| ![整合包](docs/screenshots/shot-02-packs.png) | ![删除确认](docs/screenshots/shot-03-delete-arm.png) |
-| **技能管理** —— 官方包自带 Office 四件套与去味写作，可启停可卸载 | **技能市场** —— 1900+ 技能按分类浏览安装 |
-| ![技能管理](docs/screenshots/shot-05-skills-installed.png) | ![技能市场](docs/screenshots/shot-04-skill-market.png) |
-| **插件** —— 核心组合层受保护，启停不删本体 | **DSH Market** —— 3400+ 精选插件，搜索 / 分类 / 检查更新 |
-| ![插件](docs/screenshots/shot-06-plugins.png) | ![DSH Market](docs/screenshots/shot-08-dsh-market.png) |
-| **DSH 版本** —— 已装与可下载版本一目了然，切换只在整合包页 | |
-| ![DSH 版本](docs/screenshots/shot-07-versions.png) | |
+| **整合包** —— 顶部「官方整合包」堆叠列出所有历史版本，可删可重下 | **下载进度** —— 速度、来源与阶段全程可见，慢了自己换镜像 |
+| ![整合包](docs/screenshots/shot-02-packs.png) | ![下载进度](docs/screenshots/shot-10-official-pack-download.png) |
+| **删除二次确认** —— 点删除变红「确定删除」，说清删什么留什么 | **技能管理** —— 官方包自带 Office 四件套与去味写作，可启停可卸载 |
+| ![删除确认](docs/screenshots/shot-03-delete-arm.png) | ![技能管理](docs/screenshots/shot-05-skills-installed.png) |
+| **技能市场** —— 1900+ 技能按分类浏览安装 | **插件** —— 核心组合层受保护，启停不删本体 |
+| ![技能市场](docs/screenshots/shot-04-skill-market.png) | ![插件](docs/screenshots/shot-06-plugins.png) |
+| **DSH Market** —— 3400+ 精选插件，搜索 / 分类 / 检查更新 | **DSH 版本** —— 已装与可下载版本一目了然，切换只在整合包页 |
+| ![DSH Market](docs/screenshots/shot-08-dsh-market.png) | ![DSH 版本](docs/screenshots/shot-07-versions.png) |
 
 ## 核心特性
 
 ### 官方默认整合包：下载即有
 
-- **首启自动获取** —— 启动器后台核对版本，自动从 GitHub Release 拉取官方包 zip 并导入，进度可见，全程零操作
+- **首启自动获取、进度全程可见** —— 启动器后台核对版本，自动从 GitHub Release 拉取官方包 zip 并导入，下载有带速度与来源的进度条、导入阶段接着显示，全程零操作
 - **内容基线** —— Web 全家桶界面（任务板 / Git 图 / 皮肤中心 / 社区插件…）、Office 文档技能（含 33MB 引擎随包搬运）、去 AI 味中文写作技能
-- **可删可恢复** —— 官方包没有特权，删了整合包页出现「恢复官方整合包」按钮；启动器更新带来新版官方包时，新包自动出现、旧包并存不覆盖
+- **可删可恢复、按版本可选** —— 官方包没有特权，删了在整合包页顶部的「官方整合包」里一点即可重下；那个堆叠里列着所有历史版本（最新版标「推荐」），想装哪个装哪个，同一个版本重复下载会得到「(2)」副本。有新版本时只挂个「有新版本」徽标提醒你，不会在后台偷偷下几百 MB
 
 ### 整合包：真隔离环境
 
@@ -95,7 +101,7 @@
 
 - **自动准备 Node.js / pnpm** —— 启动器自带便携运行时（SHA-256 校验、断点续传），不需要系统装 Node
 - **自动准备 DSH** —— 导入的包缺 DSH 版本时弹窗确认后自动补装
-- **GitHub 加速** —— DSH 版本列表、插件目录、官方包下载统一走「用户镜像 → 直连 → 公共镜像」候选链，大陆网络可用
+- **GitHub 加速** —— DSH 版本列表、插件目录、官方包下载统一走「用户镜像 → 直连 → 公共镜像」候选链；官方包这类百 MB 资产还会按**实测速度**换源：等首字节超时、中途断流、均速低于 300KB/s 任一命中就切下一个源，大陆网络可用
 
 ### 启动与进程管理
 
@@ -120,7 +126,7 @@
 
 ### 2. 等官方包就位
 
-首次启动会自动下载导入「官方默认整合包」（约 128MB，含 DSH 本体与全部资源；整合包页顶部有进度横幅）。完成后首页显示当前整合包为「官方默认整合包」。
+首次启动会自动下载导入「官方默认整合包」（约 120MB，含 DSH 本体与全部资源；整合包页顶部有带速度与来源的进度条，接着显示导入阶段）。完成后首页显示当前整合包为「官方默认整合包」。之后官方包跟随 `@linxin666/dsh-web-all` 发版自动出新版本，启动器只会提醒、由你决定什么时候下载。
 
 ### 3. 填 Key，启动
 
@@ -173,7 +179,6 @@ npm run package:win   # 打包 Windows 便携 exe
 
 ## 联系与反馈
 
-- 官方用户 QQ 群：**625155044**（欢迎一起开发，QQ：1250104511）
 - 问题反馈请开 [Issue](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/issues)，附上启动器版本与复现步骤
 
 ---
