@@ -82,20 +82,26 @@ jobs:
           set -euo pipefail
           latest=$(npm view '@linxin666/dsh-web-all' dist-tags.latest --registry="$NPM_REGISTRY")
           echo "npm 上 web-all 最新版：$latest"
-          releases=$(curl -sSL "https://api.github.com/repos/$RELEASE_REPOSITORY/releases?per_page=100")
-          published=$(node -e '
-            const releases = JSON.parse(process.argv[1]);
-            const zipRe = /^official-pack-v(.+)\.zip$/;
-            const metaRe = /^official-pack-meta-(.+)\.json$/;
-            const withPack = releases
-              .filter(release => (release.assets ?? []).some(asset => zipRe.test(asset.name ?? "")))
-              .sort((left, right) => String(right.published_at).localeCompare(String(left.published_at)));
-            const newest = withPack[0];
-            if (!newest) { console.log("|"); process.exit(0); }
-            const version = zipRe.exec((newest.assets ?? []).find(a => zipRe.test(a.name ?? "")).name)[1];
-            const meta = (newest.assets ?? []).find(a => metaRe.test(a.name ?? ""));
-            console.log(`${version}|${meta ? String(meta.browser_download_url) : ""}`);
-          ' "$releases")
+          # JSON 必须走 stdin：Release 列表（含正文）远超 Windows 命令行长度上限，
+          # 当 argv 传会直接 Argument list too long。
+          published=$(curl -sSL "https://api.github.com/repos/$RELEASE_REPOSITORY/releases?per_page=100" | node -e '
+            let body = "";
+            process.stdin.on("data", chunk => { body += chunk });
+            process.stdin.on("end", () => {
+              const zipRe = /^official-pack-v(.+)\.zip$/;
+              const metaRe = /^official-pack-meta-(.+)\.json$/;
+              let releases = [];
+              try { releases = JSON.parse(body) } catch { console.log("|"); return }
+              const withPack = releases
+                .filter(release => (release.assets ?? []).some(asset => zipRe.test(asset.name ?? "")))
+                .sort((left, right) => String(right.published_at).localeCompare(String(left.published_at)));
+              const newest = withPack[0];
+              if (!newest) { console.log("|"); return }
+              const version = zipRe.exec((newest.assets ?? []).find(asset => zipRe.test(asset.name ?? "")).name)[1];
+              const meta = (newest.assets ?? []).find(asset => metaRe.test(asset.name ?? ""));
+              console.log(`${version}|${meta ? String(meta.browser_download_url) : ""}`);
+            });
+          ')
           published_version=${published%%|*}
           published_meta_url=${published##*|}
           echo "已发布的官方包：${published_version:-（无）}"
