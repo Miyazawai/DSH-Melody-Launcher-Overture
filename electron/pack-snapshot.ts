@@ -393,6 +393,23 @@ export async function writeSnapshotZip(
     lastReportAt = now
     options.onProgress?.(written, totalBytes)
   }
+  /**
+   * 给一个源文件套上计数流：yazl 的 addFile 不暴露读取进度，而直接监听源流会抢在
+   * yazl 之前把数据流干，必须用 Transform 让 yazl 消费它的可读端来统计进度。
+   */
+  const makeCounterStream = (sourcePath: string): Transform => {
+    const counter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        written += chunk.length
+        report()
+        callback(null, chunk)
+      },
+    })
+    const source = createReadStream(sourcePath)
+    source.on('error', error => counter.destroy(error instanceof Error ? error : new Error(String(error))))
+    source.pipe(counter)
+    return counter
+  }
   for (const entry of plan.entries) {
     if (entry.data) {
       zip.addBuffer(entry.data, entry.rel)
@@ -403,19 +420,11 @@ export async function writeSnapshotZip(
     if (!entry.source) continue
     const info = await stat(entry.source).catch(() => null)
     if (!info) continue
-    // 自己串一个计数流统计真实进度（yazl 的 addFile 不暴露读取进度；
-    // 直接监听源流会抢在 yazl 之前把数据流干，必须用 Transform 让 yazl 消费它的可读端）。
-    const counter = new Transform({
-      transform(chunk: Buffer, _encoding, callback) {
-        written += chunk.length
-        report()
-        callback(null, chunk)
-      },
-    })
-    const source = createReadStream(entry.source)
-    source.on('error', error => counter.destroy(error instanceof Error ? error : new Error(String(error))))
-    source.pipe(counter)
-    zip.addReadStream(counter, entry.rel, { size: info.size })
+    // 懒创建：yazl 走到这个条目才真的去开文件。一次把上万个条目全挂上读取流的话，
+    // 每个都会占一个文件句柄并预读几十 KB（真机 392MB 包实测峰值 RSS 393MB → 318MB），
+    // 而且进度字节数会跑到压缩前面，让进度条虚高。
+    const sourcePath = entry.source
+    zip.addReadStreamLazy(entry.rel, { size: info.size }, callback => callback(null, makeCounterStream(sourcePath)))
   }
   const meta: SnapshotMeta = {
     format: SNAPSHOT_FORMAT_VERSION,

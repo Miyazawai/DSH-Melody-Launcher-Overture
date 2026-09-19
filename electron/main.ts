@@ -683,6 +683,10 @@ function createServices(): Services {
       relayDshProgressToPack = true
       try {
         await ensureDshVersionInstalled(installed, next => runtimeVersions.installDsh(next), version)
+      } catch (error) {
+        // 补装失败就根本不会走到导入，也就没有后续事件来收掉上面那条阶段横幅；自己收口。
+        events.packProgress({ kind: 'status', message: '' })
+        throw error
       } finally {
         relayDshProgressToPack = false
       }
@@ -857,7 +861,11 @@ function createServices(): Services {
           events.packProgress({ kind: 'stage', label: '下载完成，正在写入并解压整合包…', percent: null })
         }
       },
-    }, target)
+    }, target).catch((error: unknown) => {
+      // 下载或导入中途失败时，后面的收口语句根本走不到，下载条/阶段横幅会一直挂在界面上。
+      events.packProgress({ kind: 'status', message: '' })
+      throw error
+    })
     events.packProgress({ kind: 'status', message: '' })
     if (outcome.outcome === 'imported' && outcome.result) {
       officialStatusCache = null

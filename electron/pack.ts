@@ -177,6 +177,12 @@ function asErrorMessage(error: unknown): string {
   return typeof error === 'string' ? error : '未知错误'
 }
 
+/** 打包百分比：字节计数可能因节流略微超过总量，夹在 0-100 之间。 */
+function packPercent(written: number, total: number): number | null {
+  if (!(total > 0)) return null
+  return Math.max(0, Math.min(100, Math.round((written / total) * 100)))
+}
+
 /** 创建/导出整合包时解析当前启动器实际使用的 DSH 精确版本。 */
 async function resolvePackDshVersion(settings: AppSettings, requested?: string): Promise<string> {
   const candidates = [requested, settings.dshVersion]
@@ -1731,11 +1737,13 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           zipPath = path.join(exportDir, `${packId}.zip`)
         }
         const sizeMb = Math.round(plan.totalBytes / (1024 * 1024))
-        options.emitEvent({ kind: 'status', message: `正在打包 ${plan.entries.length} 个文件（约 ${sizeMb}MB）…` })
+        // 打包是有字节进度的：走 stage 事件报百分比，界面才能画确定态进度条
+        // （status 进度的百分比恒为空，会被渲染成一直转圈的不确定态）。
+        options.emitEvent({ kind: 'stage', label: `正在打包 ${plan.entries.length} 个文件（约 ${sizeMb}MB）…`, percent: 0 })
         await writeSnapshotZip(plan, zipPath, {
           onProgress: (written, total) => {
             const toMb = (value: number): number => Math.round(value / (1024 * 1024))
-            options.emitEvent({ kind: 'status', message: `打包中：${toMb(written)}/${toMb(total)}MB` })
+            options.emitEvent({ kind: 'stage', label: `打包中：${toMb(written)}/${toMb(total)}MB`, percent: packPercent(written, total) })
           },
         })
         return { zipPath, fileName: path.basename(zipPath) }
@@ -1744,6 +1752,9 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         throw error
       } finally {
         active = false
+        // 导出只发阶段事件、从不发 done/error：必须在这里自己收口，否则界面横幅
+        // 会一直停在最后一句「打包中…」，看起来像还在导（文件其实早写完了）。
+        options.emitEvent({ kind: 'status', message: '' })
       }
     },
 
@@ -1907,6 +1918,8 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         active = false
         snapshot = null
         profileWasNew = false
+        // 「已还原快照」只是完成文案，没有 done/error 收尾，横幅会一直挂着转圈。
+        options.emitEvent({ kind: 'status', message: '' })
       }
     },
 
@@ -1939,6 +1952,8 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         throw error
       } finally {
         active = false
+        // 成功路径只发过「正在向整合包添加插件…」，没有收尾事件，同样要自己收口。
+        options.emitEvent({ kind: 'status', message: '' })
       }
     },
 

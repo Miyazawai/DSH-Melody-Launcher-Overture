@@ -994,7 +994,7 @@ function PackStageBar({ stage }: { stage: PackStageProgress }) {
         {percent !== null && <strong>{percent}%</strong>}
       </div>
       <div className="settings-pack-download-meta">
-        {percent === null && <span>这一步没有字节进度，会自己往下走；首次导入要解压一万多个文件，可能一两分钟。</span>}
+        {percent === null && <span>这一步没有细粒度进度，会自己往下走；最慢的是首次导入解压上万个文件，可能一两分钟。</span>}
       </div>
     </div>
   )

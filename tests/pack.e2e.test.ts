@@ -328,7 +328,7 @@ describe('pack E2E · 标准包生命周期（真隔离）', () => {
     const env = await makeEnv()
     const store = makeSettingsStore(env)
     const sim = createDshSimulator(store, env.pluginReceiptsPath)
-    const { manager } = makeManager(env, sim, store)
+    const { manager, emitEvent } = makeManager(env, sim, store)
 
     const alphaBody = await makePluginBody(env, 'alpha')
     const manifest: PackManifest = {
@@ -379,6 +379,7 @@ describe('pack E2E · 标准包生命周期（真隔离）', () => {
     expect(reEnabled.plugins.find(p => p.packageName === 'alpha')?.enabled).toBe(true)
 
     // 导出：快照 = 家目录镜像（无清单，node_modules 随包一起走）。
+    emitEvent.mockClear()
     const { zipPath: exportedZipPath } = await manager.exportPack('pack-alpha-pack')
     const exportedBytes = await readFile(exportedZipPath)
     const snapshotEntries = new AdmZip(exportedBytes).getEntries().map(entry => entry.entryName)
@@ -389,6 +390,10 @@ describe('pack E2E · 标准包生命周期（真隔离）', () => {
     // 旧格式的清单与依赖 tarball 不再出现。
     expect(snapshotEntries.some(name => name.startsWith('plugin-bodies/'))).toBe(false)
     expect(snapshotEntries).not.toContain('dsh-pack.yaml')
+    // 打包进度走确定态百分比，且结束必须收口：否则界面横幅会一直停在「打包中…」转圈。
+    const exportEvents = emitEvent.mock.calls.map(([event]) => event)
+    expect(exportEvents.some(event => event.kind === 'stage' && typeof event.percent === 'number')).toBe(true)
+    expect(exportEvents.at(-1)).toEqual({ kind: 'status', message: '' })
 
     // 删除激活中的包：允许；没有其它包时进入零包引导态（指针置空，不自动新建兜底包）。
     const removed = await manager.removePack('pack-alpha-pack')
@@ -588,6 +593,53 @@ describe('pack E2E · 导出隐私边界', () => {
     expect(entries.some(entry => /credentials/i.test(entry))).toBe(false)
     expect(entries.some(entry => /sessions/i.test(entry))).toBe(false)
     expect(entries.some(entry => entry.includes('alpha'))).toBe(true)
+  })
+})
+
+// ===========================================================================
+// 场景 E：进度横幅的收口事件
+// 界面上的整合包横幅（packStage / packDownload）只靠 done / error / status 空串清掉；
+// 操作结束时漏发这些事件，横幅就会一直停在最后一句「正在…」上转圈，看起来像还没做完。
+// ===========================================================================
+
+describe('pack E2E · 进度横幅收口', () => {
+  it('导出失败（包不存在）也要发收尾事件', async () => {
+    const env = await makeEnv()
+    const store = makeSettingsStore(env)
+    const sim = createDshSimulator(store, env.pluginReceiptsPath)
+    const { manager, emitEvent } = makeManager(env, sim, store)
+
+    await expect(manager.exportPack('pack-missing')).rejects.toThrow()
+    expect(emitEvent.mock.calls.at(-1)?.[0]).toEqual({ kind: 'status', message: '' })
+  })
+
+  it('导入成功以 done 收尾', async () => {
+    const env = await makeEnv()
+    const store = makeSettingsStore(env)
+    const sim = createDshSimulator(store, env.pluginReceiptsPath)
+    const { manager, emitEvent } = makeManager(env, sim, store)
+
+    const alphaBody = await makePluginBody(env, 'alpha')
+    const manifest: PackManifest = {
+      name: 'Alpha Pack',
+      description: 'alpha pack',
+      version: '1.0.0',
+      plugins: [{ packageName: 'alpha', source: 'npm' }],
+    }
+    const zipPath = await writeStandardZip(env, 'alpha-pack.zip', manifest, new Map([['alpha', alphaBody]]))
+    await manager.importPack(zipPath)
+    expect(emitEvent.mock.calls.at(-1)?.[0]).toMatchObject({ kind: 'done' })
+  })
+
+  it('导入失败以 error 收尾', async () => {
+    const env = await makeEnv()
+    const store = makeSettingsStore(env)
+    const sim = createDshSimulator(store, env.pluginReceiptsPath)
+    const { manager, emitEvent } = makeManager(env, sim, store)
+
+    const zipPath = await writeRawZip(env, 'nothing.zip', { 'README.txt': 'nothing installable here' })
+    await expect(manager.importPack(zipPath)).rejects.toThrow()
+    expect(emitEvent.mock.calls.at(-1)?.[0]).toMatchObject({ kind: 'error' })
   })
 })
 
