@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   BookOpen,
   Check,
+  ChevronDown,
   Cpu,
   Download,
   ExternalLink,
@@ -23,11 +24,10 @@ import {
   X,
 } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { OFFICIAL_PACK_VERSION } from '../constants'
 import { useLauncherApi } from '../api/client'
 import { resolveLauncherApi } from '../api/client'
 import { useLauncherStore } from '../hooks/use-launcher-store'
-import { formatBytes } from '../lib/format'
+import { downloadPercent, formatBytes, formatSpeed } from '../lib/format'
 import { SkeletonStrip } from '../components/Skeleton'
 import { DshMarketView } from './DshMarketView'
 import {
@@ -37,12 +37,12 @@ import {
   collectSkillsShEntries,
   filterSkillMarketEntries,
   formatInstalls,
-  partitionDshVersions,
   type SkillCategory,
   type SkillMarketEntry,
   type SkillMarketSource,
   type SkillMarketSourceKind,
 } from '../lib/skill-market'
+import { groupDshVersionsByChannel, parseDshVersion, type DshChannelMeta } from '../lib/dsh-version'
 import type {
   AppSettings,
   BuiltinAgentPreset,
@@ -52,6 +52,10 @@ import type {
   InstalledSkill,
   InstallProgress,
   ManagedPlugin,
+  OfficialPackRelease,
+  OfficialPackStatus,
+  PackDownloadProgress,
+  PackStageProgress,
   PackStatus,
   ProfileState,
   RuntimeEnvironmentState,
@@ -95,10 +99,22 @@ interface SettingsPanelsProps {
   onActivatePack: (packId: string) => Promise<boolean>
   /** 整合包后台活动（导出打包进度等）；null 表示空闲。 */
   packActivity?: string | null
+  /** 包体下载进度（官方整合包百 MB 级）：非空时在整合包页画进度条。 */
+  packDownload?: PackDownloadProgress | null
+  /** 下载之后的导入阶段（解压 / 补装 DSH 运行时）：接在同一条进度条位置。 */
+  packStage?: PackStageProgress | null
   onRenamePack: (packId: string, name: string) => Promise<boolean>
   onCreateBlankPack: (name: string, dshVersion: string | null) => Promise<PackStatus | undefined>
   onPackDiskUsage: (packId: string) => Promise<number>
   onRestoreOfficialPack: () => void
+  /** 官方整合包版本流：状态 / 版本列表 / 按版本下载。 */
+  officialStatus: OfficialPackStatus | null
+  officialVersions: OfficialPackRelease[] | null
+  officialVersionsError: string | null
+  officialVersionsBusy: boolean
+  onReadOfficialPackStatus: (force?: boolean) => Promise<OfficialPackStatus | null>
+  onRefreshOfficialVersions: (force?: boolean) => Promise<void>
+  onInstallOfficialPackVersion: (version: string) => Promise<boolean>
   onRemovePack: (packId: string) => Promise<boolean>
   onExportPack: (packId: string) => Promise<string | null>
   onOpenDshFolder: () => void
@@ -133,10 +149,19 @@ export function SettingsPanels({
   onProfileChanged,
   onActivatePack,
   packActivity,
+  packDownload,
+  packStage,
   onRenamePack,
   onCreateBlankPack,
   onPackDiskUsage,
   onRestoreOfficialPack,
+  officialStatus,
+  officialVersions,
+  officialVersionsError,
+  officialVersionsBusy,
+  onReadOfficialPackStatus,
+  onRefreshOfficialVersions,
+  onInstallOfficialPackVersion,
   onRemovePack,
   onExportPack,
   onOpenDshFolder,
@@ -248,7 +273,12 @@ export function SettingsPanels({
               onDrop={onZoneDrop}
             >
               {zoneDroppingZip && <div className="settings-zip-drop-zone-hint">松开鼠标，把 .zip 整合包安装进来</div>}
-              {packActivity && <div className="settings-pack-activity"><LoaderCircle size={13} className="spin" /><span>{packActivity}</span></div>}
+              {/* 下载有字节进度、导入有阶段进度，两者共用同一条进度条位置；都没有时才退回文字横幅。 */}
+              {packDownload
+                ? <PackDownloadBar progress={packDownload} />
+                : packStage
+                  ? <PackStageBar stage={packStage} />
+                  : packActivity && <div className="settings-pack-activity"><LoaderCircle size={13} className="spin" /><span>{packActivity}</span></div>}
               <SettingsPacks
                 packs={packs}
                 activePack={activePack}
@@ -268,6 +298,13 @@ export function SettingsPanels({
                 onNavigateTab={onNavigateTab}
                 onRestoreOfficial={onRestoreOfficialPack}
                 restoringOfficial={busy === 'official-restore'}
+                officialStatus={officialStatus}
+                officialVersions={officialVersions}
+                officialVersionsError={officialVersionsError}
+                officialVersionsBusy={officialVersionsBusy}
+                onReadOfficialStatus={onReadOfficialPackStatus}
+                onRefreshOfficialVersions={onRefreshOfficialVersions}
+                onInstallOfficialVersion={onInstallOfficialPackVersion}
               />
             </div>
           )}
@@ -306,7 +343,8 @@ function SettingsVersions({
   onRefresh: () => void
   refreshLocked: boolean
 }) {
-  const [expandedGroup, setExpandedGroup] = useState<'stable' | 'prerelease' | null>(null)
+  // 展开的渠道分组键（正式版为 'stable'，其余为渠道名）；同时只展开一组。
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
   const [removingVersion, setRemovingVersion] = useState<string | null>(null)
   const dshProgress = installProgress && installProgress.kind === 'dsh'
     && installProgress.phase !== 'complete' && installProgress.phase !== 'error'
@@ -317,7 +355,7 @@ function SettingsVersions({
   }
 
   const installedVersions = new Set(environment.dshInstalled.map(item => item.version))
-  const { stable, prerelease } = partitionDshVersions(environment.dshAvailable, installedVersions)
+  const versionGroups = groupDshVersionsByChannel(environment.dshAvailable)
 
   return (
     <div className="settings-stack">
@@ -380,34 +418,28 @@ function SettingsVersions({
             {!dshProgress.indeterminate && dshProgress.percent > 0 && <strong>{dshProgress.percent}%</strong>}
           </div>
         )}
-        <div className="settings-hint">点「下载」安装该版本并生成一个同名整合包；到整合包页切换即可使用，不会动当前环境。</div>
-        {stable.length === 0 && prerelease.length === 0 && <div className="settings-empty">registry 里没有更多可下载的版本。</div>}
-        <VersionGroup
-          title="稳定版"
-          candidates={stable}
-          expanded={expandedGroup === 'stable'}
-          onToggle={() => setExpandedGroup(value => value === 'stable' ? null : 'stable')}
-          busy={busy || dshProgress !== null}
-          installedVersions={installedVersions}
-          onInstall={onInstall}
-        />
-        <VersionGroup
-          title="预发布版"
-          candidates={prerelease}
-          expanded={expandedGroup === 'prerelease'}
-          onToggle={() => setExpandedGroup(value => value === 'prerelease' ? null : 'prerelease')}
-          busy={busy || dshProgress !== null}
-          installedVersions={installedVersions}
-          onInstall={onInstall}
-        />
+        <div className="settings-hint">点「下载」安装该版本并生成一个同名整合包；到整合包页切换即可使用，不会动当前环境。版本按发布渠道归堆，越靠前的渠道越稳定。</div>
+        {versionGroups.length === 0 && <div className="settings-empty">registry 里没有更多可下载的版本。</div>}
+        {versionGroups.map(group => (
+          <VersionGroup
+            key={group.key}
+            meta={group.meta}
+            candidates={group.candidates}
+            expanded={expandedGroup === group.key}
+            onToggle={() => setExpandedGroup(value => value === group.key ? null : group.key)}
+            busy={busy || dshProgress !== null}
+            installedVersions={installedVersions}
+            onInstall={onInstall}
+          />
+        ))}
       </section>
     </div>
   )
 }
 
-/** 可下载版本分组：默认只露 5 条，组内可展开；已安装的保留在列表里标「已安装」，最新发行版标「最新版」。 */
+/** 可下载版本分组：一个发布渠道归一堆（正式版 → rc → beta → alpha → 其它），默认只露 5 条。 */
 function VersionGroup({
-  title,
+  meta,
   candidates,
   expanded,
   onToggle,
@@ -415,7 +447,7 @@ function VersionGroup({
   installedVersions,
   onInstall,
 }: {
-  title: string
+  meta: DshChannelMeta
   candidates: RuntimeVersionCandidate[]
   expanded: boolean
   onToggle: () => void
@@ -428,7 +460,10 @@ function VersionGroup({
   return (
     <div className="settings-version-group">
       <div className="settings-version-group-head">
-        <span className="settings-version-group-title">{title}<em>{candidates.length}</em></span>
+        <span className="settings-version-group-title">
+          <span className={`settings-version-group-label ${meta.tone}`} title={meta.hint}>{meta.name}</span>
+          <em>{candidates.length}</em>
+        </span>
         {candidates.length > 5 && (
           <button type="button" className="settings-nav-link" onClick={onToggle}>{expanded ? '收起' : `展开全部 ${candidates.length} 个`}</button>
         )}
@@ -436,14 +471,25 @@ function VersionGroup({
       <div className="settings-list">
         {shown.map(candidate => {
           const installed = installedVersions.has(candidate.version)
+          const parsed = parseDshVersion(candidate.version)
+          const date = candidate.date ? candidate.date.slice(0, 10) : null
+          const detail = [
+            `DSH ${candidate.version}`,
+            meta.name,
+            candidate.label ? `npm 标签 ${candidate.label}` : null,
+            date ? `发布于 ${date}` : null,
+          ].filter(Boolean).join(' · ')
           return (
-            <div key={candidate.version} className={`settings-row ${installed ? 'installed' : ''}`}>
+            <div key={candidate.version} className={`settings-row ${installed ? 'installed' : ''}`} title={detail}>
               <div className="settings-row-copy">
                 <strong>
-                  {candidate.version}
-                  {candidate.label === 'latest' && <span className="settings-row-badge latest">最新版</span>}
+                  {parsed.base}
+                  {parsed.prerelease && <span className={`settings-row-channel ${meta.tone}`}>{parsed.prerelease}</span>}
+                  {candidate.isNewest
+                    ? <span className="settings-row-badge latest">最新版</span>
+                    : candidate.recommended && <span className="settings-row-badge recommended" title="首次安装与一键更新都会装这个版本">推荐安装</span>}
                 </strong>
-                <span>{[candidate.label === 'latest' ? null : candidate.label, candidate.date ? candidate.date.slice(0, 10) : null, candidate.prerelease ? '预发布' : null].filter(Boolean).join(' · ') || 'npm registry'}</span>
+                <span>{[date, meta.name].filter(Boolean).join(' · ')}</span>
               </div>
               <div className="settings-row-actions">
                 {installed
@@ -930,6 +976,57 @@ function SettingsSection({
   )
 }
 
+/**
+ * 导入阶段的进度条（下载完成之后）：写盘 / 解压快照 / 补装缺失的 DSH 运行时。
+ * 有百分比就画确定态（解压按文件数、补装运行时按安装进度），没有就退回不确定态动画——
+ * 关键是别让下载那条 100% 的进度条停在那里一动不动。
+ */
+function PackStageBar({ stage }: { stage: PackStageProgress }) {
+  const percent = stage.percent
+  return (
+    <div className="settings-pack-download">
+      <div className="settings-progress">
+        <LoaderCircle size={14} className="spin" />
+        <span className="settings-pack-download-label">{stage.label}</span>
+        <div className={`settings-progress-track ${percent === null ? 'indeterminate' : 'determinate'}`}>
+          {percent !== null && <span style={{ width: `${percent}%` }} />}
+        </div>
+        {percent !== null && <strong>{percent}%</strong>}
+      </div>
+      <div className="settings-pack-download-meta">
+        {percent === null && <span>这一步没有字节进度，会自己往下走；首次导入要解压一万多个文件，可能一两分钟。</span>}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 官方整合包这类百 MB 级下载的可视化进度条：百分比 + 已下载/总量 + 实时速度 + 当前下载源。
+ * 字节数、速度、来源都由主进程上报（换源后速度重新起算），总量未知时退回不确定态动画。
+ */
+function PackDownloadBar({ progress }: { progress: PackDownloadProgress }) {
+  const total = progress.total
+  const percent = downloadPercent(progress.received, total)
+  const speed = formatSpeed(progress.speed)
+  return (
+    <div className="settings-pack-download">
+      <div className="settings-progress">
+        <Download size={14} />
+        <span className="settings-pack-download-label">{progress.label}</span>
+        <div className={`settings-progress-track ${percent === null ? 'indeterminate' : 'determinate'}`}>
+          {percent !== null && <span style={{ width: `${percent}%` }} />}
+        </div>
+        <strong>{percent !== null ? `${percent}%` : formatBytes(progress.received)}</strong>
+      </div>
+      <div className="settings-pack-download-meta">
+        {percent !== null && total != null && <span>{formatBytes(progress.received)} / {formatBytes(total)}</span>}
+        <span>{speed || '连接中…'}</span>
+        <span className="settings-pack-download-source" title="直连太慢或断流时自动切换到镜像">经 {progress.source}</span>
+      </div>
+    </div>
+  )
+}
+
 function SettingsPacks({
   packs,
   activePack,
@@ -946,6 +1043,13 @@ function SettingsPacks({
   onNavigateTab,
   onRestoreOfficial,
   restoringOfficial,
+  officialStatus,
+  officialVersions,
+  officialVersionsError,
+  officialVersionsBusy,
+  onReadOfficialStatus,
+  onRefreshOfficialVersions,
+  onInstallOfficialVersion,
 }: {
   packs: PackStatus[]
   activePack: PackStatus | null
@@ -962,9 +1066,30 @@ function SettingsPacks({
   onNavigateTab: (tab: HomeTab) => void
   onRestoreOfficial: () => void
   restoringOfficial: boolean
+  officialStatus: OfficialPackStatus | null
+  /** null = 还没拉过版本列表（展开堆叠时才拉）。 */
+  officialVersions: OfficialPackRelease[] | null
+  officialVersionsError: string | null
+  officialVersionsBusy: boolean
+  onReadOfficialStatus: (force?: boolean) => Promise<OfficialPackStatus | null>
+  onRefreshOfficialVersions: (force?: boolean) => Promise<void>
+  onInstallOfficialVersion: (version: string) => Promise<boolean>
 }) {
-  // 当前版本的官方包缺失时（被删、或首启还没拉下来）给出「恢复」入口。
-  const hasOfficialPack = packs.some(pack => pack.officialVersion === OFFICIAL_PACK_VERSION)
+  // 本机已装过哪些官方版本（包被改名也仍算已下载，靠记录里的 officialVersion）。
+  const installedOfficialVersions = packs
+    .map(pack => pack.officialVersion)
+    .filter((version): version is string => Boolean(version))
+  /**
+   * 旧命名的官方资产（`official-pack-v0.1.1.zip`）名字里没编码 DSH 版本、Release 正文也没写，
+   * 但本机装过它的话绑定版本是确定的——用本地包补上，仍补不上才显示「未标注」。
+   */
+  const localOfficialDshVersions = new Map<string, string>()
+  for (const pack of packs) {
+    const version = pack.officialVersion?.trim()
+    if (version && pack.dshVersion) localOfficialDshVersions.set(version, pack.dshVersion)
+  }
+  const [officialOpen, setOfficialOpen] = useState(false)
+  const [installingOfficial, setInstallingOfficial] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
@@ -1025,8 +1150,10 @@ function SettingsPacks({
         <div className="settings-panel-title"><Package size={17} /><span>整合包</span>{packs.length > 0 && <span className="settings-count">{packs.length}</span>}</div>
         <div className="settings-market-heading-actions">
           <PanelRefresh onClick={onRefresh} disabled={busy} />
-          {!hasOfficialPack && (
-            <button type="button" className="secondary-button" onClick={onRestoreOfficial} disabled={busy || restoringOfficial} title={`从 GitHub Release 重新获取官方默认整合包 ${OFFICIAL_PACK_VERSION}`}>
+          {/* 版本列表读不到（断网/限流）且本机还没有官方包时的兜底：盲装推荐版本。
+              列表可用时，下载入口在下面的「官方整合包」堆叠里。 */}
+          {officialVersionsError && installedOfficialVersions.length === 0 && (
+            <button type="button" className="secondary-button" onClick={onRestoreOfficial} disabled={busy || restoringOfficial} title="版本列表暂时读不到，直接获取推荐版本">
               {restoringOfficial ? <LoaderCircle size={15} className="spin" /> : <Sparkles size={15} />}恢复官方整合包
             </button>
           )}
@@ -1100,6 +1227,88 @@ function SettingsPacks({
         </div>
       )}
       <div className="settings-list">
+        {/* 官方整合包：折叠成一个堆叠入口，展开是各版本的默认整合包（最新版即推荐版本）。
+            下载即导入为普通整合包（带「官方」徽标），重复下载同一版本得到「… (2)」。 */}
+        <div className={`settings-official-stack ${officialOpen ? 'open' : ''}`}>
+          <button
+            type="button"
+            className="settings-official-head"
+            aria-expanded={officialOpen}
+            onClick={() => {
+              const next = !officialOpen
+              setOfficialOpen(next)
+              if (next) {
+                void onReadOfficialStatus(false)
+                if (!officialVersions) void onRefreshOfficialVersions(false)
+              }
+            }}
+          >
+            <Package size={15} className="settings-official-icon" />
+            <span className="settings-official-copy">
+              <strong>官方整合包</strong>
+              <span>
+                {installedOfficialVersions.length > 0
+                  ? `已下载 ${installedOfficialVersions.join('、')}`
+                  : officialStatus?.recommended
+                    ? `尚未下载，推荐 ${officialStatus.recommended}`
+                    : '尚未下载'}
+                {officialStatus?.updateAvailable && officialStatus.recommended ? ` · 有新版本 ${officialStatus.recommended}` : ''}
+              </span>
+            </span>
+            {officialStatus?.updateAvailable && <span className="settings-pack-badge settings-official-update-badge">有新版本</span>}
+            <ChevronDown size={16} className="settings-official-chevron" />
+          </button>
+          {officialOpen && (
+            <div className="settings-official-versions">
+              {officialVersionsBusy && <div className="settings-empty"><LoaderCircle className="spin" size={16} />正在读取官方整合包版本…</div>}
+              {!officialVersionsBusy && officialVersionsError && (
+                <div className="settings-empty settings-official-error">
+                  <span>{officialVersionsError}</span>
+                  <button type="button" className="secondary-button" onClick={() => void onRefreshOfficialVersions(true)}>重试</button>
+                </div>
+              )}
+              {!officialVersionsBusy && !officialVersionsError && (officialVersions?.length ?? 0) === 0 && (
+                <div className="settings-empty">Release 上还没有官方整合包。</div>
+              )}
+              {(officialVersions ?? []).map(item => {
+                const installed = installedOfficialVersions.includes(item.version)
+                const recommended = item.version === officialStatus?.recommended
+                const dshVersion = item.dshVersion ?? localOfficialDshVersions.get(item.version) ?? null
+                return (
+                  <div key={item.version} className="settings-official-row">
+                    <span className="settings-official-row-copy">
+                      <span className="settings-official-title-line">
+                        <strong>{item.version}</strong>
+                        {recommended && <span className="settings-pack-badge settings-official-recommended-badge">推荐</span>}
+                        {installed && <span className="settings-pack-badge settings-pack-official-badge"><Check size={11} />已下载</span>}
+                      </span>
+                      <span className="settings-official-meta">
+                        {[
+                          dshVersion ? `适配 DSH ${dshVersion}` : '适配 DSH 未标注',
+                          item.publishedAt ? item.publishedAt.slice(0, 10) : null,
+                          item.size > 0 ? formatBytes(item.size) : null,
+                        ].filter(Boolean).join(' · ')}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={busy || installingOfficial !== null}
+                      title={installed ? '再下载一份（新包会加「(2)」后缀）' : '下载并导入这个版本'}
+                      onClick={() => {
+                        setInstallingOfficial(item.version)
+                        void onInstallOfficialVersion(item.version).finally(() => setInstallingOfficial(null))
+                      }}
+                    >
+                      {installingOfficial === item.version ? <LoaderCircle size={13} className="spin" /> : <Download size={13} />}
+                      {installed ? '再下载' : '下载'}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
         {packs.map(pack => {
           const isActive = activePack?.id === pack.id
           const counts = [

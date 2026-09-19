@@ -602,13 +602,6 @@ input:focus-visible {
   }
 }
 
-.home-brand-qq {
-  color: var(--quiet);
-  font-size: 10.5px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
 /* 首页右列：卡片区 + 动作区整体垂直居中、略偏上，启动按钮不再沉底 */
 .home-side {
   display: flex;
@@ -8055,6 +8048,37 @@ input:focus-visible {
   vertical-align: 2px;
 }
 
+/* 「推荐安装」= 首次安装与一键更新都会装的那个版本（稳定优先、同级取新）。 */
+.settings-row-badge.recommended {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid var(--muted);
+  background: transparent;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  vertical-align: 2px;
+}
+
+/* 发布渠道徽章：颜色一律引用主题语义变量，六套主题下都成立。 */
+.settings-row-channel {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 9px;
+  font-size: 10.5px;
+  font-weight: 700;
+  vertical-align: 1px;
+}
+
+.settings-row-channel.stable { color: var(--accent); }
+.settings-row-channel.rc { color: var(--blue); }
+.settings-row-channel.beta { color: var(--amber); }
+.settings-row-channel.alpha { color: var(--danger); }
+.settings-row-channel.other { color: var(--muted); }
+
 .settings-row.installed {
   opacity: 0.72;
 }
@@ -8068,6 +8092,131 @@ input:focus-visible {
   color: var(--quiet);
   font-size: 13px;
   text-align: center;
+}
+
+/* ---- 官方整合包堆叠入口 ---- */
+/* 合起来占一行（有更新时挂徽标），展开后是各版本的默认整合包，最新版标「推荐」。 */
+.settings-official-stack {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+
+.settings-official-stack.open {
+  background: var(--surface);
+}
+
+.settings-official-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.settings-official-head:hover {
+  background: var(--surface-strong);
+}
+
+.settings-official-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.settings-official-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-official-copy strong {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.settings-official-copy span {
+  font-size: 12px;
+  color: var(--quiet);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-official-chevron {
+  flex-shrink: 0;
+  color: var(--quiet);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.settings-official-stack.open .settings-official-chevron {
+  transform: rotate(180deg);
+}
+
+.settings-pack-badge.settings-official-update-badge,
+.settings-pack-badge.settings-official-recommended-badge {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.settings-official-versions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+
+.settings-official-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-soft);
+}
+
+.settings-official-row-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.settings-official-title-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.settings-official-title-line strong {
+  font-size: 13.5px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-official-meta {
+  font-size: 12px;
+  color: var(--quiet);
+}
+
+/* 列表读不到时的错误态：文案 + 重试按钮竖排。 */
+.settings-official-versions .settings-empty {
+  flex-direction: column;
+  gap: 8px;
 }
 
 .settings-pack-row {
@@ -8551,6 +8700,24 @@ input:focus-visible {
   color: var(--muted);
 }
 
+/* 渠道标签：沿用启动器既有的「浅底彩字」徽章语言（与行内徽章同构），不用游离的圆点。 */
+.settings-version-group-label {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 10px;
+  background: var(--surface-strong);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settings-version-group-label.stable { background: var(--accent-soft); color: var(--accent); }
+.settings-version-group-label.rc { background: var(--blue-soft); color: var(--blue); }
+.settings-version-group-label.beta { background: var(--amber-soft); color: var(--amber); }
+.settings-version-group-label.alpha { background: var(--danger-soft); color: var(--danger); }
+.settings-version-group-label.other { background: var(--surface-strong); color: var(--muted); }
+
 .settings-version-group-title em {
   display: inline-flex;
   align-items: center;
@@ -8803,3 +8970,10 @@ input:focus-visible {
 
 
 .settings-pack-activity { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 9px 12px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--ink); font-size: 12px; font-weight: 600; }
+
+/* 包体下载进度条：主行（图标+名称+轨道+百分比）与元信息行（大小/速度/来源）两层。 */
+.settings-pack-download { margin: 0 0 10px; padding: 9px 12px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.settings-pack-download .settings-progress { margin-bottom: 0; border: none; background: transparent; padding: 0; }
+.settings-pack-download-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-pack-download-meta { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 0 22px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.settings-pack-download-source { color: var(--accent); font-weight: 600; }

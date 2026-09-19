@@ -8,7 +8,6 @@ import {
   formatInstalls,
   guessSkillCategory,
   localizeSkillEntry,
-  partitionDshVersions,
   skillInstallRequestFor,
 } from '../src/lib/skill-market'
 import type { InstalledSkill, SkillInstallTarget, SkillRepositoryAnalysis, SkillsShSkill } from '../src/types'
@@ -171,19 +170,6 @@ describe('formatInstalls', () => {
     expect(formatInstalls(189_038)).toBe('18.9 万')
     expect(formatInstalls(1_234_567_890)).toBe('12.3 亿')
     expect(formatInstalls(-5)).toBe('0')
-  })
-})
-
-describe('partitionDshVersions', () => {
-  const candidate = (version: string, prerelease: boolean) => ({ version, label: null, lts: null, date: null, prerelease })
-
-  it('已安装版本保留在列表中，按预发布标记分组', () => {
-    const grouped = partitionDshVersions(
-      [candidate('0.1.0', false), candidate('0.1.1-rc.2', true), candidate('0.0.9', false)],
-      new Set(['0.1.0']),
-    )
-    expect(grouped.stable.map(item => item.version)).toEqual(['0.1.0', '0.0.9'])
-    expect(grouped.prerelease.map(item => item.version)).toEqual(['0.1.1-rc.2'])
   })
 })
 

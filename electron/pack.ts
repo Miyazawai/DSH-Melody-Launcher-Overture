@@ -339,13 +339,18 @@ export function createPackManager(options: PackManagerOptions): PackManager {
    * 自然写进新包，整条既有安装管线零改动。覆盖导入时沿用既有记录的 homePath。
    */
   /**
-   * 同名导入冲突时 resolveImportedProfileId 会给 packId 追加 -N 后缀；
-   * 显示名跟随改成「原名 (N)」，避免列表里出现两个一模一样的名字。
+   * 同名导入冲突时 resolveImportedProfileId 会给 id 追加 -N 后缀，显示名跟着变成「原名 (N)」，
+   * 避免列表里出现两个一模一样的名字。
+   *
+   * 必须显式传「加后缀前的基础 id」，不能拿显示名反推 id：中文显示名经 packProfileName 会被换成
+   * 一串 `-`，而快照导入的 id 来自 zip 内的 profileId，两者本来就对不上——官方默认整合包（中文名）
+   * 重复下载正是这种情形，反推会算不出后缀、列表里出现两个同名包。
    */
-  function importPackDisplayName(packId: string, baseName: string): string {
-    const base = packProfileName(baseName)
-    if (packId === base) return baseName
-    const suffix = packId.slice(base.length + 1)
+  function importPackDisplayName(packId: string, baseId: string, baseName: string): string {
+    if (packId === baseId) return baseName
+    const prefix = `${baseId}-`
+    if (!packId.startsWith(prefix)) return baseName
+    const suffix = packId.slice(prefix.length)
     return /^\d+$/.test(suffix) ? `${baseName} (${suffix})` : baseName
   }
 
@@ -1022,8 +1027,9 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           const manifest = parsePackManifest(await readFile(filePath, 'utf8'), { requireDshVersion: true })
           const existing = await readPackRegistry(options.registryPath)
           const currentHome = await getDshHome()
+          const baseId = packProfileName(importOptions?.name ?? manifest.name)
           const packId = await resolveImportedProfileId(
-            packProfileName(importOptions?.name ?? manifest.name),
+            baseId,
             currentHome,
             existing,
             importOptions,
@@ -1035,7 +1041,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
             dshHome = await provisionPackHome({
               packId,
               existing,
-              meta: { name: importPackDisplayName(packId, importOptions?.name ?? manifest.name), description: manifest.description, version: manifest.version, dshVersion: manifest.dshVersion, source: 'manifest' },
+              meta: { name: importPackDisplayName(packId, baseId, importOptions?.name ?? manifest.name), description: manifest.description, version: manifest.version, dshVersion: manifest.dshVersion, source: 'manifest' },
             })
             await ensureUnifiedProfile(dshHome, profileName, settings.profileName, { description: manifest.description, dshVersion: manifest.dshVersion, source: 'yaml' })
           }
@@ -1080,7 +1086,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           const result = buildInstallResult(packId, installed, failures)
           const record: PackRecord = {
             id: packId,
-            name: importPackDisplayName(packId, importOptions?.name ?? manifest.name),
+            name: importPackDisplayName(packId, baseId, importOptions?.name ?? manifest.name),
             description: manifest.description,
             version: manifest.version,
             dshVersion: manifest.dshVersion,
@@ -1116,7 +1122,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
               : assertMeaningfulPackName(packName)
             const packId = await resolveImportedProfileId(idBase, snapshotHome, snapshotExisting, importOptions)
             const dshVersion = snapshotInfo.dshVersion ?? await resolvePackDshVersion(snapshotSettings)
-            const displayName = importPackDisplayName(packId, packName)
+            const displayName = importPackDisplayName(packId, idBase, packName)
             const homePath = path.join(packsRoot, packId)
             await mkdir(homePath, { recursive: true })
             try {
@@ -1210,7 +1216,8 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           if (!packName) throw new Error('无法确定整合包名称，请在预览中手动命名。')
           const existing = await readPackRegistry(options.registryPath)
           const currentHome = await getDshHome()
-          const packId = await resolveImportedProfileId(assertMeaningfulPackName(packName), currentHome, existing, importOptions)
+          const baseId = assertMeaningfulPackName(packName)
+          const packId = await resolveImportedProfileId(baseId, currentHome, existing, importOptions)
           const settings = await options.readSettings()
           const dshVersion = await resolvePackDshVersion(settings)
           const profileName = options.unifiedProfiles ? packId : settings.profileName
@@ -1219,7 +1226,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
             dshHome = await provisionPackHome({
               packId,
               existing,
-              meta: { name: importPackDisplayName(packId, packName), description: `非标准整合包：${packName}`, version: '1.0.0', dshVersion, source: 'raw' },
+              meta: { name: importPackDisplayName(packId, baseId, packName), description: `非标准整合包：${packName}`, version: '1.0.0', dshVersion, source: 'raw' },
             })
             await ensureUnifiedProfile(dshHome, profileName, settings.profileName, { description: `非标准整合包：${packName}`, dshVersion, source: 'zip' })
           }
@@ -1322,7 +1329,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
 
           const record: PackRecord = {
             id: packId,
-            name: importPackDisplayName(packId, packName),
+            name: importPackDisplayName(packId, baseId, packName),
             description: `非标准整合包：扫描到 ${scan.plugins.length} 个插件、${scan.skills.length} 个技能${scan.presets.length > 0 ? `、${scan.presets.length} 个预设` : ''}。`,
             version: '1.0.0',
             dshVersion,
@@ -1354,7 +1361,8 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         }
         const existing = await readPackRegistry(options.registryPath)
         const currentHome = await getDshHome()
-        const packId = await resolveImportedProfileId(packProfileName(manifest.name), currentHome, existing, importOptions)
+        const baseId = packProfileName(manifest.name)
+        const packId = await resolveImportedProfileId(baseId, currentHome, existing, importOptions)
         const settings = await options.readSettings()
         const profileName = options.unifiedProfiles ? packId : settings.profileName
         let dshHome = currentHome
@@ -1362,7 +1370,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
           dshHome = await provisionPackHome({
             packId,
             existing,
-            meta: { name: importPackDisplayName(packId, manifest.name), description: manifest.description, version: manifest.version, dshVersion: manifest.dshVersion, source: inspection.hasBodies ? 'zip' : 'manifest' },
+            meta: { name: importPackDisplayName(packId, baseId, manifest.name), description: manifest.description, version: manifest.version, dshVersion: manifest.dshVersion, source: inspection.hasBodies ? 'zip' : 'manifest' },
           })
           await ensureUnifiedProfile(dshHome, profileName, settings.profileName, { description: manifest.description, dshVersion: manifest.dshVersion, source: 'zip' })
         }
@@ -1649,7 +1657,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         const installedApplicationIds = installed.filter(name => applicationIds.has(name))
         const record: PackRecord = {
           id: packId,
-          name: importPackDisplayName(packId, manifest.name),
+          name: importPackDisplayName(packId, baseId, manifest.name),
           description: manifest.description,
           version: manifest.version,
           dshVersion: manifest.dshVersion,

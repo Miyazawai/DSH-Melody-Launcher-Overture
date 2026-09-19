@@ -2,7 +2,7 @@
 // 通用技能来自 skills.sh 目录索引（api.skillMarketCatalog，千级、带安装量）；
 // DSH 社区栏仍走精选仓库的归档式检测（api.skillMarketAnalyze，主进程带缓存）。
 
-import type { InstalledSkill, RuntimeVersionCandidate, SkillInstallRequest, SkillInstallTarget, SkillRepositoryAnalysis, SkillsShSkill } from '../types'
+import type { InstalledSkill, SkillInstallRequest, SkillInstallTarget, SkillRepositoryAnalysis, SkillsShSkill } from '../types'
 
 export type SkillMarketSourceKind = 'general' | 'dsh'
 
@@ -252,17 +252,4 @@ export function skillInstallRequestFor(entry: SkillMarketEntry): SkillInstallReq
   }
 }
 
-/** 可下载版本分组：按预发布标记拆成稳定/预发布两组（各自保持 registry 顺序）。
- * 已安装的版本保留在列表里由界面标「已安装」，不再剔除。 */
-export function partitionDshVersions(
-  candidates: RuntimeVersionCandidate[],
-  _installedVersions: ReadonlySet<string>,
-): { stable: RuntimeVersionCandidate[]; prerelease: RuntimeVersionCandidate[] } {
-  const stable: RuntimeVersionCandidate[] = []
-  const prerelease: RuntimeVersionCandidate[] = []
-  for (const candidate of candidates) {
-    if (candidate.prerelease) prerelease.push(candidate)
-    else stable.push(candidate)
-  }
-  return { stable, prerelease }
-}
+/** 可下载版本的分组与渠道解析见 src/lib/dsh-version.ts（与主进程推荐安装口径同源）。 */

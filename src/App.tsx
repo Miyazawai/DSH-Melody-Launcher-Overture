@@ -14,11 +14,9 @@ import { useLauncherStore } from './hooks/use-launcher-store'
 import { useNavigation } from './hooks/use-navigation'
 import { usePackInstall } from './hooks/use-pack-install'
 import { isInstallProgressActive } from './lib/install-progress'
+import { HOME_TAB_ORDER } from './lib/nav'
 import type { HomeTab } from './types'
 import { SettingsPanels } from './views/SettingsView'
-
-/** 一级导航顺序（keep-mounted 渲染顺序）。 */
-const HOME_TAB_ORDER: HomeTab[] = ['start', 'versions', 'plugins', 'skills', 'presets', 'packs']
 
 /**
  * 应用根。
@@ -168,6 +166,13 @@ function LauncherShell() {
                     onImportPack={() => void handlePackImport()}
                     onImportPackPath={path => { void packInstall.startImport(path) }}
                     onRestoreOfficialPack={() => { void store.restoreOfficialPack() }}
+                    officialStatus={store.officialStatus}
+                    officialVersions={store.officialVersions}
+                    officialVersionsError={store.officialVersionsError}
+                    officialVersionsBusy={store.officialVersionsBusy}
+                    onReadOfficialPackStatus={store.readOfficialPackStatus}
+                    onRefreshOfficialVersions={store.refreshOfficialVersions}
+                    onInstallOfficialPackVersion={store.installOfficialPackVersion}
                     onInstallDshVersion={async version => {
                       const ok = await store.installDshVersion(version)
                       // 装版本会自动补发同名整合包（零包时还会自动激活成为当前包），
@@ -194,6 +199,8 @@ function LauncherShell() {
                     }}
                     onActivatePack={store.activatePack}
                     packActivity={store.packActivity}
+                    packDownload={store.packDownload}
+                    packStage={store.packStage}
                     onRenamePack={store.renamePack}
                     onCreateBlankPack={(name, dshVersion) => store.createBlankPack({ name, dshVersion })}
                     onPackDiskUsage={store.packDiskUsage}

@@ -29,6 +29,12 @@ export const DSH_PACKAGE_NAME = '@deepseek-ai/dsh'
 /** 未显式配置时使用的默认整合包。 */
 export const DEFAULT_PROFILE_NAME = 'web'
 
+/**
+ * 内置公共 GitHub 镜像前缀（拼成 `<镜像>/<原始 URL>`）。
+ * 主进程的下载候选链与设置页的镜像预选共用这一份，避免两处各写一套。
+ */
+export const GITHUB_MIRROR_PRESETS = ['https://gh-proxy.com/', 'https://ghfast.top/', 'https://ghproxy.net/'] as const
+
 /** 渲染层保留的最大日志条数，超出后丢弃最旧的记录。 */
 export const MAX_LOG_LINES = 500
 
@@ -148,6 +154,12 @@ export const IPC = {
   packsImport: 'packs:import',
   packsExport: 'packs:export',
   packsRestoreOfficial: 'packs:restore-official',
+  /** 列出 Release 上所有官方默认整合包版本。 */
+  packsOfficialVersions: 'packs:official-versions',
+  /** 官方整合包状态：推荐版本 / 已装版本 / 是否有更新。 */
+  packsOfficialStatus: 'packs:official-status',
+  /** 下载并导入指定版本的官方默认整合包。 */
+  packsOfficialInstall: 'packs:official-install',
   packsPickFile: 'packs:pick-file',
   packsActivate: 'packs:activate',
   packsRename: 'packs:rename',
@@ -191,4 +203,6 @@ export const IPC_EVENTS = {
   aiInstallEvent: 'ai:install-event',
   aiSessionEvent: 'ai-session:event',
   packProgress: 'packs:progress',
+  /** 官方整合包状态变化（启动核对完成 / 有新版本）。 */
+  officialPackStatus: 'packs:official-status-changed',
 } as const

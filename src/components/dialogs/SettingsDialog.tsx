@@ -2,6 +2,7 @@ import { Check, Folder, Gamepad2, Globe, Info, LoaderCircle, Palette, Rocket, Wr
 import { useState, type ReactNode } from 'react'
 import packageMetadata from '../../../package.json'
 import { useLauncherApi } from '../../api/client'
+import { GITHUB_MIRROR_PRESETS } from '../../constants'
 import type { AppSettings, UiTheme } from '../../types'
 
 /**
@@ -21,6 +22,11 @@ const UI_THEMES: Array<{ id: UiTheme; label: string }> = [
   { id: 'night', label: '夜间' },
 ]
 
+/** 下拉里代表「手填地址」的哨兵值，不会真的存进设置。 */
+const CUSTOM_MIRROR = '__custom__'
+/** 比较镜像地址时忽略首尾空格与结尾斜杠（手敲的常常少一个 `/`）。 */
+const normalizeMirror = (value: string): string => value.trim().replace(/\/+$/, '')
+
 function SettingsGroup({ icon, title, desc, children }: { icon: ReactNode; title: string; desc?: string; children: ReactNode }) {
   return (
     <section className="settings-group">
@@ -35,6 +41,10 @@ export function SettingsDialog({ settings, busy, onClose, onSave }: SettingsDial
   const [draft, setDraft] = useState(settings)
   // 参数在界面上是一整行文本，保存时才切成数组。
   const [argsText, setArgsText] = useState(settings.launchArgs.join(' '))
+  // 镜像下拉的当前档位：空 = 自动、预设前缀之一、或「自定义」。
+  const mirrorValue = draft.network?.githubMirror ?? ''
+  const matchedPreset = GITHUB_MIRROR_PRESETS.find(prefix => normalizeMirror(prefix) === normalizeMirror(mirrorValue) && mirrorValue.trim() !== '')
+  const mirrorPreset = mirrorValue.trim() === '' ? '' : (matchedPreset ?? CUSTOM_MIRROR)
 
   const chooseDirectory = async (kind: 'dshInstallPath' | 'dshHome' | 'workspace') => {
     const chosen = await api.chooseDirectory(kind)
@@ -72,13 +82,26 @@ export function SettingsDialog({ settings, busy, onClose, onSave }: SettingsDial
           <SettingsGroup icon={<Globe size={16} />} title="网络" desc="默认使用国内 npm 镜像（npmmirror），并自动跟随 Windows 系统代理；留空即可。">
             <label className="form-field"><span>npm 镜像</span><input value={draft.network?.npmRegistry ?? ''} placeholder="https://registry.npmmirror.com" onChange={event => setDraft({ ...draft, network: { ...draft.network, npmRegistry: event.target.value } })} /></label>
             <label className="form-field"><span>代理地址</span><input value={draft.network?.proxy ?? ''} placeholder="留空自动探测系统代理；如 http://127.0.0.1:7890" onChange={event => setDraft({ ...draft, network: { ...draft.network, proxy: event.target.value } })} /></label>
-            <label className="form-field"><span>GitHub 镜像</span><input value={draft.network?.githubMirror ?? ''} placeholder="可选，留空不启用；如 https://gh-proxy.com" onChange={event => setDraft({ ...draft, network: { ...draft.network, githubMirror: event.target.value } })} /></label>
-            <p className="settings-group-note">直连 GitHub 不稳时，可配置代理或 GitHub 镜像后重试 DSH Market 安装；npm 安装始终优先镜像。</p>
+            {/* 镜像从「裸文本框」改成预设下拉：国内用户最容易卡在这一格，选一个比手敲 URL 现实。 */}
+            <label className="form-field">
+              <span>GitHub 镜像</span>
+              <select value={mirrorPreset} onChange={event => {
+                const value = event.target.value
+                setDraft({ ...draft, network: { ...draft.network, githubMirror: value === CUSTOM_MIRROR ? (draft.network?.githubMirror ?? '') : value } })
+              }}>
+                <option value="">自动（直连太慢或断流时自动换公共镜像）</option>
+                {GITHUB_MIRROR_PRESETS.map(prefix => <option key={prefix} value={prefix}>{prefix.replace(/^https?:\/\//, '').replace(/\/$/, '')}</option>)}
+                <option value={CUSTOM_MIRROR}>自定义…</option>
+              </select>
+            </label>
+            {mirrorPreset === CUSTOM_MIRROR && (
+              <label className="form-field"><span>自定义镜像</span><input value={draft.network?.githubMirror ?? ''} placeholder="如 https://gh-proxy.com" onChange={event => setDraft({ ...draft, network: { ...draft.network, githubMirror: event.target.value } })} /></label>
+            )}
+            <p className="settings-group-note">下载整合包 / 插件 / DSH 时优先走这里的镜像；选「自动」则先试直连，8 秒无响应或速度低于 300KB/s 就自动切到公共镜像（整合包页会显示当前用的是哪一个）。</p>
           </SettingsGroup>
           <SettingsGroup icon={<Info size={16} />} title="关于">
             <div className="settings-about-rows">
               <div><span>启动器版本</span><strong>v{packageMetadata.version}</strong></div>
-              <div><span>官方用户 QQ 群</span><strong>625155044</strong></div>
             </div>
           </SettingsGroup>
           <details className="settings-group settings-advanced">

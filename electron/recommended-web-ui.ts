@@ -1,12 +1,14 @@
-import { mkdir, rename, unlink, writeFile } from 'node:fs/promises'
-import path from 'node:path'
 import type { AppSettings } from '../src/types'
 import type { Installer } from './installer'
 import { readProfile, updateBundles } from './profile'
+import { applyStockAppearance } from './stock-appearance'
 
 /**
  * 「官方推荐整合包」DSH Web UI 全家桶：安装 latest、启用、可选停用其它插件、
  * 并把皮肤切到官方默认外观。
+ *
+ * 注意：这个服务的 UI 入口在 v0.1.1 已被「官方默认整合包」机制取代（见 CHANGELOG），
+ * 渲染层只保留了 store 方法、已无人调用。外观重置逻辑已抽到 stock-appearance.ts 共用。
  */
 
 /** 官方推荐整合包：DSH Web UI 全家桶。 */
@@ -14,13 +16,6 @@ export const RECOMMENDED_WEB_UI_PACKAGE = '@linxin666/dsh-web-ui-all'
 
 /** 核心组合层：始终保留，不参与“停用其它插件”。 */
 const CORE_BUNDLES = new Set(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless'])
-
-/**
- * 皮肤中心的“当前活动皮肤”文件。active 为空串 = 官方默认外观：
- * skin-center 的 seed 逻辑只在 active 为 null/缺失时强写回作者默认皮肤，
- * 非空 id（哪怕是空串）会被尊重，从而持久保持默认外观。
- */
-const STOCK_ACTIVE_SKIN = { active: '' }
 
 export interface RecommendedWebUiOptions {
   readSettings: () => Promise<AppSettings>
@@ -36,27 +31,6 @@ export interface RecommendedWebUiService {
   isBusy(): boolean
   status(): Promise<RecommendedWebUiStatus>
   ensureInstall(options: { suspendOthers?: boolean }): Promise<RecommendedWebUiStatus>
-}
-
-async function activeSkinStatePath(dshHome: string): Promise<string> {
-  return path.join(dshHome, 'skin-center-active.json')
-}
-
-async function writeStockActiveSkin(dshHome: string): Promise<void> {
-  try {
-    const target = await activeSkinStatePath(dshHome)
-    await mkdir(path.dirname(target), { recursive: true })
-    const temporary = `${target}.dsh-launcher.tmp`
-    await writeFile(temporary, `${JSON.stringify(STOCK_ACTIVE_SKIN, null, 2)}\n`, 'utf8')
-    try {
-      await rename(temporary, target)
-    } catch {
-      await writeFile(target, `${JSON.stringify(STOCK_ACTIVE_SKIN, null, 2)}\n`, 'utf8')
-      await unlink(temporary).catch(() => undefined)
-    }
-  } catch {
-    // 皮肤文件写失败不阻断安装。
-  }
 }
 
 export function createRecommendedWebUiService(options: RecommendedWebUiOptions): RecommendedWebUiService {
@@ -86,7 +60,7 @@ export function createRecommendedWebUiService(options: RecommendedWebUiOptions):
           bundles.filter(name => CORE_BUNDLES.has(name) || name === RECOMMENDED_WEB_UI_PACKAGE),
         )
       }
-      await writeStockActiveSkin(settings.dshHome)
+      await applyStockAppearance(settings.dshHome)
       return status()
     } finally {
       busy = false

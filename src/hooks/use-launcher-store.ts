@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLauncherApi } from '../api/client'
 import { DSH_REPOSITORY, EMPTY_DSH_INSTALLATION, EMPTY_RUNTIME_STATE, MAX_LOG_LINES } from '../constants'
-import { errorText } from '../lib/format'
+import { downloadProgressText, errorText } from '../lib/format'
 import { finalizeInstallProgress } from '../lib/install-progress'
 import { reorderProfilePlugins } from '../lib/profile-order'
 import type {
@@ -16,12 +16,16 @@ import type {
   GitHubAuthStatus,
   InstallProgress,
   LauncherApi,
+  OfficialPackRelease,
+  OfficialPackStatus,
   InstalledPreset,
   InstalledSkill,
   InstalledApplicationAddon,
   LauncherUpdateProgress,
   LauncherUpdateStatus,
   ManagedPlugin,
+  PackDownloadProgress,
+  PackStageProgress,
   PackStatus,
   ProfileSummary,
   PluginTrialResult,
@@ -193,6 +197,12 @@ export function useLauncherStore() {
     void api.checkDshUpdate()
       .then(next => { if (!disposed) setDshUpdate(next) })
       .catch(() => { /* 主进程已把网络失败转换为状态；演示 API 也不应阻塞启动 */ })
+
+    // 官方整合包状态（推荐版本 / 是否有更新）：主进程启动核对也会推一次，
+    // 这里主动读一次以免事件晚到或丢失时「有新版本」徽标不出现。主进程侧已做请求合流。
+    void api.readOfficialPackStatus(false)
+      .then(next => { if (!disposed) setOfficialStatus(next) })
+      .catch(() => { /* 状态读失败不影响整合包页其它功能 */ })
 
     void api.readRuntimeEnvironment()
       .then(next => { if (!disposed) setRuntimeEnvironment(next) })
@@ -900,12 +910,110 @@ export function useLauncherStore() {
     return result !== undefined
   }, [api, run, refreshPacks, refreshProfile])
 
+  /**
+   * 官方整合包版本列表与状态：整合包页的「官方整合包」堆叠用。
+   * 版本列表按需拉（打开堆叠时），状态读主进程启动核对留下的缓存，force 才重查 GitHub。
+   */
+  const [officialStatus, setOfficialStatus] = useState<OfficialPackStatus | null>(null)
+  const [officialVersions, setOfficialVersions] = useState<OfficialPackRelease[] | null>(null)
+  const [officialVersionsError, setOfficialVersionsError] = useState<string | null>(null)
+  const [officialVersionsBusy, setOfficialVersionsBusy] = useState(false)
+
+  const readOfficialPackStatus = useCallback(async (force = false): Promise<OfficialPackStatus | null> => {
+    try {
+      const next = await api.readOfficialPackStatus(force)
+      setOfficialStatus(next)
+      return next
+    } catch {
+      // 状态读失败不打扰用户：堆叠入口退化为「版本列表按需拉」。
+      return null
+    }
+  }, [api])
+
+  const refreshOfficialVersions = useCallback(async (force = false): Promise<void> => {
+    setOfficialVersionsBusy(true)
+    try {
+      const versions = await api.listOfficialPackVersions()
+      setOfficialVersions(versions)
+      setOfficialVersionsError(null)
+      // 列表本身就带推荐版本，顺手把状态刷新到最新（避免启动核对与列表不一致）。
+      setOfficialStatus(current => current
+        ? { ...current, recommended: versions[0]?.version ?? current.recommended }
+        : current)
+    } catch (error) {
+      setOfficialVersionsError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setOfficialVersionsBusy(false)
+    }
+    if (force) void readOfficialPackStatus(true)
+  }, [api, readOfficialPackStatus])
+
+  /** 下载并导入指定版本的官方整合包（重复下载同名会得到「… (2)」）。 */
+  const installOfficialPackVersion = useCallback(async (version: string): Promise<boolean> => {
+    const result = await run(`official-install:${version}`, () => api.installOfficialPackVersion(version), {
+      success: `官方整合包 ${version} 已导入，可在整合包页切换使用。`,
+    })
+    if (result) {
+      await Promise.all([refreshPacks(), refreshOfficialVersions(false), readOfficialPackStatus(true)])
+    }
+    return result !== undefined
+  }, [api, run, refreshPacks, refreshOfficialVersions, readOfficialPackStatus])
+
+  // 主进程启动核对完成后会推一次状态（发现新版本 / 首装完成），据此更新堆叠入口的「有新版本」徽标。
+  useEffect(() => api.onOfficialPackStatus(status => {
+    setOfficialStatus(status)
+    if (status.recommended && status.installedVersions.length > 0) setOfficialVersions(null)
+  }), [api])
+
   // 整合包后台活动（导出打包进度等）：来自主进程 packProgress 状态事件，面板上展示，
   // 否则导出这类长任务在 UI 上毫无反馈、看起来像卡死。
   const [packActivity, setPackActivity] = useState<string | null>(null)
+  // 包体下载进度（官方整合包百 MB 级）：结构化数据给进度条画图，文字版进活动横幅与首页。
+  const [packDownload, setPackDownload] = useState<PackDownloadProgress | null>(null)
+  // 下载之后的导入阶段（解压快照 / 补装 DSH 运行时）：同一条进度条接着用，只是换成阶段文案。
+  const [packStage, setPackStage] = useState<PackStageProgress | null>(null)
   useEffect(() => api.onPackProgress(event => {
-    if (event.kind === 'status') setPackActivity(event.message)
-    else if (event.kind === 'done' || event.kind === 'error') setPackActivity(null)
+    switch (event.kind) {
+      case 'download':
+        // 下载阶段：结构化进度给进度条，文字版同时喂给首页（那里只有一个文字位）。
+        setPackDownload(event)
+        setPackStage(null)
+        setPackActivity(`${event.label}：${downloadProgressText(event)}`)
+        return
+      case 'stage':
+        setPackDownload(null)
+        setPackStage(event)
+        setPackActivity(event.label)
+        return
+      case 'status':
+        // 一句阶段文案：接着挂在进度条上（百分比未知），空串表示收工。
+        setPackDownload(null)
+        setPackStage(event.message ? { label: event.message, percent: null } : null)
+        setPackActivity(event.message)
+        return
+      case 'extract': {
+        // 解压按文件数推进：保留上一句文案当标题，百分比换成文件进度。
+        const percent = event.total > 0 ? Math.min(100, Math.floor((event.done / event.total) * 100)) : null
+        setPackDownload(null)
+        setPackStage(current => ({ label: current?.label ?? '正在解压导入整合包…', percent }))
+        setPackActivity(`正在解压导入整合包：${event.done} / ${event.total} 个文件…`)
+        return
+      }
+      case 'item-start':
+        setPackDownload(null)
+        setPackStage({ label: `正在安装 ${event.packageName}…`, percent: null })
+        setPackActivity(`正在安装 ${event.packageName}…`)
+        return
+      // phase / item-done / snapshot 是导入弹窗的明细，进度条这里保持不动，免得来回闪。
+      case 'phase':
+      case 'item-done':
+      case 'snapshot':
+        return
+      default:
+        setPackDownload(null)
+        setPackStage(null)
+        setPackActivity(null)
+    }
     // 主进程侧的导入（官方整合包首启自动获取等）完成后刷新列表，无需用户手动切页。
     if (event.kind === 'done') void refreshPacks()
   }), [api, refreshPacks])
@@ -1141,11 +1249,20 @@ export function useLauncherStore() {
     refreshPackSnapshots,
     activatePack,
     packActivity,
+    packDownload,
+    packStage,
     renamePack,
     createBlankPack,
     packDiskUsage,
     removePack,
     restoreOfficialPack,
+    officialStatus,
+    officialVersions,
+    officialVersionsError,
+    officialVersionsBusy,
+    readOfficialPackStatus,
+    refreshOfficialVersions,
+    installOfficialPackVersion,
     exportPack,
     exportProfile,
     addPackPlugin,

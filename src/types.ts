@@ -1,5 +1,5 @@
 export type WindowMode = 'launcher' | 'manager'
-/** 一级导航 tab：启动页 + 五个 C 端面板（原二级设置页拍平）。 */
+/** 一级导航 tab：启动页 + 五个 C 端面板（原二级设置页拍平）。顺序与显示名见 src/lib/nav.ts。 */
 export type HomeTab = 'start' | 'versions' | 'plugins' | 'skills' | 'presets' | 'packs'
 export type UiTheme = 'deepseek' | 'night'
 
@@ -304,6 +304,10 @@ export interface RuntimeVersionCandidate {
   lts: string | boolean | null
   date: string | null
   prerelease: boolean
+  /** 版本号最高者（列表里真正最新的那个，可能是不稳定的渠道）。 */
+  isNewest?: boolean
+  /** 启动器推荐下载/更新的版本（稳定优先、同级取新）。 */
+  recommended?: boolean
 }
 
 export interface DshVersionInfo {
@@ -976,6 +980,43 @@ export interface PackStatus {
   updatedAt: string
 }
 
+/** Release 上的一个官方默认整合包资产。 */
+export interface OfficialPackRelease {
+  /**
+   * 官方包版本号。新命名 = 适配的 DSH 版本 + 序号（如 0.1.5-rc.2.1）；
+   * 旧命名就是启动器版本（如 0.1.1），与 DSH 版本无关。
+   */
+  version: string
+  /**
+   * 该包适配的 DSH 版本，如 0.1.5-rc.2（取自 Release 正文的构建元信息，或版本号命名里的编码）。
+   * null = 两处都读不到（旧命名的历史资产）——不得用包版本号冒充，界面显示「未标注」，
+   * 能拿本机已装这个包的真实绑定版本补上就补。
+   */
+  dshVersion: string | null
+  assetName: string
+  /** 资产下载地址（主进程下载用；渲染层不需要它）。 */
+  assetUrl: string
+  /** 资产字节数；GitHub 没给时为 0。 */
+  size: number
+  releaseTag: string
+  publishedAt: string | null
+  /** Release 正文（构建时记录 web-all / officecli / dsh 三个版本）。 */
+  notes?: string | null
+}
+
+/** 官方整合包的整体状态：推荐版本、本机已装版本、是否有更新。 */
+export interface OfficialPackStatus {
+  /** 推荐版本（Release 里最新的官方包）；列表读不到时为 null。 */
+  recommended: string | null
+  /** 本机已导入的官方包版本号（升序）。 */
+  installedVersions: string[]
+  /** 存在比本机最新已装版本更高的官方包。 */
+  updateAvailable: boolean
+  /** 列表读取失败的原因；null = 正常。 */
+  error: string | null
+  checkedAt: string | null
+}
+
 export interface PackCreateRequest {
   name: string
   description?: string
@@ -1040,6 +1081,16 @@ export interface PackInstallResult {
 
 export type PackProgressEvent =
   | { kind: 'status'; message: string }
+  /**
+   * 包体下载进度（官方整合包这类百 MB 级资产）：界面据此画可视化进度条。
+   * `speed` 为字节/秒的滑动平均（换源后重新起算），`source` 是当前下载源（镜像域名 / GitHub 直连）。
+   */
+  | { kind: 'download'; label: string; received: number; total: number | null; speed: number | null; source: string }
+  /**
+   * 导入阶段（下载之后）：解压快照、准备缺失的 DSH 运行时等没有字节进度的阶段，只有一句话和可能的百分比。
+   * 界面用它顶掉已完成的下载进度条，避免「100% 卡住」的错觉。
+   */
+  | { kind: 'stage'; label: string; percent: number | null }
   | { kind: 'phase'; phase: string; itemIndex?: number; itemTotal?: number }
   | { kind: 'extract'; done: number; total: number }
   | { kind: 'item-start'; packageName: string; offline: boolean }
@@ -1048,6 +1099,12 @@ export type PackProgressEvent =
   | { kind: 'done'; result: PackInstallResult }
   | { kind: 'cancelled' }
   | { kind: 'error'; message: string }
+
+/** 包体下载进度（即 PackProgressEvent 的 download 分支），给进度条直接用。 */
+export type PackDownloadProgress = Omit<Extract<PackProgressEvent, { kind: 'download' }>, 'kind'>
+
+/** 导入阶段进度（即 PackProgressEvent 的 stage 分支），下载完成后的进度条用它。 */
+export type PackStageProgress = Omit<Extract<PackProgressEvent, { kind: 'stage' }>, 'kind'>
 
 export interface DshMarketPlugin {
   name: string
@@ -1218,6 +1275,12 @@ export interface LauncherApi {
   exportPack(packId: string): Promise<string | null>
   /** 恢复当前版本的官方默认整合包（从 GitHub Release 下载导入）；失败抛错。 */
   restoreOfficialPack(): Promise<PackInstallResult>
+  /** 列出 Release 上所有官方默认整合包版本（按版本降序，第一项即推荐版本）。 */
+  listOfficialPackVersions(): Promise<OfficialPackRelease[]>
+  /** 官方整合包状态：推荐版本 / 已装版本 / 是否有更新；列表读不到时 error 有值而不抛。 */
+  readOfficialPackStatus(force?: boolean): Promise<OfficialPackStatus>
+  /** 下载并导入指定版本的官方整合包（重复下载同名会得到「… (2)」）。 */
+  installOfficialPackVersion(version: string): Promise<PackInstallResult>
   pickPackFile(): Promise<string | null>
   /** 把拖拽进入窗口的 .zip File 解析为磁盘绝对路径（preload 通过 webUtils 还原）。 */
   getDroppedFilePath(file: File): string
@@ -1244,6 +1307,8 @@ export interface LauncherApi {
   onCatalogAnalysisProgress(listener: (progress: CatalogAnalysisProgress) => void): () => void
   onDshMarketProgress(listener: (progress: DshMarketProgress) => void): () => void
   onPackProgress(listener: (event: PackProgressEvent) => void): () => void
+  /** 官方整合包状态变化（启动核对完成 / 发现新版本）。 */
+  onOfficialPackStatus(listener: (status: OfficialPackStatus) => void): () => void
   onRuntimeOutput(listener: (output: RuntimeOutput) => void): () => void
   onRuntimeState(listener: (state: RuntimeState) => void): () => void
   onInstallProgress(listener: (progress: InstallProgress) => void): () => void

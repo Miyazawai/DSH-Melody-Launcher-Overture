@@ -31,6 +31,7 @@ import type {
   LauncherUpdateProgress,
   LauncherUpdateStatus,
   ManagedPlugin,
+  OfficialPackRelease,
   PackProgressEvent,
   PackStatus,
   PluginInstallTarget,
@@ -58,7 +59,7 @@ let demoSettings: AppSettings = {
   webPort: 3080,
   openAfterLaunch: true,
   uiTheme: 'deepseek',
-  dshVersion: '0.1.0-rc.7',
+  dshVersion: '0.1.5-rc.1',
   nodeVersion: null,
 }
 
@@ -193,18 +194,20 @@ let demoGitHubAuth: GitHubAuthStatus = {
 }
 const demoStarredRepositories = new Set<string>()
 let demoDshInstallation: DshInstallationStatus = { installed: false, version: null, executable: null, source: null }
-const demoRemoteDshVersion = '0.1.0-rc.7'
+const demoRemoteDshVersion = '0.1.5-rc.2'
+/** demo：镜像上游真实状态——版本号最高的 0.1.6-alpha.1 标「最新版」，推荐的安装版本是同渠道最新的 0.1.5-rc.2。 */
 const demoDshCandidates: RuntimeVersionCandidate[] = [
-  { version: '0.1.0-rc.7', label: 'latest', lts: null, date: null, prerelease: true },
-  { version: '0.1.0-rc.6', label: null, lts: null, date: null, prerelease: true },
+  { version: '0.1.6-alpha.1', label: 'alpha', lts: null, date: '2026-09-15T00:00:00.000Z', prerelease: true, isNewest: true },
+  { version: '0.1.5-rc.2', label: 'next', lts: null, date: '2026-09-10T00:00:00.000Z', prerelease: true, recommended: true },
+  { version: '0.1.5-rc.1', label: 'latest', lts: null, date: '2026-09-10T00:00:00.000Z', prerelease: true },
 ]
 const demoNodeCandidates: RuntimeVersionCandidate[] = [
   { version: 'v24.19.0', label: 'Krypton', lts: 'Krypton', date: null, prerelease: false },
   { version: 'v22.19.0', label: 'Jod', lts: 'Jod', date: null, prerelease: false },
 ]
 let demoDshVersions: RuntimeEnvironmentState['dshInstalled'] = [
-  { version: '0.1.0-rc.7', root: 'C:\\Users\\demo\\AppData\\Roaming\\dsh-launcher\\dsh-runtime\\versions\\0.1.0-rc.7', executable: 'C:\\Users\\demo\\AppData\\Roaming\\dsh-launcher\\dsh-runtime\\versions\\0.1.0-rc.7\\node_modules\\.bin\\dsh.cmd', source: 'launcher', selected: true, removable: true },
-  { version: '0.1.0-rc.6', root: 'C:\\Users\\demo\\.dsh-runtime', executable: 'C:\\Users\\demo\\.dsh-runtime\\node_modules\\.bin\\dsh.cmd', source: 'legacy', selected: false, removable: true },
+  { version: '0.1.5-rc.1', root: 'C:\\Users\\demo\\AppData\\Roaming\\dsh-launcher\\dsh-runtime\\versions\\0.1.5-rc.1', executable: 'C:\\Users\\demo\\AppData\\Roaming\\dsh-launcher\\dsh-runtime\\versions\\0.1.5-rc.1\\node_modules\\.bin\\dsh.cmd', source: 'launcher', selected: true, removable: true },
+  { version: '0.1.3-alpha.2', root: 'C:\\Users\\demo\\.dsh-runtime', executable: 'C:\\Users\\demo\\.dsh-runtime\\node_modules\\.bin\\dsh.cmd', source: 'legacy', selected: false, removable: true },
 ]
 let demoNodeVersions: RuntimeEnvironmentState['nodeInstalled'] = [
   { version: 'system', root: 'C:\\Program Files\\nodejs', executable: 'C:\\Program Files\\nodejs\\node.exe', source: 'system', selected: true, removable: false },
@@ -221,6 +224,10 @@ const pluginTrialListeners = new Set<(result: PluginTrialResult) => void>()
 const aiEventListeners = new Set<(event: AiInstallEvent) => void>()
 const aiSessionEventListeners = new Set<(event: AiSessionEvent) => void>()
 const packProgressListeners = new Set<(event: PackProgressEvent) => void>()
+
+function emitPackProgress(event: PackProgressEvent): void {
+  for (const listener of packProgressListeners) listener(event)
+}
 const dshMarketProgressListeners = new Set<(progress: DshMarketProgress) => void>()
 
 function demoDshMarketCatalog(): DshMarketCatalog {
@@ -294,7 +301,7 @@ let demoPacks: PackStatus[] = [
     name: 'Web 基础包',
     description: 'Web 工作台 + UI 集合，日常使用的基础组合。',
     version: '1.0.0',
-    dshVersion: '0.1.0-rc.7',
+    dshVersion: '0.1.5-rc.1',
     source: 'created',
     enabled: true,
     state: 'complete',
@@ -311,7 +318,7 @@ let demoPacks: PackStatus[] = [
     name: 'CC TUI 终端包',
     description: '终端交互界面专用组合。',
     version: '0.9.0',
-    dshVersion: '0.1.0-rc.7',
+    dshVersion: '0.1.5-rc.1',
     source: 'zip',
     enabled: false,
     state: 'complete',
@@ -323,17 +330,71 @@ let demoPacks: PackStatus[] = [
     updatedAt: '2026-08-11T14:00:00Z',
   },
   {
-    id: 'pack-0-1-0-rc-7',
-    name: '0.1.0-rc.7',
+    id: 'pack-0-1-5-rc-1',
+    name: '0.1.5-rc.1',
     description: '',
     version: '1.0.0',
-    dshVersion: '0.1.0-rc.7',
+    dshVersion: '0.1.5-rc.1',
     source: 'created',
     enabled: false,
     state: 'complete',
     plugins: [],
     installedAt: '2026-08-12T12:00:00Z',
     updatedAt: '2026-08-12T12:00:00Z',
+  },
+  {
+    id: 'pack-official-0-1-1',
+    name: '官方默认整合包 0.1.1',
+    description: '官方默认整合包：Web 全家桶 + Office 文档技能 + 去 AI 味写作技能。',
+    version: '1.0.0',
+    dshVersion: '0.1.2-rc.1',
+    officialVersion: '0.1.1',
+    source: 'snapshot',
+    enabled: false,
+    state: 'complete',
+    plugins: [{ packageName: '@linxin666/dsh-web-all', enabled: true }],
+    skills: [
+      { name: 'humanizer-zh', format: 'bundle', enabled: true },
+      { name: 'find-skills', format: 'bundle', enabled: true },
+    ],
+    installedAt: '2026-09-09T10:00:00Z',
+    updatedAt: '2026-09-09T10:00:00Z',
+  },
+]
+
+/** demo：Release 上的官方默认整合包版本（降序，第一项即推荐版本）。 */
+const demoOfficialReleases: OfficialPackRelease[] = [
+  {
+    version: '0.1.5-rc.2.1',
+    dshVersion: '0.1.5-rc.2',
+    assetName: 'official-pack-v0.1.5-rc.2.1.zip',
+    assetUrl: 'https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases/download/v0.1.2/official-pack-v0.1.5-rc.2.1.zip',
+    size: 179_182_200,
+    releaseTag: 'v0.1.2',
+    publishedAt: '2026-09-15T16:00:00Z',
+    notes: 'web-all: 0.3.22\nofficecli: v0.2.1\ndsh: 0.1.5-rc.2',
+  },
+  {
+    version: '0.1.2-rc.1.1',
+    dshVersion: '0.1.2-rc.1',
+    assetName: 'official-pack-v0.1.2-rc.1.1.zip',
+    assetUrl: 'https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases/download/v0.1.1/official-pack-v0.1.2-rc.1.1.zip',
+    size: 141_557_760,
+    releaseTag: 'v0.1.1',
+    publishedAt: '2026-09-09T09:00:00Z',
+    notes: 'web-all: 0.3.18\nofficecli: v0.2.0\ndsh: 0.1.2-rc.1',
+  },
+  {
+    // 旧命名的历史资产：资产名没编码 DSH 版本、Release 正文也没有构建元信息 → 真的不知道。
+    // 渲染层会拿本机已装这个包的真实绑定版本（0.1.2-rc.1）补上；没装过则显示「未标注」。
+    version: '0.1.1',
+    dshVersion: null,
+    assetName: 'official-pack-v0.1.1.zip',
+    assetUrl: 'https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases/download/v0.1.1/official-pack-v0.1.1.zip',
+    size: 128_083_171,
+    releaseTag: 'v0.1.1',
+    publishedAt: '2026-09-09T10:44:30Z',
+    notes: null,
   },
 ]
 let demoAiStatus: AiInstallStatus = { phase: 'idle', repository: null, taskKind: 'repository-install', subject: null, startedAt: null, sessionId: null, message: '' }
@@ -930,7 +991,7 @@ export const demoApi: LauncherApi = {
     id: demoSettings.profileName,
     name: demoSettings.profileName,
     description: '浏览器演示整合包',
-    dshVersion: demoSettings.dshVersion ?? '0.1.0-rc.7',
+    dshVersion: demoSettings.dshVersion ?? '0.1.5-rc.1',
     source: { kind: 'local' as const },
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: new Date().toISOString(),
@@ -992,7 +1053,7 @@ export const demoApi: LauncherApi = {
       profileName: 'pack-demo',
       description: '演示 GitHub 整合包仓库。',
       version: '1.0.0',
-      dshVersion: demoSettings.dshVersion ?? '0.1.0-rc.7',
+      dshVersion: demoSettings.dshVersion ?? '0.1.5-rc.1',
       dshVersionInstalled: true,
       plugins: [{
         packageName: 'dsh-demo-plugin', enabled: true, order: 0, source: 'npm' as const,
@@ -1141,7 +1202,7 @@ export const demoApi: LauncherApi = {
     installProgressListeners.forEach(listener => listener({ repository: fullName, kind, phase: 'configuring', percent: 90, message: kind === 'dsh' ? '正在切换本地启动命令' : '正在更新插件配置' }))
     await wait(350)
     if (kind === 'dsh') {
-      demoDshInstallation = { installed: true, version: '0.1.0-rc.6', executable: `${demoSettings.dshInstallPath}\\node_modules\\.bin\\dsh.cmd`, source: 'launcher' }
+      demoDshInstallation = { installed: true, version: '0.1.3-alpha.2', executable: `${demoSettings.dshInstallPath}\\node_modules\\.bin\\dsh.cmd`, source: 'launcher' }
       demoSettings = { ...demoSettings, launchExecutable: demoDshInstallation.executable!, launchArgs: ['web'] }
     } else if (repo && !demoPlugins.some(plugin => plugin.repositoryFullName === fullName)) {
       demoPlugins = renumber([...demoPlugins, {
@@ -1629,7 +1690,7 @@ export const demoApi: LauncherApi = {
       name: request.name,
       description: request.description ?? '',
       version: '1.0.0',
-      dshVersion: request.dshVersion ?? demoSettings.dshVersion ?? '0.1.0-rc.7',
+      dshVersion: request.dshVersion ?? demoSettings.dshVersion ?? '0.1.5-rc.1',
       source: 'created',
       enabled: true,
       state: 'complete',
@@ -1664,6 +1725,86 @@ export const demoApi: LauncherApi = {
     return pack ? `C:\\Users\\demo\\Desktop\\${pack.name}.zip` : null
   },
   restoreOfficialPack: async () => ({ id: 'pack-official-demo', installed: [], failures: [], state: 'complete' }),
+  listOfficialPackVersions: async () => demoOfficialReleases,
+  readOfficialPackStatus: async () => {
+    const installedVersions = demoPacks
+      .map(pack => pack.officialVersion)
+      .filter((version): version is string => Boolean(version))
+      .sort((left, right) => (left === right ? 0 : left < right ? 1 : -1))
+    const recommended = demoOfficialReleases[0]?.version ?? null
+    return {
+      recommended,
+      installedVersions,
+      updateAvailable: Boolean(recommended && installedVersions[0] && installedVersions[0] !== recommended),
+      error: null,
+      checkedAt: new Date().toISOString(),
+    }
+  },
+  installOfficialPackVersion: async version => {
+    const release = demoOfficialReleases.find(item => item.version === version)
+    if (!release) throw new Error(`没有官方整合包 ${version}。`)
+    const displayName = `官方默认整合包 ${release.version}`
+    const label = `官方整合包 ${release.version}`
+    // demo：模拟一次「先走直连、太慢切镜像」的下载，好让进度条与来源回显在纯浏览器里也能验收。
+    const total = release.size || 0
+    const segments = [
+      { source: 'GitHub 直连', speed: 60 * 1024, steps: 3 },
+      { source: 'gh-proxy.com', speed: 3.4 * 1024 * 1024, steps: 9 },
+    ]
+    let received = 0
+    let emitted = 0
+    for (const segment of segments) {
+      for (let step = 0; step < segment.steps; step += 1) {
+        await new Promise(resolve => setTimeout(resolve, 140))
+        emitted += 1
+        received = Math.max(received, Math.round((total * emitted) / 12))
+        emitPackProgress({ kind: 'download', label, received, total, speed: segment.speed, source: segment.source })
+      }
+    }
+    // 下载完接着是导入阶段（下载完成 → 补装 DSH 运行时 → 解压 → 完成），与主进程的事件顺序一致。
+    emitPackProgress({ kind: 'stage', label: '下载完成，正在写入并解压整合包…', percent: null })
+    await new Promise(resolve => setTimeout(resolve, 600))
+    if (release.dshVersion) {
+      emitPackProgress({ kind: 'stage', label: `正在准备 DSH ${release.dshVersion}（本机未安装，需要先下载运行时）`, percent: null })
+      for (const percent of [12, 38, 64, 89]) {
+        await new Promise(resolve => setTimeout(resolve, 260))
+        emitPackProgress({ kind: 'stage', label: `正在准备 DSH ${release.dshVersion} 依赖`, percent })
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 300))
+    emitPackProgress({ kind: 'status', message: `正在解压快照包「${displayName}」…` })
+    for (let done = 500; done <= 16000; done += 500) {
+      emitPackProgress({ kind: 'extract', done, total: 16490 })
+      if (done % 2000 === 0) await new Promise(resolve => setTimeout(resolve, 70))
+    }
+    emitPackProgress({ kind: 'extract', done: 16490, total: 16490 })
+    // 与主进程一致：同名重复下载得到「原名 (2)」。
+    const taken = demoPacks.filter(pack => pack.name === displayName || pack.name.startsWith(`${displayName} (`)).length
+    const name = taken === 0 ? displayName : `${displayName} (${taken + 1})`
+    const id = `pack-official-${release.version.replace(/[^a-z0-9]+/gi, '-')}${taken === 0 ? '' : `-${taken + 1}`}`
+    const now = new Date().toISOString()
+    demoPacks = [...demoPacks, {
+      id,
+      name,
+      description: '官方默认整合包：Web 全家桶 + Office 文档技能 + 去 AI 味写作技能。',
+      version: '1.0.0',
+      dshVersion: release.dshVersion,
+      officialVersion: release.version,
+      source: 'snapshot',
+      enabled: false,
+      state: 'complete',
+      plugins: [{ packageName: '@linxin666/dsh-web-all', enabled: true }],
+      skills: [
+        { name: 'humanizer-zh', format: 'bundle', enabled: true },
+        { name: 'find-skills', format: 'bundle', enabled: true },
+      ],
+      installedAt: now,
+      updatedAt: now,
+    }]
+    const result = { id, installed: [], failures: [], state: 'complete' as const }
+    emitPackProgress({ kind: 'done', result })
+    return result
+  },
   pickPackFile: async () => 'C:\\Users\\demo\\Downloads\\example-pack.zip',
   getDroppedFilePath: file => (file as File & { path?: string }).path ?? 'C:\\Users\\demo\\Downloads\\example-pack.zip',
   activatePack: async packId => {
@@ -1690,7 +1831,7 @@ export const demoApi: LauncherApi = {
       name: request.name.trim(),
       description: '',
       version: '1.0.0',
-      dshVersion: request.dshVersion ?? demoSettings.dshVersion ?? '0.1.0-rc.7',
+      dshVersion: request.dshVersion ?? demoSettings.dshVersion ?? '0.1.5-rc.1',
       source: 'created',
       enabled: false,
       state: 'complete',
@@ -1863,6 +2004,8 @@ export const demoApi: LauncherApi = {
     packProgressListeners.add(listener)
     return () => packProgressListeners.delete(listener)
   },
+  // demo 没有启动核对流程，状态由 readOfficialPackStatus 现算（见上面）。
+  onOfficialPackStatus: () => () => undefined,
   onAiInstallEvent: listener => {
     aiEventListeners.add(listener)
     return () => aiEventListeners.delete(listener)

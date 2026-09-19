@@ -68,7 +68,7 @@ describe('DSH update check', () => {
   it('does not offer a downgrade when the local version is newer', async () => {
     await expect(checkDshUpdate(installed('0.1.0-rc.6'), githubFetch('0.1.0-rc.5'))).resolves.toMatchObject({
       state: 'up-to-date',
-      message: '本地 DSH 0.1.0-rc.6 高于仓库版本 0.1.0-rc.5。',
+      message: '本地 DSH 0.1.0-rc.6 高于可更新版本 0.1.0-rc.5。',
     })
   })
 
@@ -92,15 +92,23 @@ describe('DSH update check', () => {
 const MIRROR = 'https://registry.npmmirror.com'
 const OFFICIAL = 'https://registry.npmjs.org'
 
+/** packument 体的最小形态：候选版本 + dist-tags（口径只看版本串，标签只是附带信息）。 */
+function packument(versions: string[], distTags: Record<string, string> = {}): unknown {
+  return {
+    versions: Object.fromEntries(versions.map(version => [version, {}])),
+    'dist-tags': distTags,
+  }
+}
+
 /** registry 形态的 fetch：按 URL 前缀决定哪个源可用，其余 404（含 GitHub 路径）。 */
 function registryFetch(available: Partial<Record<string, string | 'bad'>>, fallback = 404): typeof fetch {
   return (async input => {
     const url = String(input)
     for (const [base, value] of Object.entries(available)) {
-      if (url.startsWith(`${base}/@deepseek-ai%2Fdsh/latest`)) {
-        if (value === 'bad') return new Response('not json', { status: 200 })
-        return new Response(JSON.stringify({ version: value }), { status: 200 })
-      }
+      if (url !== `${base}/@deepseek-ai%2Fdsh`) continue
+      if (value === 'bad') return new Response('not json', { status: 200 })
+      if (!value) continue
+      return new Response(JSON.stringify(packument([value])), { status: 200 })
     }
     return new Response('', { status: fallback })
   }) as typeof fetch
@@ -112,8 +120,8 @@ describe('DSH update check via npm registry', () => {
     const fetchImpl = (async (input: RequestInfo | URL) => {
       const url = String(input)
       calls.push(url)
-      if (url.startsWith(`${MIRROR}/@deepseek-ai%2Fdsh/latest`)) {
-        return new Response(JSON.stringify({ version: '0.2.0' }), { status: 200 })
+      if (url === `${MIRROR}/@deepseek-ai%2Fdsh`) {
+        return new Response(JSON.stringify(packument(['0.2.0'])), { status: 200 })
       }
       return new Response('', { status: 404 })
     }) as typeof fetch
@@ -122,6 +130,23 @@ describe('DSH update check via npm registry', () => {
       remoteVersion: '0.2.0',
     })
     expect(calls.some(u => u.includes(OFFICIAL) || u.includes('github.com'))).toBe(false)
+  })
+
+  it('推荐版本按渠道取新，不采信 npm 的 latest 标签', async () => {
+    // 上游真实情形：latest 标签停在旧的 rc.1，更新的 rc.2 只打了 next 标签。
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      if (String(input) === `${MIRROR}/@deepseek-ai%2Fdsh`) {
+        return new Response(JSON.stringify(packument(
+          ['0.1.6-alpha.1', '0.1.5-rc.2', '0.1.5-rc.1'],
+          { latest: '0.1.5-rc.1', next: '0.1.5-rc.2', alpha: '0.1.6-alpha.1' },
+        )), { status: 200 })
+      }
+      return new Response('', { status: 404 })
+    }) as typeof fetch
+    await expect(checkDshUpdate(installed('0.1.5-rc.1'), fetchImpl, [MIRROR])).resolves.toMatchObject({
+      state: 'update-available',
+      remoteVersion: '0.1.5-rc.2',
+    })
   })
 
   it('镜像 404 时回退官方源', async () => {
@@ -139,10 +164,10 @@ describe('DSH update check via npm registry', () => {
   })
 
   it('registry 全部失败回退 GitHub contents', async () => {
-    // githubFetch 对 registry URL 返回 404，对 GitHub 路径返回版本清单。
+    // 两个 registry 都 404（含镜像与官方源），只有 GitHub 路径能给出清单。
     const both = (async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.includes('/latest')) return new Response('', { status: 404 })
+      if (url.startsWith(MIRROR) || url.startsWith(OFFICIAL)) return new Response('', { status: 404 })
       return githubFetch('0.1.0-rc.6')(input)
     }) as typeof fetch
     await expect(checkDshUpdate(installed('0.1.0-rc.5'), both, [MIRROR, OFFICIAL])).resolves.toMatchObject({

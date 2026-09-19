@@ -1,0 +1,183 @@
+name: Official pack
+
+# 官方默认整合包自动出包。
+#
+# 触发判据**只有 `@linxin666/dsh-web-all`**：它发新版才出包（避免 officecli 每次发版都刷包）。
+# 一旦出包，会把 officecli 顺带升到当时的最新 tag；要钉回旧引擎用 workflow_dispatch 的
+# officecli-tag 输入。
+#
+# 判据怎么读：每个官方包旁边会多传一个 `official-pack-meta-<版本>.json`（启动器只按
+# `official-pack-v<版本>.zip` 严格匹配资产名，多一个元数据文件它完全无视）。里面记着这次
+# 用的 web-all / officecli / dsh 版本，本工作流据此决定要不要出下一包，也便于事后追溯
+# 「某个版本官包里到底是哪个引擎」。
+
+on:
+  schedule:
+    # 每天 04:00（北京时间）= 前一天 20:00 UTC。
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+    inputs:
+      dsh-version:
+        description: 适配的 DSH 版本（留空则按「稳定优先、同级取新」自动解析）
+        required: false
+      serial:
+        description: 官方包序号（留空用基线默认）
+        required: false
+      officecli-tag:
+        description: OfficeCLI 发布 tag（留空用 latest；用于回退旧引擎后重发）
+        required: false
+      force:
+        description: web-all 未变化也强制出包
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: official-pack
+  cancel-in-progress: false
+
+env:
+  RELEASE_REPOSITORY: Miyazawai/DSH-Melody-Launcher-Overture
+  NPM_REGISTRY: https://registry.npmmirror.com
+
+jobs:
+  build:
+    name: 构建并发布官方整合包
+    # 包是 Windows 专用的：officecli 是 win-x64 单二进制，原生模块也按 win32 预编译。
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      # pnpm 版本与启动器运行时钉在同一处（electron/node-runtime.ts 的 PNPM_VERSION），
+      # 免得两边的锁文件/链接器行为漂移。
+      - name: 读取启动器钉住的 pnpm 版本
+        id: pnpm-version
+        shell: bash
+        run: |
+          version=$(node -e "console.log(require('fs').readFileSync('electron/node-runtime.ts','utf8').match(/PNPM_VERSION = '([^']+)'/)[1])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "启动器钉住的 pnpm：$version"
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ steps.pnpm-version.outputs.version }}
+
+      - name: 安装项目依赖
+        run: npm ci
+
+      - name: 判断 web-all 是否发新版
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest=$(npm view '@linxin666/dsh-web-all' dist-tags.latest --registry="$NPM_REGISTRY")
+          echo "npm 上 web-all 最新版：$latest"
+          releases=$(curl -sSL "https://api.github.com/repos/$RELEASE_REPOSITORY/releases?per_page=100")
+          published=$(node -e '
+            const releases = JSON.parse(process.argv[1]);
+            const zipRe = /^official-pack-v(.+)\.zip$/;
+            const metaRe = /^official-pack-meta-(.+)\.json$/;
+            const withPack = releases
+              .filter(release => (release.assets ?? []).some(asset => zipRe.test(asset.name ?? "")))
+              .sort((left, right) => String(right.published_at).localeCompare(String(left.published_at)));
+            const newest = withPack[0];
+            if (!newest) { console.log("|"); process.exit(0); }
+            const version = zipRe.exec((newest.assets ?? []).find(a => zipRe.test(a.name ?? "")).name)[1];
+            const meta = (newest.assets ?? []).find(a => metaRe.test(a.name ?? ""));
+            console.log(`${version}|${meta ? String(meta.browser_download_url) : ""}`);
+          ' "$releases")
+          published_version=${published%%|*}
+          published_meta_url=${published##*|}
+          echo "已发布的官方包：${published_version:-（无）}"
+
+          published_web_all=""
+          if [ -n "$published_meta_url" ]; then
+            published_web_all=$(curl -sSL "$published_meta_url" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).webAll ?? "")}catch{console.log("")}})')
+          fi
+          echo "其中记录的 web-all：${published_web_all:-未知}"
+
+          build=false
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "手动强制出包。"; build=true
+          elif [ -z "$published_web_all" ]; then
+            echo "最新官方包没有元数据（旧格式），出一次包把它补齐。"; build=true
+          elif [ "$published_web_all" != "$latest" ]; then
+            echo "web-all 由 $published_web_all 升到 $latest，需要出包。"; build=true
+          else
+            echo "web-all 未变化，跳过出包。"
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "web-all=$latest" >> "$GITHUB_OUTPUT"
+
+      - name: 构建官方整合包
+        if: steps.check.outputs.build == 'true'
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--web-all "${{ steps.check.outputs.web-all }}")
+          if [ -n "${{ inputs.dsh-version }}" ]; then args+=(--dsh "${{ inputs.dsh-version }}"); fi
+          if [ -n "${{ inputs.serial }}" ]; then args+=(--serial "${{ inputs.serial }}"); fi
+          if [ -n "${{ inputs.officecli-tag }}" ]; then args+=(--officecli-tag "${{ inputs.officecli-tag }}"); fi
+          npm run pack:official -- "${args[@]}" | tee pack-build.log
+
+          # 把脚本打印的元信息落成随包发布的 json（启动器不会看它，只作追溯与判据）。
+          node -e '
+            const fs = require("node:fs");
+            const text = fs.readFileSync("pack-build.log", "utf8");
+            const read = (key) => new RegExp(`^${key}: (.+)$`, "m").exec(text)?.[1]?.trim() ?? "";
+            const packVersion = read("official-pack-version");
+            const meta = {
+              packVersion,
+              webAll: read("web-all"),
+              officecli: read("officecli"),
+              dsh: read("dsh"),
+              asset: read("official-pack-asset"),
+              bytes: Number(read("official-pack-bytes")) || null,
+              builtAt: new Date().toISOString(),
+              builtBy: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            };
+            fs.writeFileSync(`release/official-pack-meta-${packVersion}.json`, JSON.stringify(meta, null, 2) + "\n");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `asset=${meta.asset}\nmeta=official-pack-meta-${packVersion}.json\n`);
+            console.log(`元数据：${JSON.stringify(meta)}`);
+          '
+
+      - name: 上传构建产物（备份，也是未配置上传凭据时的交付物）
+        if: steps.check.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-pack
+          path: |
+            release/official-pack-v*.zip
+            release/official-pack-meta-*.json
+          retention-days: 30
+
+      - name: 上传到 Release
+        if: steps.check.outputs.build == 'true'
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.OVERTURE_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::未配置 OVERTURE_RELEASE_TOKEN，跳过自动上传；zip 见本工作流 artifact。"
+            exit 0
+          fi
+          # 官方包机制只查 releases/latest，所以必须挂到最新那个 Release 上。
+          tag=$(curl -sSL "https://api.github.com/repos/$RELEASE_REPOSITORY/releases/latest" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).tag_name ?? ""))')
+          if [ -z "$tag" ]; then echo "::error::读不到 $RELEASE_REPOSITORY 的最新 Release tag。"; exit 1; fi
+          echo "上传到 $RELEASE_REPOSITORY@$tag"
+          GH_TOKEN="$TOKEN" gh release upload "$tag" \
+            "release/${{ steps.pack.outputs.asset }}" \
+            "release/${{ steps.pack.outputs.meta }}" \
+            --repo "$RELEASE_REPOSITORY" --clobber

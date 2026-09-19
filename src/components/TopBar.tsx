@@ -1,19 +1,12 @@
 import { Minus, SquareArrowOutUpRight, X } from 'lucide-react'
+import { HOME_TABS } from '../lib/nav'
 import type { HomeTab } from '../types'
 
 /**
  * 全局顶栏（PCL2 式）：DML 文字标记 + 一级导航 tab + 打开网页（运行中）+ 窗口键。
  * 整条可拖拽；按钮区 no-drag。
+ * 栏目顺序在 src/lib/nav.ts 里定义（App 的挂载顺序同源）。
  */
-
-const HOME_TABS: Array<{ id: HomeTab; label: string }> = [
-  { id: 'start', label: '启动' },
-  { id: 'versions', label: 'DSH版本' },
-  { id: 'plugins', label: '插件' },
-  { id: 'skills', label: '技能' },
-  { id: 'presets', label: '预设' },
-  { id: 'packs', label: '整合包' },
-]
 
 interface TopBarProps {
   activeTab: HomeTab | null

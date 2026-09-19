@@ -3,7 +3,7 @@ import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/pr
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { AppSettings, PackInstallResult, RuntimeOutput, WindowMode } from '../src/types'
+import type { AppSettings, OfficialPackRelease, OfficialPackStatus, PackInstallResult, RuntimeOutput, WindowMode } from '../src/types'
 import { ACP_RUNTIME_DIRNAME, CREDENTIALS_LOCK_DIRNAME, createAiInstaller, healCredentialsLock, type AiInstaller } from './ai-install'
 import { createApplicationAddonManager, type ApplicationAddonManager } from './application-addons'
 import { applyWindowMode, createMainWindow, createRendererChannel } from './app-window'
@@ -14,6 +14,7 @@ import { runCommand } from './command'
 import { readDeepSeekApiKey } from './credentials'
 import { resolveAgentApiForModel, resolveCopilotAgentApi } from './copilot-api'
 import { findInstalledDsh } from './dsh-install'
+import { compareVersions } from './dsh-release'
 import { buildPluginCommandArgs, createInstaller, syncProfilePnpmConfig, validateLocalPluginDirectory, type Installer } from './installer'
 import { registerIpcHandlers } from './ipc'
 import { createLauncherUpdater, type LauncherUpdater } from './launcher-update'
@@ -30,7 +31,7 @@ import {
 } from './node-runtime'
 import { createProxyAwareFetch } from './network'
 import { packUsesOfficeCliSkills, resolveOfficeCliExecutable } from './officecli-tool'
-import { ensureOfficialPack } from './official-pack'
+import { ensureOfficialPackVersion, listOfficialPackVersions, type OfficialPackListDeps } from './official-pack'
 import { createPackManager, type InstallInstaller, type PackInstallTarget, type PackManager } from './pack'
 import { migrateToPackHomesV2 } from './pack-migration'
 import { readPackRegistry } from './pack-registry'
@@ -92,7 +93,13 @@ interface Services {
   profilePoolReady: Promise<void>
   /** 手动恢复官方整合包（整合包页按钮）；失败抛错给渲染层。 */
   restoreOfficialPack: () => Promise<PackInstallResult>
-  /** 首启/更新后的自动获取：静默进行，进度走 packProgress 事件。 */
+  /** 列出 Release 上所有官方整合包版本（按版本降序）。 */
+  listOfficialPackVersions: () => Promise<OfficialPackRelease[]>
+  /** 官方整合包状态；`force` = 强制重新查 GitHub，否则用启动核对的缓存。 */
+  readOfficialPackStatus: (force?: boolean) => Promise<OfficialPackStatus>
+  /** 下载并导入指定版本的官方整合包；失败抛错给渲染层。 */
+  installOfficialPackVersion: (version: string) => Promise<PackInstallResult>
+  /** 启动核对：无官方包则自动装推荐版本，有更新则只通知不改动。 */
   officialPackBootstrap: () => Promise<void>
 }
 
@@ -377,6 +384,9 @@ function createServices(): Services {
     },
   })
 
+  /** 整合包导入期间补装 DSH 运行时：把安装进度接力到整合包页的进度条（见上面的 emitProgress）。 */
+  let relayDshProgressToPack = false
+
   const runtimeVersions = createRuntimeVersionService({
     dshRoot: managedDshRoot,
     nodeRoot: managedNodeRoot,
@@ -386,7 +396,14 @@ function createServices(): Services {
     preparePnpmRuntime: (nodeRuntime, onProgress) => preparePnpmRuntime('plugin', nodeRuntime, onProgress),
     isRuntimeRunning: () => runtime.isRunning(),
     emitOutput: (level, text) => events.output('plugin', level, text),
-    emitProgress: progress => events.installProgress(progress),
+    emitProgress: progress => {
+      events.installProgress(progress)
+      // 整合包导入过程中会先补装缺失的 DSH 运行时（约 100MB），那段时间整合包页只有一条死进度条；
+      // 把这一段并进 packProgress，用户在包页也能看到「正在准备 DSH x.y.z · 45%」。
+      if (relayDshProgressToPack && progress.kind === 'dsh') {
+        events.packProgress({ kind: 'stage', label: progress.message, percent: progress.percent })
+      }
+    },
     githubFetch: githubAuth.fetch,
     // 装一个 DSH 版本只下载版本本体；整合包仅由「新建 / 导入」产生。
   })
@@ -660,7 +677,15 @@ function createServices(): Services {
     ensureDshVersionInstalled: async version => {
       const current = await settings.read()
       const installed = await findManagedDshVersions(current.dshInstallPath)
-      await ensureDshVersionInstalled(installed, next => runtimeVersions.installDsh(next), version)
+      if (installed.some(item => item.version === version)) return
+      // 导入过程中补装运行时：先给一条明确的阶段提示，再把安装进度接力到整合包页。
+      events.packProgress({ kind: 'stage', label: `正在准备 DSH ${version}（本机未安装，需要先下载运行时）`, percent: null })
+      relayDshProgressToPack = true
+      try {
+        await ensureDshVersionInstalled(installed, next => runtimeVersions.installDsh(next), version)
+      } finally {
+        relayDshProgressToPack = false
+      }
     },
     selectDshVersion: async version => {
       await runtimeVersions.selectDsh(version)
@@ -711,51 +736,169 @@ function createServices(): Services {
   })
 
   /**
-   * 官方默认整合包：首启/更新后自动核对当前版本的包是否存在，缺失则从
-   * GitHub Release 拉 `official-pack-v<版本>.zip` 导入（快照管线原样复用）。
-   * 进度走 packProgress status 事件（整合包页横幅），导入成功广播 done
-   * 让渲染层刷新列表；任何失败只记日志，不打扰启动。
+   * 官方默认整合包：列版本 / 读状态 / 按版本下载导入共用一份状态缓存
+   * （启动核对也写它，渲染层随后读到的就是同一结果）。
+   * 进度走 packProgress status 事件（整合包页横幅），导入成功广播 done 让渲染层刷新列表。
    */
-  const runOfficialPack = async (announce: boolean): Promise<PackInstallResult | null> => {
+  let officialStatusCache: OfficialPackStatus | null = null
+  /** 进行中的核对：启动核对与渲染层同时要状态时合流成一次 GitHub 查询。 */
+  let officialCheckInFlight: Promise<OfficialPackStatus> | null = null
+
+  const officialListDeps = async (): Promise<OfficialPackListDeps> => {
     const current = await settings.read()
+    return { fetchImpl: proxyAwareFetch, mirror: current.network?.githubMirror }
+  }
+
+  const readInstalledOfficialVersions = async (): Promise<string[]> => {
+    const records = await readPackRegistry(packsJsonPath)
+    const versions = new Set<string>()
+    for (const record of records) {
+      const version = record.officialVersion?.trim()
+      if (version) versions.add(version)
+    }
+    // 版本号降序：第一项即本机最新的官方包。
+    return [...versions].sort((left, right) => compareVersions(right, left))
+  }
+
+  const resolveOfficialPackStatus = async (force: boolean): Promise<OfficialPackStatus> => {
+    if (!force && officialStatusCache) return officialStatusCache
+    if (officialCheckInFlight) return officialCheckInFlight
+    officialCheckInFlight = (async () => {
+      const installedVersions = await readInstalledOfficialVersions()
+      try {
+        const releases = await listOfficialPackVersions(await officialListDeps())
+        const recommended = releases[0]?.version ?? null
+        const newestInstalled = installedVersions[0] ?? null
+        officialStatusCache = {
+          recommended,
+          installedVersions,
+          updateAvailable: Boolean(recommended && newestInstalled && compareVersions(newestInstalled, recommended) > 0),
+          error: null,
+          checkedAt: new Date().toISOString(),
+        }
+      } catch (error) {
+        officialStatusCache = {
+          recommended: null,
+          installedVersions,
+          updateAvailable: false,
+          error: error instanceof Error ? error.message : String(error),
+          checkedAt: new Date().toISOString(),
+        }
+      }
+      return officialStatusCache
+    })()
+    try {
+      return await officialCheckInFlight
+    } finally {
+      officialCheckInFlight = null
+    }
+  }
+
+  /**
+   * 下载并导入指定版本的官方整合包；`version` 缺省时用推荐版本（Release 里最新）。
+   * `announce` = 用户主动触发：失败要抛错给界面；否则只记日志，不打扰启动。
+   */
+  const runOfficialPack = async (announce: boolean, version?: string): Promise<PackInstallResult | null> => {
+    let target = version?.trim() ?? ''
+    if (!target) {
+      const status = await resolveOfficialPackStatus(true)
+      if (!status.recommended) {
+        if (announce) throw new Error(status.error ?? '没有可用的官方整合包版本。')
+        if (status.error) events.output('plugin', 'error', `官方整合包版本核对失败：${status.error}`)
+        return null
+      }
+      target = status.recommended
+    }
+
+    // 下载进度：250ms 节流（进度条够顺滑又不刷爆 IPC），速度用指数滑动平均抹平抖动，
+    // 换源时速度重新起算（source 变了就丢弃旧速度，否则镜像的快速率会被直连的慢速率拖着）。
     let lastProgressAt = 0
-    const outcome = await ensureOfficialPack({
+    let lastReceived = 0
+    let lastReceivedAt = Date.now()
+    let smoothedSpeed = 0
+    let lastSource = ''
+    let announcedDownloadDone = false
+    const outcome = await ensureOfficialPackVersion({
       registryPath: packsJsonPath,
       importPack: (filePath, items, options) => packManager!.importPack(filePath, items, options),
       fetchImpl: proxyAwareFetch,
-      mirror: current.network?.githubMirror,
+      mirror: (await settings.read()).network?.githubMirror,
       downloadDir: path.join(userData, 'pack-snapshots'),
-      onProgress: (received, total) => {
+      onProgress: ({ received, total, source }) => {
         const now = Date.now()
-        const finished = total != null && received >= total
-        if (now - lastProgressAt < 1_500 && !finished) return
+        const finished = total != null && total > 0 && received >= total
+        if (source !== lastSource) {
+          lastSource = source
+          smoothedSpeed = 0
+          lastReceived = received
+          lastReceivedAt = now
+        }
+        const elapsed = (now - lastReceivedAt) / 1000
+        if (elapsed >= 0.5) {
+          const instant = (received - lastReceived) / elapsed
+          smoothedSpeed = smoothedSpeed > 0 ? smoothedSpeed * 0.6 + instant * 0.4 : instant
+          lastReceived = received
+          lastReceivedAt = now
+        }
+        if (now - lastProgressAt < 250 && !finished) return
         lastProgressAt = now
-        const percent = total && total > 0 ? `：${Math.floor((received / total) * 100)}%` : ''
-        events.packProgress({ kind: 'status', message: `正在获取官方整合包${percent}…` })
+        events.packProgress({
+          kind: 'download',
+          label: `官方整合包 ${target}`,
+          received,
+          total: total && total > 0 ? total : null,
+          speed: smoothedSpeed > 0 ? smoothedSpeed : null,
+          source,
+        })
+        // 下载完成到真正导入完成之间还有写盘、解压、补装 DSH 运行时，几十秒到几分钟；
+        // 这里立刻交棒给阶段提示，别让进度条停在 100% 一动不动。
+        if (finished && !announcedDownloadDone) {
+          announcedDownloadDone = true
+          events.packProgress({ kind: 'stage', label: '下载完成，正在写入并解压整合包…', percent: null })
+        }
       },
-    })
+    }, target)
     events.packProgress({ kind: 'status', message: '' })
     if (outcome.outcome === 'imported' && outcome.result) {
+      officialStatusCache = null
+      if (outcome.source) events.output('plugin', 'info', `官方整合包 ${target} 已下载（来源：${outcome.source}）。`)
       events.packProgress({ kind: 'done', result: outcome.result })
       return outcome.result
     }
     if (announce) {
-      if (outcome.outcome === 'present') throw new Error('当前版本的官方整合包已存在。')
-      throw new Error(outcome.message ?? '官方整合包获取失败。')
+      if (outcome.outcome === 'present') throw new Error(`官方整合包 ${target} 已存在。`)
+      throw new Error(outcome.message ?? `官方整合包 ${target} 获取失败。`)
     }
     if (outcome.outcome === 'failed') {
       events.output('plugin', 'error', `官方整合包自动获取失败：${outcome.message ?? '未知原因'}`)
     }
     return null
   }
+
   const restoreOfficialPack = async (): Promise<PackInstallResult> => {
     const result = await runOfficialPack(true)
     if (!result) throw new Error('官方整合包获取失败。')
     return result
   }
+
+  const installOfficialPackVersion = async (version: string): Promise<PackInstallResult> => {
+    const result = await runOfficialPack(true, version)
+    if (!result) throw new Error(`官方整合包 ${version} 获取失败。`)
+    return result
+  }
+
+  /**
+   * 启动核对两段式：
+   * - 本机**一个官方包都没有**（全新用户）→ 自动导入推荐版本，保证开箱可用；
+   * - 已有官方包但存在更新版本 → **只写状态并通知渲染层**挂「有新版本」，不静默拉几百 MB。
+   */
   const officialPackBootstrap = async () => {
     try {
-      await runOfficialPack(false)
+      const status = await resolveOfficialPackStatus(true)
+      if (status.installedVersions.length === 0 && status.recommended) {
+        await runOfficialPack(false, status.recommended)
+      }
+      events.officialPackStatus(await resolveOfficialPackStatus(false))
     } catch (error) {
       events.output('plugin', 'error', `官方整合包自动获取失败：${error instanceof Error ? error.message : String(error)}`)
     }
@@ -796,7 +939,7 @@ function createServices(): Services {
     })
   }).catch(error => events.output('plugin', 'error', `旧整合包/插件池迁移失败：${error instanceof Error ? error.message : String(error)}`))
 
-  return { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager: packManager!, githubAuth, applicationAddons, catalogSync, dshMarket, recommendedWebUi, runtimeVersions, profiles: profileService, profilePoolReady, restoreOfficialPack, officialPackBootstrap }
+  return { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager: packManager!, githubAuth, applicationAddons, catalogSync, dshMarket, recommendedWebUi, runtimeVersions, profiles: profileService, profilePoolReady, restoreOfficialPack, listOfficialPackVersions: async () => listOfficialPackVersions(await officialListDeps()), readOfficialPackStatus: force => resolveOfficialPackStatus(force === true), installOfficialPackVersion, officialPackBootstrap }
 }
 
 function openMainWindow(): void {

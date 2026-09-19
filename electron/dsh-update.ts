@@ -1,5 +1,9 @@
 import { DSH_PACKAGE_NAME, DSH_REPOSITORY } from '../src/constants'
 import type { DshInstallationStatus, DshUpdateStatus } from '../src/types'
+import { compareVersions, normalizeVersion, readRecommendedDshVersion } from './dsh-release'
+
+/** 版本号解析/比较的唯一实现在 electron/dsh-release.ts；这里再导出以保持既有导入路径可用。 */
+export { compareVersions, normalizeVersion } from './dsh-release'
 
 const GITHUB_API_ROOT = 'https://api.github.com'
 const DSH_PACKAGE_PATHS = ['apps/cli/package.json', 'package.json'] as const
@@ -27,53 +31,6 @@ interface PackageManifest {
 
 function repositoryApiUrl(path: string): string {
   return `${GITHUB_API_ROOT}/repos/${DSH_REPOSITORY}/${path}`
-}
-
-function normalizeVersion(version: string): string {
-  return version.trim().replace(/^v/i, '')
-}
-
-interface ParsedVersion {
-  core: [number, number, number]
-  prerelease: string[]
-}
-
-function parseVersion(version: string): ParsedVersion | null {
-  const match = normalizeVersion(version).match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/)
-  if (!match) return null
-  return {
-    core: [Number(match[1]), Number(match[2]), Number(match[3])],
-    prerelease: match[4] ? match[4].split('.') : [],
-  }
-}
-
-/** Returns a positive number when remote is newer than local. */
-export function compareVersions(local: string, remote: string): number {
-  const left = parseVersion(local)
-  const right = parseVersion(remote)
-  if (!left || !right) return normalizeVersion(remote).localeCompare(normalizeVersion(local))
-
-  for (let index = 0; index < left.core.length; index += 1) {
-    if (left.core[index] !== right.core[index]) return right.core[index] - left.core[index]
-  }
-  if (left.prerelease.length === 0 || right.prerelease.length === 0) {
-    if (left.prerelease.length === right.prerelease.length) return 0
-    return left.prerelease.length === 0 ? -1 : 1
-  }
-  const length = Math.max(left.prerelease.length, right.prerelease.length)
-  for (let index = 0; index < length; index += 1) {
-    const localPart = left.prerelease[index]
-    const remotePart = right.prerelease[index]
-    if (localPart === undefined || remotePart === undefined) return localPart === undefined ? 1 : -1
-    if (localPart === remotePart) continue
-    const localNumber = /^\d+$/.test(localPart) ? Number(localPart) : null
-    const remoteNumber = /^\d+$/.test(remotePart) ? Number(remotePart) : null
-    if (localNumber !== null && remoteNumber !== null) return remoteNumber - localNumber
-    if (localNumber !== null) return -1
-    if (remoteNumber !== null) return 1
-    return remotePart.localeCompare(localPart)
-  }
-  return 0
 }
 
 function checkedAt(): string {
@@ -109,22 +66,6 @@ function decodeContent(content: string): string {
   return Buffer.from(content.replace(/\s/g, ''), 'base64').toString('utf8')
 }
 
-/**
- * npm registry 的 dist-tag/latest。DSH 本体经 npm 分发，registry 才是版本真值；
- * GitHub contents 接口在仓库不可达/镜像限流时会 404，只作最后回退。
- */
-async function readRemoteDshVersionFromRegistry(fetchImpl: typeof fetch, registry: string): Promise<string> {
-  const base = registry.replace(/\/+$/, '')
-  const response = await fetchImpl(`${base}/${DSH_PACKAGE_NAME.replace('/', '%2F')}/latest`, {
-    headers: { accept: 'application/vnd.npm.install-v1+json, application/json' },
-    signal: AbortSignal.timeout(10_000),
-  })
-  if (!response.ok) throw new Error(`npm 镜像返回 ${response.status}。`)
-  const body = await response.json() as { version?: unknown }
-  if (typeof body?.version !== 'string' || !body.version.trim()) throw new Error('npm 镜像没有返回可用的版本号。')
-  return body.version.trim()
-}
-
 async function readRemoteDshVersionFromGitHub(fetchImpl: typeof fetch): Promise<string> {
   const repository = await requestJson<GitHubRepositoryResponse>(
     repositoryApiUrl(''),
@@ -156,30 +97,28 @@ async function readRemoteDshVersionFromGitHub(fetchImpl: typeof fetch): Promise<
   throw lastError instanceof Error ? lastError : new Error('未找到 DSH 版本清单。')
 }
 
-/** 镜像优先逐个试 registry，全部失败才回退 GitHub；两边都失败时抛最后一次的错误。 */
+/**
+ * 镜像优先读 registry，全部失败才回退 GitHub contents（仓库不可达/镜像限流时）。
+ * registry 侧走与「推荐安装」完全相同的推荐版本口径，两边不会各说各话。
+ */
 async function readRemoteDshVersion(fetchImpl: typeof fetch, registryCandidates: string[]): Promise<string> {
-  const seen = new Set<string>()
-  let lastError: unknown = null
-  for (const candidate of registryCandidates) {
-    const registry = candidate.trim().replace(/\/+$/, '')
-    if (!registry || seen.has(registry)) continue
-    seen.add(registry)
-    try {
-      return await readRemoteDshVersionFromRegistry(fetchImpl, registry)
-    } catch (error) {
-      lastError = error
-    }
+  let registryError: unknown = null
+  try {
+    return await readRecommendedDshVersion(fetchImpl, registryCandidates)
+  } catch (error) {
+    registryError = error
   }
   try {
     return await readRemoteDshVersionFromGitHub(fetchImpl)
   } catch (error) {
-    throw error instanceof Error ? error : lastError
+    throw error instanceof Error ? error : registryError
   }
 }
 
 /**
- * Compare the installed DSH package with the published npm version
- * (mirror-first, official registry, GitHub contents as last resort).
+ * Compare the installed DSH package with the version the launcher would install
+ * (registry 推荐版本，镜像优先、官方源兜底；GitHub contents 只作最后回退，
+ * 此时拿到的是仓库分支上的版本，不一定等于线上发布版)。
  * A failed check is reported as an error state and never blocks launcher startup.
  */
 export async function checkDshUpdate(
@@ -200,11 +139,11 @@ export async function checkDshUpdate(
       : status('up-to-date', localVersion, remoteVersion,
         normalizeVersion(remoteVersion) === normalizeVersion(localVersion)
           ? '当前 DSH 已是最新版本。'
-          : `本地 DSH ${localVersion} 高于仓库版本 ${remoteVersion}。`)
+          : `本地 DSH ${localVersion} 高于可更新版本 ${remoteVersion}。`)
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
     return status('error', localVersion, null, `暂时无法检查 DSH 更新：${detail}`)
   }
 }
 
-export { normalizeVersion, readRemoteDshVersion }
+export { readRemoteDshVersion }

@@ -86,6 +86,7 @@ const EXCLUDED_TOP_LEVEL = new Set([
   'task-board',
   'attachments',
   'storages',
+  'pet.json',
   '.dsh-module-fallback',
   '.skill-staging',
   '.preset-staging',
@@ -95,6 +96,8 @@ const EXCLUDED_TOP_LEVEL = new Set([
 const EXCLUDED_TOP_LEVEL_PREFIXES = ['.pack-raw-staging-', '.pack-raw-preset-staging-', '.pack-offline-import-']
 /** 任何层级出现即剔除的目录（DSH 自建缓存/临时目录，含绝对路径或纯临时数据）。 */
 const EXCLUDED_ANYWHERE = new Set(['.dsh-module-fallback', '.skill-staging', '.preset-staging', '.pack-offline-import'])
+/** 具体路径前缀（相对家目录）：装的是本地凭据或平台令牌缓存，随包公开会泄露机主身份。 */
+const EXCLUDED_PATH_PREFIXES = ['skin-center/wallpapers/.cache']
 /** pnpm 自己的元数据：含源机 store 绝对路径；导入端不跑 pnpm，交给它以后重建。 */
 const EXCLUDED_PROFILE_FILES = new Set([
   'node_modules/.modules.yaml',
@@ -109,6 +112,7 @@ export function isSnapshotExcluded(rel: string): boolean {
   if (EXCLUDED_TOP_LEVEL.has(top)) return true
   if (EXCLUDED_TOP_LEVEL_PREFIXES.some(prefix => top.startsWith(prefix))) return true
   if (segments.some(segment => EXCLUDED_ANYWHERE.has(segment))) return true
+  if (EXCLUDED_PATH_PREFIXES.some(prefix => rel === prefix || rel.startsWith(`${prefix}/`))) return true
   if (segments.length === 1 && top.toLowerCase().endsWith('.log')) return true
   // profiles/<id>/node_modules 与 profiles/node_modules 下的 pnpm 元数据
   if (segments[0] === 'profiles' && segments.length >= 3) {

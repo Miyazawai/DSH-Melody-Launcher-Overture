@@ -29,15 +29,13 @@ import {
 } from './node-runtime'
 import { runCommand, type CommandResult, type OutputLevel } from './command'
 import { withExecutableDirectoryOnPath } from './process'
-import { compareVersions } from './dsh-update'
+import { candidatesFromPackument, compareVersions, readDshVersionIndex, validVersion } from './dsh-release'
 import { buildNetworkEnvironment, DEFAULT_NPM_REGISTRY, NPM_OFFICIAL_REGISTRY } from './proxy'
 import {
   DSH_SUBPROCESS_LOCAL_PACKAGE,
   ensureDshScriptPolicy,
   hasDshScriptPackage,
 } from './dsh-script-policy'
-
-const VERSION_LIMIT_PER_CHANNEL = 12
 
 /** DSH 版本列表的 registry 候选：用户镜像 → npmmirror → 官方源（大陆直连 npmjs 常失败）。 */
 export function dshRegistryCandidates(npmRegistry?: string | null): string[] {
@@ -192,59 +190,13 @@ export async function ensureDshVersionInstalled(
   return true
 }
 
-function validVersion(version: string): boolean {
-  return /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version.trim())
-}
-
-function candidateFromVersion(version: string, time?: string | null, distTag?: string | null): RuntimeVersionCandidate {
-  const normalized = normalizeDshVersion(version)
-  return {
-    version: normalized,
-    label: distTag ?? null,
-    lts: null,
-    date: time ?? null,
-    prerelease: normalized.includes('-'),
-  }
-}
-
-interface DshRegistryResponse {
-  versions?: Record<string, unknown>
-  'dist-tags'?: Record<string, unknown>
-  time?: Record<string, unknown>
-}
-
+/**
+ * 可下载版本列表：完整 packument（版本页需要 time 字段显示发布日期）。
+ * 渠道截断、以及「最新版 / 推荐版本」标记都在 candidatesFromPackument 内完成，
+ * 两个标记在截断前计算并强制保留，这里不需要再做什么。
+ */
 export async function listAvailableDshVersions(fetchImpl: typeof fetch = fetch, registryCandidates: string[] = dshRegistryCandidates()): Promise<RuntimeVersionCandidate[]> {
-  let lastError: unknown = null
-  for (const registry of registryCandidates) {
-    try {
-      const base = registry.replace(/\/+$/, '')
-      const response = await fetchImpl(`${base}/${DSH_PACKAGE_NAME.replace('/', '%2F')}`, {
-        headers: { Accept: 'application/json', 'User-Agent': 'DSH-Launcher' },
-        signal: AbortSignal.timeout(15_000),
-      })
-      if (!response.ok) throw new Error(`读取 DSH npm 版本列表失败（HTTP ${response.status}）。`)
-      return candidatesFromPackument(await response.json() as DshRegistryResponse)
-    } catch (error) {
-      lastError = error
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error('读取 DSH npm 版本列表失败。')
-}
-
-function candidatesFromPackument(data: DshRegistryResponse): RuntimeVersionCandidate[] {
-  const versions = Object.keys(data.versions ?? {}).filter(validVersion)
-  const tags = Object.entries(data['dist-tags'] ?? {})
-    .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && validVersion(entry[1]))
-  const tagged = new Map(tags.map(([tag, version]) => [normalizeDshVersion(version), tag]))
-  const candidates = versions
-    .map(version => candidateFromVersion(version, typeof data.time?.[version] === 'string' ? data.time[version] as string : null, tagged.get(normalizeDshVersion(version))))
-    .sort((left, right) => compareVersions(left.version, right.version))
-  const stable = candidates.filter(candidate => !candidate.prerelease).slice(0, VERSION_LIMIT_PER_CHANNEL)
-  const prerelease = candidates.filter(candidate => candidate.prerelease).slice(0, VERSION_LIMIT_PER_CHANNEL)
-  const current = candidates.filter(candidate => ['latest', 'next', 'beta', 'rc'].includes(candidate.label ?? ''))
-  const selected = new Map<string, RuntimeVersionCandidate>()
-  for (const item of [...stable, ...prerelease, ...current]) selected.set(item.version, item)
-  return [...selected.values()].sort((left, right) => compareVersions(left.version, right.version))
+  return candidatesFromPackument(await readDshVersionIndex(fetchImpl, registryCandidates))
 }
 
 function versionFromDshRoot(root: string): string | null {

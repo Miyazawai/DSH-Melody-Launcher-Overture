@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { copyFile, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { IPC, IPC_EVENTS } from '../src/constants'
-import type { AiSessionCreateInput, ApplicationInstallRequest, AppSettings, CustomApiProviderInput, PackCreateRequest, PackInstallResult, PluginInstallRequest, PresetInstallRequest, SkillInstallRequest, SkillInstallTarget, WindowMode, ProfileRepositoryImportMode, PackPluginEntry } from '../src/types'
+import type { AiSessionCreateInput, ApplicationInstallRequest, AppSettings, CustomApiProviderInput, OfficialPackRelease, OfficialPackStatus, PackCreateRequest, PackInstallResult, PluginInstallRequest, PresetInstallRequest, SkillInstallRequest, SkillInstallTarget, WindowMode, ProfileRepositoryImportMode, PackPluginEntry } from '../src/types'
 import type { ApplicationAddonManager } from './application-addons'
 import type { RecommendedWebUiService } from './recommended-web-ui'
 import { isWindowMode } from './app-window'
@@ -77,12 +77,18 @@ export interface IpcDependencies {
   newsCachePath: string
   /** 恢复当前版本的官方默认整合包（下载导入走快照管线）；失败抛错。 */
   restoreOfficialPack: () => Promise<PackInstallResult>
+  /** 列出 Release 上所有官方默认整合包版本（按版本降序）。 */
+  listOfficialPackVersions: () => Promise<OfficialPackRelease[]>
+  /** 官方整合包状态；列表读不到时把原因放进 error 而不抛。force = 强制重查 GitHub。 */
+  readOfficialPackStatus: (force?: boolean) => Promise<OfficialPackStatus>
+  /** 下载并导入指定版本的官方整合包；失败抛错。 */
+  installOfficialPackVersion: (version: string) => Promise<PackInstallResult>
   getWindow: () => BrowserWindow | null
   setWindowMode: (mode: WindowMode) => void
 }
 
 export function registerIpcHandlers(deps: IpcDependencies): void {
-  const { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager, githubAuth, applicationAddons, catalogSync, dshMarket, recommendedWebUi, runtimeVersions, profiles, skillsShIndexPath, newsCachePath, restoreOfficialPack } = deps
+  const { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager, githubAuth, applicationAddons, catalogSync, dshMarket, recommendedWebUi, runtimeVersions, profiles, skillsShIndexPath, newsCachePath, restoreOfficialPack, listOfficialPackVersions, readOfficialPackStatus, installOfficialPackVersion } = deps
   const linkedComponents = createLinkedComponentController({
     readSettings: () => settings.read(),
     readProfile,
@@ -967,6 +973,16 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   ipcMain.handle(IPC.packsRestoreOfficial, async () => {
     assertProfileMutationAvailable()
     return restoreOfficialPack()
+  })
+
+  // 只读：列版本 / 读状态都允许在其它操作进行时执行（用户只是想看看有什么版本）。
+  ipcMain.handle(IPC.packsOfficialVersions, async () => listOfficialPackVersions())
+  ipcMain.handle(IPC.packsOfficialStatus, async (_event, force: unknown) => readOfficialPackStatus(force === true))
+
+  ipcMain.handle(IPC.packsOfficialInstall, async (_event, version: unknown) => {
+    if (typeof version !== 'string' || !version.trim()) throw new Error('官方整合包版本号无效。')
+    assertProfileMutationAvailable()
+    return installOfficialPackVersion(version.trim())
   })
 
   ipcMain.handle(IPC.packsPickFile, async () => {

@@ -77,7 +77,6 @@ export function LauncherHome({
         </div>
         <div className="home-brand-meta">
           <span className="home-brand-version">v{packageMetadata.version}</span>
-          <span className="home-brand-qq">官方用户QQ群：625155044</span>
           <button type="button" className="home-brand-settings" onClick={onOpenSettings} title="启动器设置">
             <Settings size={13} /><span>设置</span>
           </button>

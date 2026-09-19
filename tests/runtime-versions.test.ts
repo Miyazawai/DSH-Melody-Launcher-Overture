@@ -92,6 +92,29 @@ describe('runtime version indexes', () => {
     expect(candidates.map(item => item.version)).toEqual(['1.0.0', '1.0.0-rc.10', '1.0.0-rc.9', '0.9.0'])
     expect(candidates[0]?.label).toBe('latest')
     expect(candidates[1]?.label).toBe('next')
+    // 有正式版时它是推荐安装版本，同时也是版本号最高者。
+    expect(candidates[0]?.isNewest).toBe(true)
+    expect(candidates[0]?.recommended).toBe(true)
+    expect(candidates.filter(item => item.isNewest)).toHaveLength(1)
+    expect(candidates.filter(item => item.recommended)).toHaveLength(1)
+  })
+
+  it('可下载列表按渠道口径带回最新版与推荐版本标记', async () => {
+    // 上游真实形态：latest 停在旧的 rc.1，rc.2 只打了 next，版本号最高的是 alpha。
+    const fetchImpl: typeof fetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        versions: { '0.1.6-alpha.1': {}, '0.1.5-rc.2': {}, '0.1.5-rc.1': {} },
+        'dist-tags': { latest: '0.1.5-rc.1', next: '0.1.5-rc.2', alpha: '0.1.6-alpha.1' },
+      }),
+    } as Response)
+
+    const candidates = await listAvailableDshVersions(fetchImpl, ['https://registry.npmmirror.com'])
+
+    expect(candidates.find(item => item.isNewest)?.version).toBe('0.1.6-alpha.1')
+    expect(candidates.find(item => item.recommended)?.version).toBe('0.1.5-rc.2')
+    expect(candidates.some(item => item.version === '0.1.5-rc.1' && item.label === 'latest')).toBe(true)
   })
 
   it('镜像失败时回退下一个 registry，全部失败才抛错', async () => {

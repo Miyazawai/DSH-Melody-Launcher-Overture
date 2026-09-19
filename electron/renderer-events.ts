@@ -1,5 +1,5 @@
 import { IPC_EVENTS } from '../src/constants'
-import type { AiInstallEvent, AiSessionEvent, DshMarketProgress, InstallProgress, LauncherUpdateProgress, PackProgressEvent, PluginTrialResult, RuntimeOutput, RuntimeState } from '../src/types'
+import type { AiInstallEvent, AiSessionEvent, DshMarketProgress, InstallProgress, LauncherUpdateProgress, OfficialPackStatus, PackProgressEvent, PluginTrialResult, RuntimeOutput, RuntimeState } from '../src/types'
 import type { RendererChannel } from './app-window'
 
 /** 主进程主动推送给渲染层的三类事件，统一在这里成形与发送。 */
@@ -21,6 +21,7 @@ export interface RendererEvents {
   aiSessionEvent(event: AiSessionEvent): void
   packProgress(event: PackProgressEvent): void
   dshMarketProgress(progress: DshMarketProgress): void
+  officialPackStatus(status: OfficialPackStatus): void
 }
 
 export function createRendererEvents(
@@ -54,6 +55,9 @@ export function createRendererEvents(
     },
     packProgress(event) {
       channel.send(IPC_EVENTS.packProgress, event)
+    },
+    officialPackStatus(status) {
+      channel.send(IPC_EVENTS.officialPackStatus, status)
     },
     dshMarketProgress(progress) {
       channel.send(IPC_EVENTS.dshMarketProgress, progress)

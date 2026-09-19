@@ -690,15 +690,17 @@ export function createInstaller(options: InstallerOptions): Installer {
     let selectedVersion: string | null = null
     try {
       const available = await listAvailableDshVersions(options.githubFetch, dshRegistryCandidates(buildNetworkEnvironment(settings).npmRegistry))
+      // 推荐版本由主进程按「稳定优先、同级取新」标在候选项上（规则见 electron/dsh-release.ts）。
+      // 不直接采信 npm 的 latest 标签：上游至今没发正式版，latest 会长期停在某个旧预发布版上。
       selectedVersion = selectedVersion
-        ?? available.find(candidate => candidate.label === 'latest')?.version
+        ?? available.find(candidate => candidate.recommended)?.version
         ?? available.find(candidate => !candidate.prerelease)?.version
         ?? available[0]?.version
         ?? (settings.dshVersion ? normalizeDshVersion(settings.dshVersion) : null)
     } catch (error) {
-      // 首次部署不能因版本索引暂时不可用而阻塞；没有精确选择时回落到旧单目录和 npm latest。
+      // 首次部署不能因版本索引暂时不可用而阻塞；没有精确选择时回落到已配置版本。
       selectedVersion = settings.dshVersion ? normalizeDshVersion(settings.dshVersion) : null
-      options.emitOutput('info', `读取 DSH 版本列表失败，回落到 npm latest：${error instanceof Error ? error.message : String(error)}`)
+      options.emitOutput('info', `读取 DSH 版本列表失败，回落到已配置版本：${error instanceof Error ? error.message : String(error)}`)
     }
     const runtimeRoot = selectedVersion ? dshVersionRoot(settings.dshInstallPath, selectedVersion) : settings.dshInstallPath
     // 选中的发布版本与已安装版本一致时直接认定已是最新，而不是对现有目录重跑一次安装。

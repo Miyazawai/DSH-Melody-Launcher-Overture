@@ -48,13 +48,19 @@ describe('快照剔除规则', () => {
       'profiles/pack-a/node_modules/.package-map.json',
       'profiles/node_modules/.modules.yaml',
       'profiles/pack-a/.dsh-module-fallback/node_modules/alpha',
+      // 桌宠好感度/投喂记录：个人游玩数据
+      'pet.json',
+      // 壁纸引擎令牌缓存：随包公开等于泄露机主凭据
+      'skin-center/wallpapers/.cache',
+      'skin-center/wallpapers/.cache/we-tokens.json',
     ]) {
       expect(isSnapshotExcluded(rel), rel).toBe(true)
     }
     for (const rel of [
       'settings.yaml',
-      'pet.json',
       'skin-center/wallpapers/a.png',
+      'skin-center/wallpapers/my-wallpaper/project/index.html',
+      'skin-center-active.json',
       'skills/find-skills/SKILL.md',
       '.agent-presets/writer/preset.yaml',
       'profiles/pack-a/package.json',

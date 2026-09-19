@@ -72,7 +72,9 @@ describe('recommended web ui service', () => {
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as { dsh?: { profile?: { bundles?: string[] } } }
     expect(manifest.dsh?.profile?.bundles).toEqual(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', RECOMMENDED_WEB_UI_PACKAGE])
     const skin = JSON.parse(await readFile(path.join(dshHome, 'skin-center-active.json'), 'utf8')) as { active?: unknown }
-    expect(skin).toEqual({ active: '' })
+    // 原生外观 = active: null（插件文档标注的 "stock look"）+ initialized: true
+    // —— 两个条件一起堵住 seedDefaultActiveSkin 的强写作者皮肤分支。
+    expect(skin).toEqual({ active: null, initialized: true })
     await expect(service.status()).resolves.toEqual({ installed: true, enabled: true })
     await rm(root, { recursive: true, force: true })
   })

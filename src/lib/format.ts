@@ -18,6 +18,27 @@ export function formatBytes(value: number): string {
   return `${scaled.toFixed(digits)} ${units[unitIndex]}`
 }
 
+/** 下载速率：1258291 → "1.2 MB/s"。未知或非正数返回空串（界面据此不显示这一段）。 */
+export function formatSpeed(bytesPerSecond: number | null | undefined): string {
+  if (bytesPerSecond == null || !Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return ''
+  return `${formatBytes(bytesPerSecond)}/s`
+}
+
+/** 下载进度百分比；总量未知时返回 null（界面退回不确定态进度条）。 */
+export function downloadPercent(received: number, total: number | null): number | null {
+  if (total == null || total <= 0) return null
+  return Math.min(100, Math.max(0, Math.floor((received / total) * 100)))
+}
+
+/** 一行式下载进度文案："45%（56 MB / 119 MB） · 2.4 MB/s · 经 gh-proxy.com"。 */
+export function downloadProgressText(progress: { received: number; total: number | null; speed: number | null; source: string }): string {
+  const percent = downloadPercent(progress.received, progress.total)
+  const amount = percent == null
+    ? `已下载 ${formatBytes(progress.received)}`
+    : `${percent}%（${formatBytes(progress.received)} / ${formatBytes(progress.total as number)}）`
+  return [amount, formatSpeed(progress.speed), `经 ${progress.source}`].filter(Boolean).join(' · ')
+}
+
 /** ISO 时间串 → "3 分钟前" / "2 天前" / "8月14日"。 */
 export function formatRelativeTime(value: string, now: number = Date.now()): string {
   const diff = now - new Date(value).getTime()

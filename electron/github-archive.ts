@@ -1,4 +1,5 @@
 import { get as httpsGet } from 'node:https'
+import { GITHUB_MIRROR_PRESETS } from '../src/constants'
 
 /** gh-proxy 系镜像接受 `<mirror>/<完整原始 URL>` 形式；去掉尾部斜杠避免双斜杠。 */
 export function applyGitHubMirror(url: string, mirror?: string): string {
@@ -7,7 +8,7 @@ export function applyGitHubMirror(url: string, mirror?: string): string {
 }
 
 /** 内置公共 GitHub 镜像前缀（按顺序尝试；镜像用自己的出口读同一份数据）。 */
-export const GITHUB_PUBLIC_MIRRORS = ['https://gh-proxy.com/', 'https://ghfast.top/', 'https://ghproxy.net/'] as const
+export const GITHUB_PUBLIC_MIRRORS = GITHUB_MIRROR_PRESETS
 
 /** GitHub 资源候选链：用户配置的镜像优先 → 直连 → 内置公共镜像。 */
 export function githubCandidateUrls(url: string, mirror?: string): string[] {
