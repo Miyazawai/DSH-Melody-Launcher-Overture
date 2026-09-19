@@ -61,6 +61,24 @@ function managedNode(): NodeRuntime {
   }
 }
 
+/**
+ * 轮询等待断言成立（默认 5 秒）。
+ * 用来替代「固定 sleep 再看结果」：重启进程、改写凭据都是异步落盘，
+ * CI runner 负载高时固定等待会假红（本文件里的凭据重试用例就这样在 CI 上红过两次）。
+ */
+async function waitFor(assertion: () => void | Promise<void>, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    try {
+      await assertion()
+      return
+    } catch (error) {
+      if (Date.now() >= deadline) throw error
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+  }
+}
+
 describe('extractLocalUrl', () => {
   it('picks up a loopback address with a port', () => {
     expect(extractLocalUrl('Server listening on http://127.0.0.1:5173')).toBe('http://127.0.0.1:5173')
@@ -385,14 +403,16 @@ describe('应用加载项运行模式', () => {
       await runtime.start()
       first.stderr.write('credentials-local: the value for "version" in .credentials.yaml must be a string\n')
       first.emit('exit', 1)
-      await new Promise(resolve => setTimeout(resolve, 150))
-      expect(spawnProcess).toHaveBeenCalledTimes(2)
-      expect(await readFile(path.join(dshHome, '.credentials.yaml'), 'utf8')).not.toContain('version:')
+      // 重启与凭据改写都是异步落盘：CI runner 慢的时候固定 sleep 会假红，改成条件轮询。
+      await waitFor(async () => {
+        expect(spawnProcess).toHaveBeenCalledTimes(2)
+        expect(await readFile(path.join(dshHome, '.credentials.yaml'), 'utf8')).not.toContain('version:')
+      })
 
       second.emit('exit', 0)
-      await new Promise(resolve => setTimeout(resolve, 150))
-      expect(await readFile(path.join(dshHome, '.credentials.yaml'), 'utf8')).toContain('version: 1')
-      await new Promise(resolve => setTimeout(resolve, 150))
+      await waitFor(async () => {
+        expect(await readFile(path.join(dshHome, '.credentials.yaml'), 'utf8')).toContain('version: 1')
+      })
     } finally {
       await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
     }
