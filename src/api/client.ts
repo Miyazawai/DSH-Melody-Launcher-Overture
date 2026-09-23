@@ -1,5 +1,4 @@
 import { createContext, useContext } from 'react'
-import { demoApi } from '../demo-api'
 import type { LauncherApi } from '../types'
 
 /**
@@ -7,12 +6,34 @@ import type { LauncherApi } from '../types'
  * 通过 context 传递而不是模块级全局，组件因此可以在测试里注入替身。
  */
 
-/** 在 Electron 里拿真实实现，在浏览器里回落到演示数据。 */
-export function resolveLauncherApi(): LauncherApi {
-  return window.launcher ?? demoApi
+let resolved: LauncherApi | null = null
+
+/**
+ * 解析渲染层 API。Electron 里就是 preload 注入的 `window.launcher`；
+ * 只有浏览器演示模式才需要那份 97KB 的 demo 数据，所以按需 import，
+ * 别让它进首屏 chunk（启动页要多解析一遍的就是这个 chunk）。
+ */
+export async function bootstrapLauncherApi(): Promise<LauncherApi> {
+  if (resolved) return resolved
+  if (window.launcher) {
+    resolved = window.launcher
+    return resolved
+  }
+  const { demoApi } = await import('../demo-api')
+  resolved = demoApi
+  return resolved
 }
 
-const LauncherApiContext = createContext<LauncherApi | null>(null)
+export function resolveLauncherApi(): LauncherApi {
+  if (resolved) return resolved
+  if (window.launcher) {
+    resolved = window.launcher
+    return resolved
+  }
+  throw new Error('渲染层 API 尚未初始化：请先 await bootstrapLauncherApi()。')
+}
+
+export const LauncherApiContext = createContext<LauncherApi | null>(null)
 
 export const LauncherApiProvider = LauncherApiContext.Provider
 

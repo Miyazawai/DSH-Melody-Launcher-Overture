@@ -48,6 +48,9 @@
 }
 
 :root[data-theme='night'] {
+  /* index.html 声明了 light，原生控件（复选框/单选/输入框/滚动条）会在暗底上画成白块，
+     未勾选看着像已勾选。作者样式里的 color-scheme 优先级高于那个 meta。 */
+  color-scheme: dark;
   --app-bg: #0d1117;
   --chrome: #161d26;
   --chrome-strong: #1d2631;
@@ -5608,11 +5611,13 @@ input:focus-visible {
   overflow: hidden;
 }
 
-.settings-dialog > header,
-.credential-dialog > header,
-.github-account-dialog > header,
-.plugin-target-dialog > header,
-.update-dialog > header {
+/*
+ * 弹窗标题栏契约：所有 .modal 的直接子 <header> 都是同一条标题栏（左标题、右关闭 X）。
+ * 以前这里是一份手写清单（settings/credential/github-account/plugin-target/update），
+ * 新弹窗忘了登记就会退回块级布局——X 掉到标题下面就是那个症状。改成通用规则后
+ * 新弹窗自带正确骨架，不必再来加名字。
+ */
+.modal > header {
   display: flex;
   min-height: 56px;
   align-items: center;
@@ -5621,11 +5626,7 @@ input:focus-visible {
   border-bottom: 1px solid var(--line);
 }
 
-.settings-dialog > header > div,
-.credential-dialog > header > div,
-.github-account-dialog > header > div,
-.plugin-target-dialog > header > div,
-.update-dialog > header > div {
+.modal > header > div {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -6644,6 +6645,102 @@ input:focus-visible {
   line-height: 15px;
 }
 
+/*
+ * 弹窗里的通用三件套：可选项行 / 说明文字 / 警示块。
+ * 几何照抄 .check-field（启动器一贯的可选行），但补上 hover、选中、聚焦与禁用四态——
+ * 弹窗里的选项行是要点的，设置页那一份不需要。只用 token，夜间主题才不会翻车。
+ */
+.dialog-choice {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+.dialog-choice:hover {
+  border-color: var(--line-strong);
+}
+
+.dialog-choice.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.dialog-choice:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.dialog-choice:has(input:disabled) {
+  opacity: .55;
+  cursor: default;
+}
+
+.dialog-choice input {
+  width: 15px;
+  height: 15px;
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+}
+
+.dialog-choice > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dialog-choice strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog-choice small {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 15px;
+}
+
+/* 一组 .dialog-choice 的外壳：行距固定，边框不叠成双线。 */
+.dialog-choice-list { display: grid; gap: 6px; }
+
+.dialog-note {
+  margin: 0;
+  color: var(--quiet);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.dialog-warning {
+  display: grid;
+  gap: 6px;
+  padding: 11px 12px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.dialog-warning ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 16px;
+  color: var(--ink);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
 .modal > footer {
   display: flex;
   min-height: 62px;
@@ -7521,21 +7618,6 @@ input:focus-visible {
   width: min(620px, calc(100vw - 32px));
 }
 
-.ai-install-dialog > header {
-  display: flex;
-  min-height: 56px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--line);
-}
-
-.ai-install-dialog > header > div:first-child {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
 .ai-header-actions {
   display: inline-flex;
   align-items: center;
@@ -8268,6 +8350,60 @@ input:focus-visible {
   flex-shrink: 0;
 }
 
+/*
+ * 包卡片的折叠操作条：常态只有「切换」+ 齿轮，点齿轮把其余操作横向推出来。
+ * 宽度用 grid-template-columns 的 0fr→1fr 过渡（行高不变，只横向生长）；
+ * visibility 跟着一起收，否则藏起来的按钮还能被 Tab 走到。
+ */
+.pack-actions-rail {
+  display: grid;
+  grid-template-columns: 0fr;
+  transition: grid-template-columns var(--dur-base) var(--ease-spring);
+}
+
+.pack-actions-rail[data-open="true"] {
+  grid-template-columns: 1fr;
+}
+
+.pack-actions-rail-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  visibility: hidden;
+  transition: visibility 0s linear var(--dur-base);
+}
+
+.pack-actions-rail[data-open="true"] .pack-actions-rail-inner {
+  visibility: visible;
+  transition: visibility 0s linear;
+}
+
+/* 出场：从右侧 6px 滑入 + 轻微放大，按 --i 逐个错开；回场不排队，干脆收掉。 */
+.pack-actions-rail-inner > * {
+  opacity: 0;
+  transform: translateX(6px) scale(.97);
+  transition: opacity var(--dur-fast) linear, transform var(--dur-base) var(--ease-spring);
+}
+
+.pack-actions-rail[data-open="true"] .pack-actions-rail-inner > * {
+  opacity: 1;
+  transform: none;
+  transition-delay: calc(var(--i, 0) * 35ms);
+}
+
+.pack-actions-toggle {
+  flex-shrink: 0;
+  transition: transform var(--dur-base) var(--ease-spring), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+.pack-actions-toggle[data-open="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: rotate(90deg);
+}
+
 .settings-pack-actions .secondary-button {
   padding: 5px 12px;
   font-size: 12.5px;
@@ -8316,6 +8452,14 @@ input:focus-visible {
   align-items: center;
   gap: 7px;
   min-width: 0;
+}
+
+/* 展开操作条最宽约 260px，长包名必须让位而不是把按钮顶出卡片。 */
+.settings-pack-title-line > strong {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-pack-badge {
@@ -8934,6 +9078,18 @@ input:focus-visible {
 
 /* 尊重系统「减少动态效果」：全部新动画降级为静态 */
 @media (prefers-reduced-motion: reduce) {
+  /* 折叠操作条：展开/收起保留，但去掉滑动与错时，直接到位。 */
+  .pack-actions-rail,
+  .pack-actions-rail-inner > *,
+  .pack-actions-toggle {
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+  }
+
+  .pack-actions-rail-inner > * {
+    transform: none;
+  }
+
   .skeleton-line::after,
   .skeleton-block::after {
     animation: none;
@@ -8977,3 +9133,19 @@ input:focus-visible {
 .settings-pack-download-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-pack-download-meta { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 0 22px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .settings-pack-download-source { color: var(--accent); font-weight: 600; }
+
+/* 「导入会话」对话框：选源包 → 预览确认 → 结果（含撤销）。骨架全走 .modal / .dialog-* 通用类。 */
+.session-import-skipped { display: grid; gap: 4px; margin: 0; padding-left: 18px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+
+/* 导出对话框：默认全脱敏，两项隐私要主动勾，勾了再多一道确认屏。 */
+.pack-export-dialog .modal-content { display: grid; gap: 10px; }
+.pack-export-warning-title { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; font-weight: 700; }
+.pack-export-done { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; line-height: 1.6; word-break: break-all; }
+/* 底栏里把「撤销这次导入」顶到左边，主操作留在右边。 */
+.pack-footer-spacer { margin-right: auto; }
+
+/* 切换版本（升版副本）对话框：选版本 + 命名，首句说明"旧包不动"。 */
+.pack-clone-dialog .modal-content { display: grid; gap: 10px; }
+.pack-clone-dialog .form-field { margin-top: 2px; }
+.pack-clone-done { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; font-weight: 600; line-height: 1.5; }
+.pack-clone-versions { max-height: 210px; overflow-y: auto; }

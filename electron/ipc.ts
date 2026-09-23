@@ -4,6 +4,7 @@ import { copyFile, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promis
 import path from 'node:path'
 import { IPC, IPC_EVENTS } from '../src/constants'
 import type { AiSessionCreateInput, ApplicationInstallRequest, AppSettings, CustomApiProviderInput, OfficialPackRelease, OfficialPackStatus, PackCreateRequest, PackInstallResult, PluginInstallRequest, PresetInstallRequest, SkillInstallRequest, SkillInstallTarget, WindowMode, ProfileRepositoryImportMode, PackPluginEntry } from '../src/types'
+import type { SnapshotPrivacyInclude } from './pack-snapshot'
 import type { ApplicationAddonManager } from './application-addons'
 import type { RecommendedWebUiService } from './recommended-web-ui'
 import { isWindowMode } from './app-window'
@@ -280,7 +281,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     // PackManager remains the compatibility implementation of the ZIP writer.
     // Its input is now the same profile id, so no second local runtime state is created.
     const mode = payload.mode as 'light' | 'full' | 'repository'
-    const { zipPath, fileName } = await packManager.exportPack(payload.profileName, mode)
+    // 旧的 profiles:export 没有隐私勾选这一说：include 传空，导出的仍是全脱敏包。
+    const { zipPath, fileName } = await packManager.exportPack(payload.profileName, {})
     if (mode === 'repository') {
       const auth = await githubAuth.getStatus()
       if (!auth.authenticated || !auth.login) throw new Error('仓库化导出需要先登录 GitHub。')
@@ -953,7 +955,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     return packManager.importPack(target, items, nameOverride === undefined ? undefined : { name: nameOverride })
   })
 
-  ipcMain.handle(IPC.packsExport, async (_event, packId: string) => {
+  ipcMain.handle(IPC.packsExport, async (_event, packId: string, include?: SnapshotPrivacyInclude) => {
     if (!isSafeProfileName(packId)) throw new Error('整合包标识无效。')
     // 先让用户选保存位置，再开始打包（整包快照要打包上百 MB，对话框立刻给反馈）。
     const window = deps.getWindow()
@@ -961,13 +963,42 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     // 快照包名取文件名：用整合包的显示名做默认文件名，对方导入时看到的就是这个名字。
     const displayName = (await packManager.listPacks()).find(pack => pack.id === packId)?.name ?? packId
     const safeFileName = displayName.replace(/[\\/:*?"<>|]/g, '_').trim() || packId
+    // 勾了隐私项的包在文件名上就要看得出来——三个月后没人记得自己勾过什么。
+    const privateSuffix = include?.credentials || include?.sessions ? '·含隐私' : ''
     const result = await dialog.showSaveDialog(window, {
-      defaultPath: `${safeFileName}.zip`,
+      defaultPath: `${safeFileName}${privateSuffix}.zip`,
       filters: [{ name: '整合包', extensions: ['zip'] }],
     })
     if (result.canceled || !result.filePath) return null
-    await packManager.exportPack(packId, undefined, result.filePath)
+    await packManager.exportPack(packId, include ?? {}, result.filePath)
     return result.filePath
+  })
+
+  ipcMain.handle(IPC.packsSessionImportPreview, async (_event, sourcePackId: string, targetPackId: string) => {
+    if (!isSafeProfileName(sourcePackId) || !isSafeProfileName(targetPackId)) throw new Error('整合包标识无效。')
+    return packManager.previewSessionImport(sourcePackId, targetPackId)
+  })
+
+  ipcMain.handle(IPC.packsSessionImportApply, async (_event, sourcePackId: string, targetPackId: string) => {
+    if (!isSafeProfileName(sourcePackId) || !isSafeProfileName(targetPackId)) throw new Error('整合包标识无效。')
+    assertProfileMutationAvailable()
+    return packManager.importSessionHistory(sourcePackId, targetPackId)
+  })
+
+  ipcMain.handle(IPC.packsCloneVersion, async (_event, packId: string, request: { dshVersion: string; name?: string }) => {
+    assertProfileMutationAvailable()
+    if (!isSafeProfileName(packId)) throw new Error('整合包标识无效。')
+    const version = typeof request?.dshVersion === 'string' ? request.dshVersion.trim() : ''
+    // 版本号要拼进目录名与 profile.yaml，宁可用最严的正则也不放野字符串进去。
+    if (!/^\d+\.\d+\.\d+[\w.-]*$/.test(version)) throw new Error('DSH 版本号无效。')
+    return packManager.createVersionClone(packId, { ...request, dshVersion: version })
+  })
+
+  ipcMain.handle(IPC.packsSessionImportUndo, async (_event, undoId: string) => {
+    // undoId 只能是一串数字：它会拼成磁盘文件名，绝不能让渲染层塞路径进来。
+    if (!/^\d+$/.test(undoId ?? '')) throw new Error('撤销凭据无效。')
+    assertProfileMutationAvailable()
+    return packManager.undoSessionImport(undoId)
   })
 
   ipcMain.handle(IPC.packsRestoreOfficial, async () => {

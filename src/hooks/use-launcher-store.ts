@@ -25,6 +25,7 @@ import type {
   LauncherUpdateStatus,
   ManagedPlugin,
   PackDownloadProgress,
+  PackExportPrivacy,
   PackStageProgress,
   PackStatus,
   ProfileSummary,
@@ -1018,16 +1019,51 @@ export function useLauncherStore() {
     if (event.kind === 'done') void refreshPacks()
   }), [api, refreshPacks])
 
-  const exportPack = useCallback(async (packId: string): Promise<string | null> => {
+  const exportPack = useCallback(async (packId: string, privacy?: PackExportPrivacy): Promise<string | null> => {
     setPackActivity('正在导出整合包：正在打包插件与离线依赖（可能需要几分钟），完成后自动保存…')
     try {
-      const path = await run(`pack-export:${packId}`, () => api.exportPack(packId))
+      const path = await run(`pack-export:${packId}`, () => api.exportPack(packId, privacy))
       if (path) showToast({ kind: 'success', message: `整合包已导出到 ${path}` })
       return path ?? null
     } finally {
       setPackActivity(null)
     }
   }, [api, run, showToast])
+
+  /** 会话搬运预览：只读，不进任务队列，失败照常弹错。 */
+  const previewSessionImport = useCallback((sourcePackId: string, targetPackId: string) => (
+    api.previewSessionImport(sourcePackId, targetPackId)
+  ), [api])
+
+  /** 把源包的会话记录复制进目标包；失败返回 undefined（run 已经弹过吐司）。 */
+  const importSessionHistory = useCallback(async (sourcePackId: string, targetPackId: string) => {
+    setPackActivity('正在复制会话记录：只新增不覆盖，源包不会有任何改动…')
+    try {
+      return await run(`pack-session-import:${targetPackId}`, () => api.importSessionHistory(sourcePackId, targetPackId), { success: '会话记录已导入。' })
+    } finally {
+      setPackActivity(null)
+    }
+  }, [api, run, setPackActivity])
+
+  /** 撤销一次搬运：按 undoId 删掉我们复制过去的文件。 */
+  const undoSessionImport = useCallback(async (undoId: string) => {
+    setPackActivity('正在撤销这次导入…')
+    try {
+      return await run(`pack-session-undo:${undoId}`, () => api.undoSessionImport(undoId), { success: '已撤销这次导入。' })
+    } finally {
+      setPackActivity(null)
+    }
+  }, [api, run, setPackActivity])
+
+  /** 升版副本：复制一个新整合包认新版本，旧包不动（它就是这个包的回滚手段）。 */
+  const createVersionClone = useCallback(async (packId: string, request: { dshVersion: string; name?: string }) => {
+    setPackActivity(`正在复制整合包到 DSH ${request.dshVersion}：原包不会有任何改动…`)
+    try {
+      return await run(`pack-clone:${packId}`, () => api.createVersionClone(packId, request), { success: '新整合包已复制出来。' })
+    } finally {
+      setPackActivity(null)
+    }
+  }, [api, run, setPackActivity])
 
   /** 删除确认框用的包占用字节数；失败返回 0（不弹错，静默降级）。 */
   const packDiskUsage = useCallback(async (packId: string): Promise<number> => {
@@ -1264,6 +1300,10 @@ export function useLauncherStore() {
     refreshOfficialVersions,
     installOfficialPackVersion,
     exportPack,
+    previewSessionImport,
+    importSessionHistory,
+    undoSessionImport,
+    createVersionClone,
     exportProfile,
     addPackPlugin,
     addPackPreset,

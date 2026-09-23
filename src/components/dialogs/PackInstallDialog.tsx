@@ -416,15 +416,7 @@ const packDialogStyle = `
 .pack-install-dialog { width: min(680px, calc(100vw - 32px)); }
 .pack-footer-note.dsh-version-note { display: inline-flex; align-items: center; gap: 5px; color: var(--amber); font-weight: 600; }
 .dsh-version-note strong { color: var(--accent); font-weight: 800; }
-.pack-install-dialog > header,
-.create-pack-dialog > header {
-  display: flex; min-height: 56px; align-items: center; justify-content: space-between;
-  padding: 0 16px; border-bottom: 1px solid var(--line);
-}
-.pack-install-dialog > header > div,
-.create-pack-dialog > header > div {
-  display: flex; align-items: center; gap: 9px;
-}
+/* 标题栏由全局 .modal > header 统一给，这里不再重复一份。 */
 .pack-header-actions { display: flex; align-items: center; gap: 8px; }
 .pack-install-content { display: flex; flex-direction: column; gap: 13px; }
 .pack-install-logs { flex: 0 0 auto; min-height: 120px; max-height: 260px; }

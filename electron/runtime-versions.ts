@@ -24,13 +24,15 @@ import {
   findSystemNodeRuntime,
   installManagedNodeRuntime,
   normalizeNodeVersion,
+  probeNodeVersion,
   type NodeRuntime,
   type PnpmRuntime,
 } from './node-runtime'
+import { describeInstallFailure } from './install-diagnostics'
 import { runCommand, type CommandResult, type OutputLevel } from './command'
 import { withExecutableDirectoryOnPath } from './process'
 import { candidatesFromPackument, compareVersions, readDshVersionIndex, validVersion } from './dsh-release'
-import { buildNetworkEnvironment, DEFAULT_NPM_REGISTRY, NPM_OFFICIAL_REGISTRY } from './proxy'
+import { buildNetworkEnvironment, npmRegistryCandidates } from './proxy'
 import {
   DSH_SUBPROCESS_LOCAL_PACKAGE,
   ensureDshScriptPolicy,
@@ -39,7 +41,7 @@ import {
 
 /** DSH 版本列表的 registry 候选：用户镜像 → npmmirror → 官方源（大陆直连 npmjs 常失败）。 */
 export function dshRegistryCandidates(npmRegistry?: string | null): string[] {
-  return [...new Set([npmRegistry?.trim() ?? '', DEFAULT_NPM_REGISTRY, NPM_OFFICIAL_REGISTRY].filter(Boolean))]
+  return npmRegistryCandidates(npmRegistry)
 }
 
 /**
@@ -262,7 +264,6 @@ function progressFor(repository: string, message: string, phase: InstallProgress
 export function createRuntimeVersionService(options: RuntimeVersionServiceOptions): RuntimeVersionService {
   const executeCommand = options.runCommand ?? runCommand
   let dshAvailable: RuntimeVersionCandidate[] = []
-  let nodeAvailable: RuntimeVersionCandidate[] = []
   let availableAt = 0
   let activeOperation: string | null = null
   let activeCommand: ChildProcessWithoutNullStreams | null = null
@@ -381,14 +382,13 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
         }] : []),
       ],
       dshAvailable,
-      nodeAvailable,
     }
   }
 
   async function read(refresh = false): Promise<RuntimeEnvironmentState> {
     const settings = await options.readSettings()
-    if (refresh || Date.now() - availableAt > 5 * 60_000 || dshAvailable.length === 0 || nodeAvailable.length === 0) {
-      // 在线列表只用于展示「可下载版本」；网络黑洞（代理半开等）时 fetch 可能永不返回，
+    if (refresh || Date.now() - availableAt > 5 * 60_000 || dshAvailable.length === 0) {
+      // 在线列表只用于展示「可下载 DSH 版本」；网络黑洞（代理半开等）时 fetch 可能永不返回，
       // 用 15s 硬超时兜底，超时放弃本轮刷新（availableAt 照样推进，5 分钟内不再重试）。
       const withTimeout = async <T,>(promise: Promise<T>): Promise<T | null> => {
         let timer: NodeJS.Timeout | undefined
@@ -399,12 +399,10 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
           clearTimeout(timer)
         }
       }
-      const [dshResult, nodeResult] = await Promise.allSettled([
-        withTimeout(listAvailableDshVersions(options.githubFetch, dshRegistryCandidates(buildNetworkEnvironment(settings).npmRegistry))),
-        withTimeout(import('./node-runtime').then(module => module.listAvailableNodeVersions())),
-      ])
-      if (dshResult.status === 'fulfilled' && dshResult.value) dshAvailable = dshResult.value
-      if (nodeResult.status === 'fulfilled' && nodeResult.value) nodeAvailable = nodeResult.value
+      // 原来这里并发拉的是 DSH 列表 + nodejs.org 的 Node 版本列表；后者渲染层从未读过，
+      // 却每次刷新都占一次境外请求，已连同 nodeAvailable 字段一起删掉。
+      const nextDsh = await withTimeout(listAvailableDshVersions(options.githubFetch, dshRegistryCandidates(buildNetworkEnvironment(settings).npmRegistry)).catch(() => null))
+      if (nextDsh) dshAvailable = nextDsh
       availableAt = Date.now()
     }
     return readInstalled(settings)
@@ -518,16 +516,27 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
           onOutput: handlePackageOutput,
         }).finally(() => clearInterval(heartbeat))
       }
+      /**
+       * 失败说明带环境快照：只丢一句「代码 1」的话，用户只能去评论区问人。
+       */
+      const installFailureMessage = async (action: string, commandResult: CommandResult): Promise<string> =>
+        describeInstallFailure({
+          action,
+          exitCode: commandResult.exitCode,
+          output: commandResult.output,
+          node,
+          nodeVersion: await probeNodeVersion(node.node),
+        })
       options.emitProgress(progressFor(normalized, lastProgressMessage, 'downloading', currentPercent))
       const result = await runPackageManagerCommand(buildManagedDshPnpmArgs(root, normalized))
-      if (result.exitCode !== 0) throw new Error(`DSH ${normalized} 安装失败（代码 ${result.exitCode}）。`)
+      if (result.exitCode !== 0) throw new Error(await installFailureMessage(`DSH ${normalized} 安装`, result))
       if (hasDshScriptPackage(root)) {
         options.emitProgress(progressFor(normalized, `正在执行 ${DSH_SUBPROCESS_LOCAL_PACKAGE} 安装脚本`, 'configuring', 90))
         options.emitOutput('info', `正在执行 ${DSH_SUBPROCESS_LOCAL_PACKAGE} 的安装脚本。`)
         const rebuild = await runPackageManagerCommand([
           'rebuild', '--dir', root, '--reporter=append-only', DSH_SUBPROCESS_LOCAL_PACKAGE,
         ])
-        if (rebuild.exitCode !== 0) throw new Error(`DSH ${normalized} 核心依赖安装脚本失败（代码 ${rebuild.exitCode}）。`)
+        if (rebuild.exitCode !== 0) throw new Error(await installFailureMessage(`DSH ${normalized} 核心依赖安装脚本执行`, rebuild))
       }
       const executable = managedDshExecutable(root)
       const status = await getManagedDshStatus(root)

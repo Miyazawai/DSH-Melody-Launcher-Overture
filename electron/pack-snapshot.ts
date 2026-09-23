@@ -1,11 +1,14 @@
 import { createReadStream, createWriteStream, existsSync } from 'node:fs'
 import { cp, lstat, mkdir, readdir, readFile, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { Transform } from 'node:stream'
+import { Worker } from 'node:worker_threads'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import yazl from 'yazl'
 import { assertInside, openZipPathFromFile, safeArchivePath, type OpenZipPath } from './pack-zip'
 import { profileManifestName } from './profile-service'
+import { writeZipArchive, ZIP64_CONTENT_THRESHOLD_BYTES, type ZipEntryInput } from './zip-writer'
 
 /**
  * 快照式整合包：导出 = 把整合包家目录（DSH_HOME）原样打成 zip（剔除个人数据、绝对路径相对化），
@@ -55,6 +58,40 @@ export interface SnapshotMeta {
   excluded: string[]
   /** 无法相对化、原样保留的依赖（包外本体已丢失）。 */
   warnings: string[]
+  /**
+   * 这次导出被显式放行的隐私类别（缺省=全脱敏）。写进元数据是为了让导入端按同一份
+   * 清单放行——否则导出的隐私条目会在解压时被同一道黑名单再剔一遍，等于白导。
+   */
+  private?: SnapshotPrivacyCategory[]
+}
+
+/**
+ * 导出时可勾选带出的隐私类别（见 docs/adr/0001）。
+ * 默认都不带：那份黑名单是「导出件可以放心发给别人」的唯一保证。
+ */
+export type SnapshotPrivacyCategory = 'credentials' | 'sessions'
+
+export interface SnapshotPrivacyInclude {
+  credentials?: boolean
+  sessions?: boolean
+}
+
+/** 每个类别对应家目录里的哪些顶层条目。settings.yaml 的密钥另算（见 scrubSecrets）。 */
+const PRIVACY_TOP_LEVEL: Record<SnapshotPrivacyCategory, ReadonlySet<string>> = {
+  credentials: new Set(['.credentials.yaml']),
+  // 登记表 storages/ 不在这里：DSH 扫 sessions/ 会自建，投影缓存搬过去反而是脏的。
+  sessions: new Set(['sessions', 'dsh-session-archive', 'attachments']),
+}
+
+export function privacyIncludeFromList(list: SnapshotPrivacyCategory[] | undefined): SnapshotPrivacyInclude {
+  return { credentials: list?.includes('credentials'), sessions: list?.includes('sessions') }
+}
+
+export function privacyListFromInclude(include: SnapshotPrivacyInclude): SnapshotPrivacyCategory[] {
+  const out: SnapshotPrivacyCategory[] = []
+  if (include.credentials) out.push('credentials')
+  if (include.sessions) out.push('sessions')
+  return out
 }
 
 export interface SnapshotPlanEntry {
@@ -75,6 +112,8 @@ export interface SnapshotPlan {
   warnings: string[]
   longPaths: string[]
   totalBytes: number
+  /** 这次导出被放行的隐私类别，随元数据一起写进包里。 */
+  privacy?: SnapshotPrivacyCategory[]
 }
 
 const EXCLUDED_TOP_LEVEL = new Set([
@@ -106,10 +145,16 @@ const EXCLUDED_PROFILE_FILES = new Set([
 ])
 
 /** 相对家目录的路径是否不进包（正斜杠、不含前导 ./）。 */
-export function isSnapshotExcluded(rel: string): boolean {
+export function isSnapshotExcluded(rel: string, include: SnapshotPrivacyInclude = {}): boolean {
   const segments = rel.split('/')
   const top = segments[0]
-  if (EXCLUDED_TOP_LEVEL.has(top)) return true
+  if (EXCLUDED_TOP_LEVEL.has(top)) {
+    // 黑名单从"硬剔除"降级成"默认不导出"：只有用户在导出框里勾过的那一类才放行。
+    for (const category of Object.keys(PRIVACY_TOP_LEVEL) as SnapshotPrivacyCategory[]) {
+      if (include[category] && PRIVACY_TOP_LEVEL[category].has(top)) return false
+    }
+    return true
+  }
   if (EXCLUDED_TOP_LEVEL_PREFIXES.some(prefix => top.startsWith(prefix))) return true
   if (segments.some(segment => EXCLUDED_ANYWHERE.has(segment))) return true
   if (EXCLUDED_PATH_PREFIXES.some(prefix => rel === prefix || rel.startsWith(`${prefix}/`))) return true
@@ -124,24 +169,36 @@ export function isSnapshotExcluded(rel: string): boolean {
 
 const SECRET_KEY_RE = /(api[_-]?key|token|secret|password|passwd|credential)/i
 
-/** settings.yaml 字段级过滤：去掉 onboarding 与疑似密钥键，保留插件/模型/外观配置。 */
-export function sanitizeSettingsYaml(text: string): string {
+/**
+ * settings.yaml 字段级过滤：去掉 onboarding 与疑似密钥键，保留插件/模型/外观配置。
+ * `keepSecrets` 只在用户勾了「附带 API 密钥」时为真——onboarding 仍然照删。
+ */
+export function sanitizeSettingsYaml(text: string, keepSecrets = false): string {
   const document = parseYamlObject(text)
   if (!document) return text
   delete document['ui-onboarding']
-  scrubSecrets(document)
+  if (!keepSecrets) scrubSecrets(document)
   return stringifyYaml(document, { lineWidth: 0 })
 }
 
 function scrubSecrets(node: Record<string, unknown>): void {
   for (const key of Object.keys(node)) {
-    const value = node[key]
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      scrubSecrets(value as Record<string, unknown>)
+    // `apiKeyEnv` 只是环境变量名，不是密钥本体，保留；名字像密钥的一律先删，
+    // 省得值是列表时（`tokens: [...]`）连键都逃过过滤。
+    if (SECRET_KEY_RE.test(key) && !/env$/i.test(key)) {
+      delete node[key]
       continue
     }
-    // `apiKeyEnv` 只是环境变量名，不是密钥本体，保留。
-    if (SECRET_KEY_RE.test(key) && !/env$/i.test(key)) delete node[key]
+    const value = node[key]
+    if (Array.isArray(value)) {
+      // 列表里也藏得住密钥（自定义供应商就是一列对象）：以前只递归普通对象，
+      // 于是 `providers: [ { apiKey: ... } ]` 会原样跟着"全脱敏"的包发出去。
+      for (const item of value) {
+        if (item && typeof item === 'object' && !Array.isArray(item)) scrubSecrets(item as Record<string, unknown>)
+      }
+      continue
+    }
+    if (value && typeof value === 'object') scrubSecrets(value as Record<string, unknown>)
   }
 }
 
@@ -192,35 +249,64 @@ function toPosix(value: string): string {
   return value.replace(/\\/g, '/')
 }
 
-async function walk(home: string, current: string, plan: SnapshotPlan): Promise<void> {
-  let dirents
-  try {
-    dirents = await readdir(current, { withFileTypes: true })
-  } catch {
-    return
+/**
+ * 目录并发度与单次 stat 批量。node_modules 的形态是「海量目录 × 少量文件」，
+ * 逐目录、逐文件 await 会把几万次系统调用串成一条链：真机 16490 个文件的包，
+ * 串行 stat 1.10s、32 并发 0.37s（scripts/perf-pack-bench.mts 实测）。
+ */
+const SCAN_DIRECTORY_CONCURRENCY = 8
+const SCAN_STAT_BATCH = 64
+
+/** 家目录遍历：目录队列 + 文件 stat 批量并发；符号链接只登记，不实体化。 */
+async function walk(home: string, root: string, plan: SnapshotPlan, include: SnapshotPrivacyInclude): Promise<void> {
+  const queue: string[] = [root]
+  let cursor = 0
+  const drain = async (): Promise<void> => {
+    while (cursor < queue.length) {
+      const current = queue[cursor++]!
+      let dirents
+      try {
+        dirents = await readdir(current, { withFileTypes: true })
+      } catch {
+        continue
+      }
+      const files: Array<{ full: string; rel: string }> = []
+      const links: Array<{ full: string; rel: string }> = []
+      for (const dirent of dirents) {
+        const full = path.join(current, dirent.name)
+        const rel = toPosix(path.relative(home, full))
+        if (isSnapshotExcluded(rel, include)) {
+          if (plan.excluded.length < 200) plan.excluded.push(rel)
+          continue
+        }
+        if (dirent.isSymbolicLink()) {
+          links.push({ full, rel })
+          continue
+        }
+        if (dirent.isDirectory()) {
+          queue.push(full)
+          continue
+        }
+        if (dirent.isFile()) files.push({ full, rel })
+      }
+      for (let i = 0; i < files.length; i += SCAN_STAT_BATCH) {
+        const batch = files.slice(i, i + SCAN_STAT_BATCH)
+        const infos = await Promise.all(batch.map(file => lstat(file.full).catch(() => null)))
+        batch.forEach((file, index) => {
+          const info = infos[index]
+          if (!info) return
+          if (file.rel.length > SNAPSHOT_WARN_PATH_LENGTH && plan.longPaths.length < 50) plan.longPaths.push(file.rel)
+          plan.entries.push({ rel: file.rel, source: file.full, size: info.size })
+        })
+      }
+      for (let i = 0; i < links.length; i += SCAN_STAT_BATCH) {
+        const batch = links.slice(i, i + SCAN_STAT_BATCH)
+        const resolved = await Promise.all(batch.map(link => resolveLink(home, link.full, link.rel)))
+        for (const link of resolved) if (link) plan.links.push(link)
+      }
+    }
   }
-  for (const dirent of dirents) {
-    const full = path.join(current, dirent.name)
-    const rel = toPosix(path.relative(home, full))
-    if (isSnapshotExcluded(rel)) {
-      if (plan.excluded.length < 200) plan.excluded.push(rel)
-      continue
-    }
-    if (dirent.isSymbolicLink()) {
-      const link = await resolveLink(home, full, rel)
-      if (link) plan.links.push(link)
-      continue
-    }
-    if (dirent.isDirectory()) {
-      await walk(home, full, plan)
-      continue
-    }
-    if (!dirent.isFile()) continue
-    const info = await lstat(full).catch(() => null)
-    if (!info) continue
-    if (rel.length > SNAPSHOT_WARN_PATH_LENGTH && plan.longPaths.length < 50) plan.longPaths.push(rel)
-    plan.entries.push({ rel, source: full, size: info.size })
-  }
+  await Promise.all(Array.from({ length: SCAN_DIRECTORY_CONCURRENCY }, () => drain()))
 }
 
 /** 链接目标在包内 → 记成相对链接；在包外（store、旧 staging）→ 丢弃，DSH 会重建。 */
@@ -235,14 +321,15 @@ async function resolveLink(home: string, linkPath: string, rel: string): Promise
 }
 
 /** 扫描家目录并完成文本重写（不改动源目录）。 */
-export async function planSnapshot(home: string, options: { packId: string }): Promise<SnapshotPlan> {
+export async function planSnapshot(home: string, options: { packId: string; include?: SnapshotPrivacyInclude }): Promise<SnapshotPlan> {
   const plan: SnapshotPlan = { entries: [], links: [], excluded: [], warnings: [], longPaths: [], totalBytes: 0 }
-  await walk(home, home, plan)
-  await rewriteEntries(home, options.packId, plan)
+  await walk(home, home, plan, options.include ?? {})
+  await rewriteEntries(home, options.packId, plan, options.include ?? {})
+  plan.privacy = privacyListFromInclude(options.include ?? {})
   return plan
 }
 
-async function rewriteEntries(home: string, packId: string, plan: SnapshotPlan): Promise<void> {
+async function rewriteEntries(home: string, packId: string, plan: SnapshotPlan, include: SnapshotPrivacyInclude): Promise<void> {
   const profileRel = `profiles/${packId}`
   const profileDir = path.join(home, 'profiles', packId)
   const bodiesRel = `${profileRel}/${SNAPSHOT_BODIES_DIR}`
@@ -262,7 +349,7 @@ async function rewriteEntries(home: string, packId: string, plan: SnapshotPlan):
     if (next !== text) entry.data = Buffer.from(next, 'utf8')
   }
 
-  await rewriteText('settings.yaml', sanitizeSettingsYaml)
+  await rewriteText('settings.yaml', text => sanitizeSettingsYaml(text, Boolean(include.credentials)))
   await rewriteText(`${profileRel}/.npmrc`, sanitizeNpmrc)
   await rewriteText(`${profileRel}/profile.yaml`, text => sanitizeProfileYaml(text))
   // lockfile 里的 file: 记录写死了源机绝对路径；node_modules 已随包，导入不需要它。
@@ -315,7 +402,7 @@ async function relativizeProfilePackageJson(
     const bodyName = rawTarget.toLowerCase().endsWith('.tgz') ? `${packageName.replace(/[/@]/g, '-')}.tgz` : packageName
     const bodyRel = `${bodiesRel}/${bodyName}`
     if (resolved.isFile) {
-      plan.entries.push({ rel: bodyRel, source: resolved.sourcePath })
+      plan.entries.push({ rel: bodyRel, source: resolved.sourcePath, size: resolved.size })
     } else {
       const added = await collectDirectory(resolved.sourcePath, bodyRel, plan)
       if (added === 0) {
@@ -333,7 +420,7 @@ async function resolveBodySource(
   profileDir: string,
   packageName: string,
   rawTarget: string,
-): Promise<{ sourcePath: string; isFile: boolean } | null> {
+): Promise<{ sourcePath: string; isFile: boolean; size: number } | null> {
   const candidates = [
     path.isAbsolute(rawTarget) ? rawTarget : path.resolve(profileDir, rawTarget),
     path.join(profileDir, 'node_modules', ...packageName.split('/')),
@@ -342,19 +429,20 @@ async function resolveBodySource(
     const info = await stat(candidate).catch(() => null)
     if (!info) continue
     if (info.isDirectory() || (info.isFile() && candidate.toLowerCase().endsWith('.tgz'))) {
-      return { sourcePath: candidate, isFile: info.isFile() }
+      return { sourcePath: candidate, isFile: info.isFile(), size: info.size }
     }
   }
   return null
 }
 
-/** 把一个目录树加进快照计划（返回加入的文件数）。 */
+/** 把一个目录树加进快照计划（返回加入的文件数）。插件本体可能很大，走实体文件。 */
 async function collectDirectory(sourceDir: string, targetRel: string, plan: SnapshotPlan): Promise<number> {
   let added = 0
   const stack: Array<{ dir: string; rel: string }> = [{ dir: sourceDir, rel: targetRel }]
   while (stack.length > 0) {
     const current = stack.pop()!
     const dirents = await readdir(current.dir, { withFileTypes: true }).catch(() => [])
+    const files: Array<{ full: string; rel: string }> = []
     for (const dirent of dirents) {
       const full = path.join(current.dir, dirent.name)
       const rel = `${current.rel}/${dirent.name}`
@@ -362,11 +450,17 @@ async function collectDirectory(sourceDir: string, targetRel: string, plan: Snap
         stack.push({ dir: full, rel })
         continue
       }
-      if (!dirent.isFile()) continue
-      const info = await lstat(full).catch(() => null)
-      if (!info) continue
-      plan.entries.push({ rel, source: full, size: info.size })
-      added += 1
+      if (dirent.isFile()) files.push({ full, rel })
+    }
+    for (let i = 0; i < files.length; i += SCAN_STAT_BATCH) {
+      const batch = files.slice(i, i + SCAN_STAT_BATCH)
+      const infos = await Promise.all(batch.map(file => lstat(file.full).catch(() => null)))
+      batch.forEach((file, index) => {
+        const info = infos[index]
+        if (!info) return
+        plan.entries.push({ rel: file.rel, source: file.full, size: info.size })
+        added += 1
+      })
     }
   }
   return added
@@ -377,14 +471,111 @@ export interface WriteSnapshotOptions {
   onProgress?: (writtenBytes: number, totalBytes: number) => void
 }
 
-/** 把快照计划写成 zip（流式，zip64 自动）。进度按真实读取字节数上报。 */
+/** 压不动的后缀：deflate 对它们只是白烧 CPU，直接 store（压缩方法 0），体积几乎不变。 */
+const STORE_ONLY_SUFFIXES = /\.(node|dll|exe|so|dylib|lib|a|pyd|dat|bin|png|jpe?g|gif|webp|avif|ico|bmp|tiff|woff2?|ttf|otf|eot|mp3|mp4|m4a|mov|webm|mkv|zip|tgz|gz|bz2|xz|zst|br|7z|jar|pdf|glb|onnx|safetensors)$/i
+
+/** 这么小的条目不值得为它建一次 deflate 上下文——整合包里九成文件都小于 1KB。 */
+const STORE_BELOW_BYTES = 1024
+
+/** 文本档位。整包都是 node_modules 文本，1 档吞吐约为 6 档的 2.7 倍，体积多 15% 左右。 */
+const TEXT_DEFLATE_LEVEL = 1
+
+/**
+ * 单个条目的 deflate 档位：`0` = store（不压缩）。
+ * 纯函数，导出以便单测锁定「不剔除任何内容、只改压缩方式」这条边界。
+ */
+export function snapshotCompressionLevel(rel: string, size: number): number {
+  if (size < STORE_BELOW_BYTES) return 0
+  if (STORE_ONLY_SUFFIXES.test(rel)) return 0
+  return TEXT_DEFLATE_LEVEL
+}
+
+function snapshotMetaBuffer(plan: SnapshotPlan): Buffer {
+  const meta: SnapshotMeta = {
+    format: SNAPSHOT_FORMAT_VERSION,
+    platform: process.platform,
+    exportedAt: new Date().toISOString(),
+    links: plan.links,
+    excluded: plan.excluded,
+    warnings: plan.warnings,
+    ...(plan.privacy && plan.privacy.length > 0 ? { private: plan.privacy } : {}),
+  }
+  return Buffer.from(`${JSON.stringify(meta, null, 2)}\n`, 'utf8')
+}
+
+/** 把扫描好的计划条目换成写入器认识的形态（含压缩档位；缺 size 的少数条目补一次 stat）。 */
+async function zipEntriesFromPlan(plan: SnapshotPlan, meta: Buffer): Promise<ZipEntryInput[]> {
+  const entries: ZipEntryInput[] = []
+  for (const entry of plan.entries) {
+    if (entry.data) {
+      entries.push({ name: entry.rel, data: entry.data, level: snapshotCompressionLevel(entry.rel, entry.data.length) })
+      continue
+    }
+    if (!entry.source) continue
+    // 字节数在扫描阶段就记进 plan 了：这里再 stat 一遍是真机 16490 个文件白跑 1.1s。
+    const size = entry.size ?? (await stat(entry.source).catch(() => null))?.size
+    if (size === undefined) continue
+    entries.push({ name: entry.rel, source: entry.source, size, level: snapshotCompressionLevel(entry.rel, size) })
+  }
+  entries.push({ name: SNAPSHOT_META_FILENAME, data: meta, level: snapshotCompressionLevel(SNAPSHOT_META_FILENAME, meta.length) })
+  return entries
+}
+
+/**
+ * 打包 worker 脚本的位置：构建产物里是同目录 .js，源码态（vite-node / vitest）是同目录 .ts。
+ * 找不到就返回 null，由调用方退回进程内打包。
+ */
+function resolveSnapshotWorkerScript(): string | null {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  for (const candidate of ['snapshot-pack-worker.js', 'snapshot-pack-worker.mjs', 'snapshot-pack-worker.ts']) {
+    const target = path.join(here, candidate)
+    if (existsSync(target)) return target
+  }
+  return null
+}
+
+/** 在 worker 里打包。worker 报的是累计字节数，所以调用方要覆盖而不是累加。 */
+async function writeSnapshotZipInWorker(
+  scriptPath: string,
+  entries: ZipEntryInput[],
+  targetZipPath: string,
+  onReadBytes: (cumulativeBytes: number) => void,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const worker = new Worker(scriptPath, { workerData: { targetZipPath, entries } })
+    let settled = false
+    const stop = (error?: Error): void => {
+      if (settled) return
+      settled = true
+      worker.terminate().catch(() => undefined)
+      if (error) reject(error)
+      else resolve()
+    }
+    worker.on('message', (message: { type?: string; readBytes?: number; message?: string }) => {
+      if (message?.type === 'bytes') {
+        onReadBytes(Number(message.readBytes) || 0)
+        return
+      }
+      if (message?.type === 'done') stop()
+      else if (message?.type === 'error') stop(new Error(message.message ?? '打包失败。'))
+    })
+    worker.on('error', error => stop(error instanceof Error ? error : new Error(String(error))))
+    worker.on('exit', code => stop(code === 0 ? undefined : new Error(`打包 worker 退出码 ${code}。`)))
+  })
+}
+
+/**
+ * 把快照计划写成 zip。进度按真实读取的未压缩字节数上报。
+ * 内容总量逼近 4GB 时本模块的写入器字段会撑破 uint32，那种包退回 yazl（它带 zip64）。
+ */
 export async function writeSnapshotZip(
   plan: SnapshotPlan,
   targetZipPath: string,
   options: WriteSnapshotOptions = {},
 ): Promise<void> {
-  const zip = new yazl.ZipFile()
-  const totalBytes = plan.totalBytes || plan.entries.reduce((sum, entry) => sum + (entry.data?.length ?? 0), 0)
+  const meta = snapshotMetaBuffer(plan)
+  // 进度分母要含元数据条目，否则收尾会报出「比总量还多」的字节数。
+  const totalBytes = (plan.totalBytes || plan.entries.reduce((sum, entry) => sum + (entry.data?.length ?? entry.size ?? 0), 0)) + meta.length
   let written = 0
   let lastReportAt = 0
   const report = (force = false): void => {
@@ -393,6 +584,46 @@ export async function writeSnapshotZip(
     lastReportAt = now
     options.onProgress?.(written, totalBytes)
   }
+  if (totalBytes > ZIP64_CONTENT_THRESHOLD_BYTES) {
+    await writeSnapshotZipWithYazl(plan, targetZipPath, meta, bytes => {
+      written += bytes
+      report()
+    })
+    report(true)
+    return
+  }
+  const entries = await zipEntriesFromPlan(plan, meta)
+  const workerScript = resolveSnapshotWorkerScript()
+  if (workerScript) {
+    try {
+      await writeSnapshotZipInWorker(workerScript, entries, targetZipPath, bytes => {
+        written = bytes
+        report()
+      })
+      report(true)
+      return
+    } catch {
+      // worker 起不来（构建产物缺文件、平台限制）不能让导出陪葬：清零后在进程内重打一遍。
+      written = 0
+    }
+  }
+  await writeZipArchive(targetZipPath, entries, {
+    onBytes: bytes => {
+      written += bytes
+      report()
+    },
+  })
+  report(true)
+}
+
+/** yazl 兜底路径：只在包内容大到会撑破 uint32 字段时才走。 */
+async function writeSnapshotZipWithYazl(
+  plan: SnapshotPlan,
+  targetZipPath: string,
+  meta: Buffer,
+  onWritten: (bytes: number) => void,
+): Promise<void> {
+  const zip = new yazl.ZipFile()
   /**
    * 给一个源文件套上计数流：yazl 的 addFile 不暴露读取进度，而直接监听源流会抢在
    * yazl 之前把数据流干，必须用 Transform 让 yazl 消费它的可读端来统计进度。
@@ -400,8 +631,7 @@ export async function writeSnapshotZip(
   const makeCounterStream = (sourcePath: string): Transform => {
     const counter = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
-        written += chunk.length
-        report()
+        onWritten(chunk.length)
         callback(null, chunk)
       },
     })
@@ -412,30 +642,20 @@ export async function writeSnapshotZip(
   }
   for (const entry of plan.entries) {
     if (entry.data) {
-      zip.addBuffer(entry.data, entry.rel)
-      written += entry.data.length
-      report()
+      zip.addBuffer(entry.data, entry.rel, { compressionLevel: snapshotCompressionLevel(entry.rel, entry.data.length) })
+      onWritten(entry.data.length)
       continue
     }
     if (!entry.source) continue
-    const info = await stat(entry.source).catch(() => null)
-    if (!info) continue
-    // 懒创建：yazl 走到这个条目才真的去开文件。一次把上万个条目全挂上读取流的话，
-    // 每个都会占一个文件句柄并预读几十 KB（真机 392MB 包实测峰值 RSS 393MB → 318MB），
-    // 而且进度字节数会跑到压缩前面，让进度条虚高。
     const sourcePath = entry.source
-    zip.addReadStreamLazy(entry.rel, { size: info.size }, callback => callback(null, makeCounterStream(sourcePath)))
+    const size = entry.size ?? (await stat(sourcePath).catch(() => null))?.size
+    if (size === undefined) continue
+    // 懒创建：yazl 走到这个条目才真的去开文件。一次把上万个条目全挂上读取流的话，
+    // 每个都会占一个文件句柄并预读几十 KB（真机 392MB 包实测峰值 RSS 393MB → 318MB）。
+    zip.addReadStreamLazy(entry.rel, { size, compressionLevel: snapshotCompressionLevel(entry.rel, size) }, callback => callback(null, makeCounterStream(sourcePath)))
   }
-  const meta: SnapshotMeta = {
-    format: SNAPSHOT_FORMAT_VERSION,
-    platform: process.platform,
-    exportedAt: new Date().toISOString(),
-    links: plan.links,
-    excluded: plan.excluded,
-    warnings: plan.warnings,
-  }
-  zip.addBuffer(Buffer.from(`${JSON.stringify(meta, null, 2)}\n`, 'utf8'), SNAPSHOT_META_FILENAME)
-  report(true)
+  zip.addBuffer(meta, SNAPSHOT_META_FILENAME)
+  onWritten(meta.length)
   await new Promise<void>((resolve, reject) => {
     const output = createWriteStream(targetZipPath)
     output.on('error', reject)
@@ -444,7 +664,6 @@ export async function writeSnapshotZip(
     zip.outputStream.pipe(output)
     zip.end()
   })
-  report(true)
 }
 
 export interface SnapshotInspection {
@@ -566,6 +785,44 @@ export interface ExtractSnapshotResult {
 }
 
 /**
+ * 解压并发度。单个 yauzl 句柄一次只能开一条读流，16490 个文件就得一条条串完
+ * 「开文件 → inflate → 写 → 关」。真机官方包实测：单句柄 25.3s、4 句柄 19.7s、
+ * 8 句柄 15.3s、16 句柄反而回到 19.0s（每多开一个句柄要多解析一遍中央目录），
+ * 所以取 8。
+ */
+const EXTRACT_CONCURRENCY = 8
+const EXTRACT_MKDIR_BATCH = 32
+
+interface ExtractWork {
+  /** 中央目录里的条目下标（各句柄读到的顺序一致，用它对位）。 */
+  index: number
+  target: string
+  dir: string
+}
+
+/** 一个分片：自己开一个 zip 句柄，把分到的条目解出来。 */
+async function extractShard(
+  zipPath: string,
+  shard: ExtractWork[],
+  onDone: () => void,
+): Promise<void> {
+  const handle = await openZipPathFromFile(zipPath, SNAPSHOT_ZIP_LIMITS)
+  try {
+    for (const item of shard) {
+      const entry = handle.entries[item.index]
+      if (!entry) continue
+      await handle.writeEntryToFile(entry, item.target, {
+        maxEntryBytes: SNAPSHOT_ZIP_LIMITS.maxUnpackedBytes,
+        skipMkdir: true,
+      })
+      onDone()
+    }
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
  * 解压快照到家目录：流式写盘、zip-slip 校验、profile 目录改名、重建符号链接。
  * 不做任何联网/安装动作——node_modules 随包而来，解开即用。
  */
@@ -574,67 +831,90 @@ export async function extractSnapshot(
   home: string,
   options: ExtractSnapshotOptions,
 ): Promise<ExtractSnapshotResult> {
-  const handle = await openZipPathFromFile(zipPath, SNAPSHOT_ZIP_LIMITS)
   const longPaths: string[] = []
-  let links = 0
   let skipped = 0
+  const work: ExtractWork[] = []
+  const handle = await openZipPathFromFile(zipPath, SNAPSHOT_ZIP_LIMITS)
+  let sourceProfileId: string
+  let snapshotLinks: SnapshotLinkEntry[]
   try {
     const inspection = await inspectSnapshotZip(handle)
-    const sourceProfileId = inspection.profileId
-    if (!sourceProfileId) throw new Error('快照包内没有找到 profiles/<整合包> 目录。')
-    const total = handle.entries.length
-    let done = 0
-    for (const entry of handle.entries) {
-      done += 1
-      options.onProgress?.(done, total)
-      if (entry.isDirectory) continue
+    const found = inspection.profileId
+    if (!found) throw new Error('快照包内没有找到 profiles/<整合包> 目录。')
+    sourceProfileId = found
+    snapshotLinks = inspection.meta?.links ?? []
+    // 包自己声明带了哪些隐私条目，解压时才按同一份清单放行；
+    // 没声明（别人的包、旧版本包）就一律照黑名单剔除。
+    const include = privacyIncludeFromList(inspection.meta?.private)
+    handle.entries.forEach((entry, index) => {
+      if (entry.isDirectory) return
       const safe = safeArchivePath(entry.entryName)
-      if (!safe || safe === SNAPSHOT_META_FILENAME || isSnapshotExcluded(safe)) {
-        // 别人造的包也要挡：按同一份剔除清单兜底。
+      // 别人造的包也要挡：按同一份剔除清单兜底。
+      if (!safe || safe === SNAPSHOT_META_FILENAME || isSnapshotExcluded(safe, include)) {
         skipped += 1
-        continue
+        return
       }
       const mapped = mapSnapshotPath(safe, sourceProfileId, options.newId)
       const target = path.join(home, ...mapped.split('/'))
       assertInside(home, target)
       if (target.length > SNAPSHOT_MAX_PATH_LENGTH) {
         if (longPaths.length < 50) longPaths.push(mapped)
-        continue
+        return
       }
-      await handle.writeEntryToFile(entry, nativePath(target), { maxEntryBytes: SNAPSHOT_ZIP_LIMITS.maxUnpackedBytes })
-    }
-    for (const link of inspection.meta?.links ?? []) {
-      const safeLink = safeArchivePath(link.path)
-      if (!safeLink || isSnapshotExcluded(safeLink)) continue
-      const mapped = mapSnapshotPath(safeLink, sourceProfileId, options.newId)
-      const linkPath = path.join(home, ...mapped.split('/'))
-      assertInside(home, linkPath)
-      if (linkPath.length > SNAPSHOT_MAX_PATH_LENGTH) continue
-      const targetAbsolute = path.resolve(path.dirname(linkPath), link.target)
-      if (!existsSync(targetAbsolute)) {
-        skipped += 1
-        continue
-      }
-      await mkdir(nativePath(path.dirname(linkPath)), { recursive: true })
-      await rm(nativePath(linkPath), { recursive: true, force: true }).catch(() => undefined)
-      try {
-        await symlink(targetAbsolute, nativePath(linkPath), 'junction')
-        links += 1
-      } catch {
-        // 建链接失败（权限/文件系统）就退化成实体副本，保证包仍可启动。
-        try {
-          await cp(nativePath(targetAbsolute), nativePath(linkPath), { recursive: true })
-          links += 1
-        } catch {
-          skipped += 1
-        }
-      }
-    }
-    await finalizeExtractedProfile(home, options.newId)
-    return { profileId: options.newId, links, skipped, longPaths }
+      const nativeTarget = nativePath(target)
+      work.push({ index, target: nativeTarget, dir: nativePath(path.dirname(nativeTarget)) })
+    })
   } finally {
     await handle.close()
   }
+
+  // 目录先去重一次建完：省掉每个条目一次的递归 mkdir（万级条目时这是主要开销之一）。
+  const directories = [...new Set(work.map(item => item.dir))]
+  for (let i = 0; i < directories.length; i += EXTRACT_MKDIR_BATCH) {
+    await Promise.all(directories.slice(i, i + EXTRACT_MKDIR_BATCH).map(dir => mkdir(dir, { recursive: true })))
+  }
+
+  const total = work.length
+  let done = 0
+  const shards: ExtractWork[][] = Array.from({ length: Math.min(EXTRACT_CONCURRENCY, total) || 1 }, () => [])
+  work.forEach((item, position) => shards[position % shards.length]!.push(item))
+  const onDone = (): void => {
+    done += 1
+    options.onProgress?.(done, total)
+  }
+  await Promise.all(shards.map(shard => extractShard(zipPath, shard, onDone)))
+
+  let links = 0
+  for (const link of snapshotLinks) {
+    const safeLink = safeArchivePath(link.path)
+    if (!safeLink || isSnapshotExcluded(safeLink)) continue
+    const mapped = mapSnapshotPath(safeLink, sourceProfileId, options.newId)
+    const linkPath = path.join(home, ...mapped.split('/'))
+    assertInside(home, linkPath)
+    if (linkPath.length > SNAPSHOT_MAX_PATH_LENGTH) continue
+    const targetAbsolute = path.resolve(path.dirname(linkPath), link.target)
+    const targetExists = await lstat(targetAbsolute).then(() => true, () => false)
+    if (!targetExists) {
+      skipped += 1
+      continue
+    }
+    await mkdir(nativePath(path.dirname(linkPath)), { recursive: true })
+    await rm(nativePath(linkPath), { recursive: true, force: true }).catch(() => undefined)
+    try {
+      await symlink(targetAbsolute, nativePath(linkPath), 'junction')
+      links += 1
+    } catch {
+      // 建链接失败（权限/文件系统）就退化成实体副本，保证包仍可启动。
+      try {
+        await cp(nativePath(targetAbsolute), nativePath(linkPath), { recursive: true })
+        links += 1
+      } catch {
+        skipped += 1
+      }
+    }
+  }
+  await finalizeExtractedProfile(home, options.newId)
+  return { profileId: options.newId, links, skipped, longPaths }
 }
 
 /** 包内路径映射：profiles/<源id>/… → profiles/<新id>/…，其余原样。 */

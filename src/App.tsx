@@ -1,10 +1,9 @@
 import { Layers3, LoaderCircle } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LauncherApiProvider, resolveLauncherApi, useLauncherApi } from './api/client'
 import { LauncherHome } from './components/LauncherHome'
 import { TopBar } from './components/TopBar'
 import { Toast } from './components/Toast'
-import { PackInstallDialog } from './components/dialogs/PackInstallDialog'
 import { DshFailureDialog } from './components/dialogs/DshFailureDialog'
 import { SettingsDialog } from './components/dialogs/SettingsDialog'
 import { UpdateDialog } from './components/dialogs/UpdateDialog'
@@ -16,7 +15,14 @@ import { usePackInstall } from './hooks/use-pack-install'
 import { isInstallProgressActive } from './lib/install-progress'
 import { HOME_TAB_ORDER } from './lib/nav'
 import type { HomeTab } from './types'
-import { SettingsPanels } from './views/SettingsView'
+
+// 启动页只看得到 LauncherHome；整合包/插件/技能/预设/版本这一整块面板（以及导入对话框）
+// 拆成按需加载的 chunk，首屏要解析的 JS 就少一截。
+const SettingsPanels = lazy(() => import('./views/SettingsView').then(module => ({ default: module.SettingsPanels })))
+const PackInstallDialog = lazy(() => import('./components/dialogs/PackInstallDialog').then(module => ({ default: module.PackInstallDialog })))
+const SessionImportDialog = lazy(() => import('./components/dialogs/SessionImportDialog').then(module => ({ default: module.SessionImportDialog })))
+const PackExportDialog = lazy(() => import('./components/dialogs/PackExportDialog').then(module => ({ default: module.PackExportDialog })))
+const PackVersionCloneDialog = lazy(() => import('./components/dialogs/PackVersionCloneDialog').then(module => ({ default: module.PackVersionCloneDialog })))
 
 /**
  * 应用根。
@@ -52,6 +58,12 @@ function LauncherShell() {
   // 对话框开关是纯展示状态，不进 store。
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updateOpen, setUpdateOpen] = useState(false)
+  // 「导入会话」的目标包 id（入口长在那个包的卡片上）。
+  const [sessionImportTarget, setSessionImportTarget] = useState<string | null>(null)
+  // 「导出」对话框对应的包 id（隐私勾选项在那里决定）。
+  const [exportTarget, setExportTarget] = useState<string | null>(null)
+  // 「切换版本」（升版副本）对话框对应的包 id。
+  const [cloneTarget, setCloneTarget] = useState<string | null>(null)
   // keep-mounted 集合：访问过的一级 tab 保持挂载，切换只切可见性。
   const visitedTabs = useRef(new Set<HomeTab>(['start']))
 
@@ -145,7 +157,8 @@ function LauncherShell() {
                     onOpenSettings={() => setSettingsOpen(true)}
                   />
                 ) : (
-                  <SettingsPanels
+                  <Suspense fallback={null}>
+                    <SettingsPanels
                     tab={tab}
                     settings={settings}
                     profile={profile}
@@ -205,12 +218,15 @@ function LauncherShell() {
                     onCreateBlankPack={(name, dshVersion) => store.createBlankPack({ name, dshVersion })}
                     onPackDiskUsage={store.packDiskUsage}
                     onRemovePack={store.removePack}
-                    onExportPack={store.exportPack}
+                    onRequestExport={packId => setExportTarget(packId)}
+                    onImportSessions={packId => setSessionImportTarget(packId)}
+                    onCloneVersion={packId => setCloneTarget(packId)}
                     onOpenDshFolder={() => void api.openDshFolder()}
                     onOpenPluginFolder={packageName => { void api.openProfilePluginFolder(packageName) }}
                     onOpenPath={targetPath => { void api.openPath(targetPath) }}
                     onNavigateTab={navigation.goHome}
                   />
+                  </Suspense>
                 )}
               </div>
             ))}
@@ -227,7 +243,8 @@ function LauncherShell() {
         />
       )}
       {packInstall.phase !== 'idle' && (
-        <PackInstallDialog
+        <Suspense fallback={null}>
+          <PackInstallDialog
           phase={packInstall.phase}
           events={packInstall.events}
           result={packInstall.result}
@@ -247,6 +264,52 @@ function LauncherShell() {
           }}
           onClose={packInstall.reset}
         />
+        </Suspense>
+      )}
+      {sessionImportTarget && (
+        <Suspense fallback={null}>
+          <SessionImportDialog
+            targetPackId={sessionImportTarget}
+            targetPackName={store.packs.find(pack => pack.id === sessionImportTarget)?.name ?? sessionImportTarget}
+            packs={store.packs}
+            busy={store.busy !== null || profileMutationLocked}
+            onPreview={sourcePackId => store.previewSessionImport(sourcePackId, sessionImportTarget)}
+            onImport={async sourcePackId => {
+              const done = await store.importSessionHistory(sourcePackId, sessionImportTarget)
+              if (done) void store.refreshPacks()
+              return done
+            }}
+            onUndo={undoId => store.undoSessionImport(undoId)}
+            onClose={() => setSessionImportTarget(null)}
+          />
+        </Suspense>
+      )}
+      {exportTarget && (
+        <Suspense fallback={null}>
+          <PackExportDialog
+            packName={store.packs.find(pack => pack.id === exportTarget)?.name ?? exportTarget}
+            busy={store.busy !== null || profileMutationLocked}
+            onExport={privacy => store.exportPack(exportTarget, privacy)}
+            onClose={() => setExportTarget(null)}
+          />
+        </Suspense>
+      )}
+      {cloneTarget && (
+        <Suspense fallback={null}>
+          <PackVersionCloneDialog
+            packName={store.packs.find(pack => pack.id === cloneTarget)?.name ?? cloneTarget}
+            currentVersion={store.packs.find(pack => pack.id === cloneTarget)?.dshVersion ?? null}
+            installedVersions={(store.runtimeEnvironment?.dshInstalled ?? []).map(item => item.version)}
+            availableVersions={(store.runtimeEnvironment?.dshAvailable ?? []).map(item => item.version)}
+            busy={store.busy !== null || profileMutationLocked}
+            onClone={async request => {
+              const created = await store.createVersionClone(cloneTarget, request)
+              if (created) void store.refreshPacks()
+              return created
+            }}
+            onClose={() => setCloneTarget(null)}
+          />
+        </Suspense>
       )}
       {updateOpen && store.launcherUpdate && (
         <UpdateDialog

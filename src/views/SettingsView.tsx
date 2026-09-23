@@ -23,7 +23,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react'
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useLauncherApi } from '../api/client'
 import { resolveLauncherApi } from '../api/client'
 import { useLauncherStore } from '../hooks/use-launcher-store'
@@ -116,7 +116,11 @@ interface SettingsPanelsProps {
   onRefreshOfficialVersions: (force?: boolean) => Promise<void>
   onInstallOfficialPackVersion: (version: string) => Promise<boolean>
   onRemovePack: (packId: string) => Promise<boolean>
-  onExportPack: (packId: string) => Promise<string | null>
+  /** 打开导出对话框（隐私勾选在里面决定，真正导出由 App 里的对话框触发）。 */
+  onRequestExport: (packId: string) => void
+  /** 打开「导入会话」对话框（目标包就是被点的那个）。 */
+  onImportSessions: (packId: string) => void
+  onCloneVersion: (packId: string) => void
   onOpenDshFolder: () => void
   onOpenPluginFolder: (packageName: string) => void
   onOpenPath: (targetPath: string) => void
@@ -163,7 +167,9 @@ export function SettingsPanels({
   onRefreshOfficialVersions,
   onInstallOfficialPackVersion,
   onRemovePack,
-  onExportPack,
+  onRequestExport,
+  onImportSessions,
+  onCloneVersion,
   onOpenDshFolder,
   onOpenPluginFolder,
   onOpenPath,
@@ -292,7 +298,9 @@ export function SettingsPanels({
                 }}
                 onActivate={id => { void onActivatePack(id) }}
                 onRename={async (id, name) => onRenamePack(id, name)}
-                onExport={id => { void onExportPack(id) }}
+                onExport={onRequestExport}
+                onImportSessions={onImportSessions}
+                onCloneVersion={onCloneVersion}
                 onRemove={onRemovePack}
                 onDiskUsage={onPackDiskUsage}
                 onNavigateTab={onNavigateTab}
@@ -1027,6 +1035,14 @@ function PackDownloadBar({ progress }: { progress: PackDownloadProgress }) {
   )
 }
 
+/**
+ * 展开操作条里每个按钮的出场顺序号：CSS 用 `calc(var(--i) * 35ms)` 逐个错开，
+ * 所以展开是一串滑入而不是整块闪现；收起时不排队（见 styles.css 的 .pack-actions-rail）。
+ */
+function railOrder(index: number): CSSProperties {
+  return { ['--i' as string]: String(index) } as CSSProperties
+}
+
 function SettingsPacks({
   packs,
   activePack,
@@ -1038,6 +1054,8 @@ function SettingsPacks({
   onActivate,
   onRename,
   onExport,
+  onImportSessions,
+  onCloneVersion,
   onRemove,
   onDiskUsage,
   onNavigateTab,
@@ -1061,6 +1079,8 @@ function SettingsPacks({
   onActivate: (packId: string) => void
   onRename: (packId: string, name: string) => Promise<boolean>
   onExport: (packId: string) => void
+  onImportSessions: (packId: string) => void
+  onCloneVersion: (packId: string) => void
   onRemove: (packId: string) => Promise<boolean>
   onDiskUsage: (packId: string) => Promise<number>
   onNavigateTab: (tab: HomeTab) => void
@@ -1097,7 +1117,25 @@ function SettingsPacks({
   const [removing, setRemoving] = useState<string | null>(null)
   /** 删除二次确认：第一次点删除进入待确认态（按钮变红），再点才真删。 */
   const [armedRemove, setArmedRemove] = useState<{ id: string; size: string | null; note: string } | null>(null)
+  /** 展开操作条的那一行；同一时刻只允许一行展开，否则满屏按钮反而更看不清在操作谁。 */
+  const [railPackId, setRailPackId] = useState<string | null>(null)
   const createNameInputRef = useRef<HTMLInputElement>(null)
+
+  // Escape 或点到操作区外面都收起展开条——展开态是临时的，不该留在页面上。
+  useEffect(() => {
+    if (!railPackId) return undefined
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setRailPackId(null) }
+    const onPointerDown = (event: PointerEvent) => {
+      if ((event.target as HTMLElement | null)?.closest('.settings-pack-actions')) return
+      setRailPackId(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('pointerdown', onPointerDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('pointerdown', onPointerDown)
+    }
+  }, [railPackId])
 
   const openCreateForm = () => {
     setCreating(true)
@@ -1317,6 +1355,8 @@ function SettingsPacks({
             ...(pack.presets?.length ? [`${pack.presets.length} 预设`] : []),
             ...(pack.applications?.length ? [`${pack.applications.length} 应用`] : []),
           ].join(' · ')
+          // 删除待确认态强制展开：确认按钮不能藏在收起的操作条里。
+          const railOpen = railPackId === pack.id || armedRemove?.id === pack.id
           return (
             <div key={pack.id} className={`settings-pack-row ${isActive ? 'active' : ''}`}>
               <div className="settings-pack-copy">
@@ -1371,15 +1411,35 @@ function SettingsPacks({
                         : pack.state === 'partial'
                           ? <button type="button" className="secondary-button" disabled={busy} onClick={() => onActivate(pack.id)} title="重新进入该包环境">继续</button>
                           : <span className="settings-pack-state">未完成安装</span>}
-                    <button type="button" className="secondary-button" disabled={busy} onClick={() => onExport(pack.id)} title="导出为压缩包（不含会话与登录）">导出</button>
-                    {armedRemove?.id === pack.id ? (
-                      <>
-                        <button type="button" className="danger-button" disabled={busy} onClick={() => { void confirmRemove(pack) }}>确定删除</button>
-                        <button type="button" className="icon-button" disabled={busy} onClick={() => setArmedRemove(null)} title="取消删除" aria-label="取消删除"><X size={15} /></button>
-                      </>
-                    ) : (
-                      <button type="button" className="icon-button" disabled={busy} onClick={() => armRemove(pack)} title="删除整合包（连同环境数据）" aria-label="删除整合包"><Trash2 size={15} /></button>
-                    )}
+                    {/* 常态一行只留「切换」+ 齿轮；其余操作横向展开出来（同一时刻只展开一行）。 */}
+                    <div className="pack-actions-rail" data-open={railOpen ? 'true' : 'false'} id={`pack-rail-${pack.id}`}>
+                      <div className="pack-actions-rail-inner">
+                        <button type="button" className="secondary-button" style={railOrder(0)} disabled={busy} onClick={() => onExport(pack.id)} title="导出为压缩包（默认不含会话与登录）">导出</button>
+                        <button type="button" className="secondary-button" style={railOrder(1)} disabled={busy} onClick={() => onImportSessions(pack.id)} title="把另一个整合包的会话记录复制进这个包（源包不改动）">导入会话</button>
+                        <button type="button" className="secondary-button" style={railOrder(2)} disabled={busy} onClick={() => onCloneVersion(pack.id)} title="复制一个新整合包来用其它 DSH 版本，当前包不会改动">切换版本</button>
+                        {armedRemove?.id === pack.id ? (
+                          <>
+                            <button type="button" className="danger-button" style={railOrder(3)} disabled={busy} onClick={() => { void confirmRemove(pack) }}>确定删除</button>
+                            <button type="button" className="icon-button" style={railOrder(4)} disabled={busy} onClick={() => { setArmedRemove(null); setRailPackId(null) }} title="取消删除" aria-label="取消删除"><X size={15} /></button>
+                          </>
+                        ) : (
+                          <button type="button" className="icon-button" style={railOrder(3)} disabled={busy} onClick={() => armRemove(pack)} title="删除整合包（连同环境数据）" aria-label="删除整合包"><Trash2 size={15} /></button>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="icon-button pack-actions-toggle"
+                      data-open={railOpen ? 'true' : 'false'}
+                      disabled={busy}
+                      onClick={() => { setRailPackId(railOpen ? null : pack.id); if (railOpen) setArmedRemove(null) }}
+                      aria-expanded={railOpen}
+                      aria-controls={`pack-rail-${pack.id}`}
+                      title={railOpen ? '收起' : '更多操作'}
+                      aria-label={railOpen ? '收起该包的其他操作' : '展开该包的其他操作'}
+                    >
+                      <Settings size={15} />
+                    </button>
                   </>
                 )}
               </div>

@@ -64,12 +64,44 @@ function parseLegacyCredentials(source: string): Record<string, string> | null {
   return result
 }
 
+/**
+ * 覆盖式改名在 Windows 上会被短暂挡住：杀软/索引服务正盯着刚写出来的文件时
+ * `rename` 直接 EPERM（实测在负载高的 CI 与本机上都会偶发，一次红一次绿）。
+ * 这一步失败的用户后果是"凭据留在旧格式"，所以值得重试几百毫秒。
+ */
+const RENAME_RETRY_DELAY_MS = [20, 50, 100, 200]
+
+function isRetryableRenameError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code
+  return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY' || code === 'ENOTEMPTY'
+}
+
+async function renameOverwrite(source: string, target: string): Promise<void> {
+  let lastError: unknown = null
+  for (let attempt = 0; attempt <= RENAME_RETRY_DELAY_MS.length; attempt += 1) {
+    try {
+      await rename(source, target)
+      return
+    } catch (error) {
+      if (!isRetryableRenameError(error)) throw error
+      lastError = error
+      const delay = RENAME_RETRY_DELAY_MS[attempt]
+      if (delay !== undefined) await new Promise(resolve => setTimeout(resolve, delay))
+    }
+  }
+  throw lastError
+}
+
+/** 同一毫秒内的两次写也要拿到不同的临时文件名，所以序号必须带在名字里。 */
+let temporaryWriteSequence = 0
+
 async function atomicWrite(targetPath: string, content: string): Promise<void> {
   await mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 })
-  const temporary = `${targetPath}.${process.pid}.${Date.now()}.tmp`
+  temporaryWriteSequence += 1
+  const temporary = `${targetPath}.${process.pid}.${Date.now()}.${temporaryWriteSequence}.tmp`
   try {
     await writeFile(temporary, content, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-    await rename(temporary, targetPath)
+    await renameOverwrite(temporary, targetPath)
     await chmod(targetPath, 0o600)
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => undefined)

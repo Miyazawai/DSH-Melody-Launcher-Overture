@@ -113,3 +113,94 @@ describe('projcache 聚合', () => {
     expect(map.get('good')?.createdAt).toBe(123)
   })
 })
+
+/**
+ * 0.1.5-rc 起的真实落盘形状：投影是每会话一个文件、日志名带世代号。
+ * 这两处以前都只认旧版，导致用量页对现役整合包恒 no-data。
+ */
+describe('用量读取认 0.1.5 的落盘形状', () => {
+  const record = (createdAt: number, totals: Record<string, number>, lastPromptAt?: number) => ({
+    version: 7,
+    record: {
+      identity: { formatVersion: 3, createdAt, cwd: 'C:\\proj', isSeeded: false, inheritedEventCount: 0 },
+      rows: {
+        tokenUsage: { ver: 1, seq: 3, val: { totals } },
+        sessionListMetadata: { ver: 1, seq: 4, val: lastPromptAt ? { blank: false, lastPromptAt } : { blank: false } },
+      },
+    },
+  })
+
+  async function homeWithPerRecordCache(...entries: Array<[string, unknown]>): Promise<string> {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'dsh-usage-per-record-'))
+    const directory = path.join(home, 'storages', 'session_projcache', 'sessions')
+    await mkdir(directory, { recursive: true })
+    for (const [sessionId, value] of entries) {
+      // 字符串按原样落盘，用来伪造撕裂文件。
+      await writeFile(path.join(directory, `${sessionId}.json`), typeof value === 'string' ? value : JSON.stringify(value), 'utf8')
+    }
+    return home
+  }
+
+  it('每会话一个文件的投影目录能读出今日用量', async () => {
+    const now = Date.now()
+    const todayStart = startOfLocalDay(now)
+    const home = await homeWithPerRecordCache(
+      ['session-a', record(todayStart + 1000, { uncachedInputTokens: 1000, outputTokens: 200, cacheReadTokens: 8000 })],
+    )
+
+    const result = await readDshUsage(home, now)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.usage.tokensToday).toBe(9200)
+  })
+
+  it('读不懂的单条投影只跳过这一条，不让整页报错', async () => {
+    const now = Date.now()
+    const todayStart = startOfLocalDay(now)
+    const home = await homeWithPerRecordCache(
+      ['torn', '{ not json'],
+      ['session-a', record(todayStart + 1000, { uncachedInputTokens: 10, outputTokens: 1, cacheReadTokens: 1 })],
+    )
+
+    const result = await readDshUsage(home, now)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.usage.tokensToday).toBe(12)
+  })
+
+  it('投影目录存在但空着时，退回旧版单文件', async () => {
+    const now = Date.now()
+    const todayStart = startOfLocalDay(now)
+    const home = await homeWithPerRecordCache()
+    await writeFile(path.join(home, 'storages', 'session_projcache.json'), JSON.stringify({
+      tables: { sessions: { 'session-old': { identity: { createdAt: todayStart + 500 }, rows: { tokenUsage: { val: { totals: { uncachedInputTokens: 7, outputTokens: 3 } } } } } } },
+    }), 'utf8')
+
+    const result = await readDshUsage(home, now)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.usage.tokensToday).toBe(10)
+  })
+
+  it('世代文件名 session.vN.jsonl 认得，跨世代同一步不重复计数', async () => {
+    const now = Date.now()
+    const todayStart = startOfLocalDay(now)
+    const home = await homeWithPerRecordCache(
+      ['session-x', record(todayStart - 86_400_000, { uncachedInputTokens: 9999, outputTokens: 9999, cacheReadTokens: 9999 }, todayStart + 5000)],
+    )
+    const logDir = path.join(home, 'sessions', '--c-proj--', 'session-x')
+    await mkdir(logDir, { recursive: true })
+    const step = (turn: number, seq: number, time: number, input: number) => usageLine('assistant/message', turn, seq, time, { inputTokens: input, outputTokens: 0, cacheReadTokens: 0 })
+    // 第二代日志是重写出来的：它重复了第一步（值还变了），并多出第二步。
+    await writeFile(path.join(logDir, 'session.v2.jsonl'), [step(1, 1, todayStart + 10, 300)].join('\n'), 'utf8')
+    await writeFile(path.join(logDir, 'session.v3.jsonl'), [step(1, 1, todayStart + 20, 500), step(1, 2, todayStart + 30, 40)].join('\n'), 'utf8')
+    // 干扰项：不该被当成本会话日志的名字。
+    await writeFile(path.join(logDir, 'session.v3.meta.json'), '{}', 'utf8')
+
+    const result = await readDshUsage(home, now)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    // 折叠后是 (1,1)=500（取较晚样本）+ (1,2)=40，而不是 300+500+40。
+    expect(result.usage.tokensToday).toBe(540)
+  })
+})

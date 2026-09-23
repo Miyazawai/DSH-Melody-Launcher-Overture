@@ -1,7 +1,9 @@
 // DSH 本地会话日志用量聚合：今日 Token 与缓存命中率。
 // 数据源全部在 {dshHome} 本地磁盘（DSH 自己落盘的投影与会话日志），不发起任何网络请求。
-// 快速路径读 storages/session_projcache.json 的每会话 totals；跨天活跃会话再扫
-// sessions/{projectKey}/{sessionId}/session.jsonl(.zstd) 的逐 step usage 明细。
+// 快速路径读会话投影里每会话的 totals（0.1.5 起是 storages/session_projcache/sessions/<id>.json
+// 每会话一个文件，更早是单个 storages/session_projcache.json）；跨天活跃会话再扫
+// sessions/{projectKey}/{sessionId}/ 下当天写过的那几代日志（session.jsonl / session.vN.jsonl，
+// 可能带 .zstd）取逐 step 明细。
 
 import { readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -53,11 +55,24 @@ export function startOfLocalDay(nowMs: number): number {
 }
 
 /**
+ * 按 (turn, step) 折叠：同一步在多个世代日志里会被重写，只留时间最新的那个样本。
+ * 单独拆出来是因为一次读取可能横跨 `session.jsonl` 与 `session.v3.jsonl` 好几个文件。
+ */
+export function foldUsageRecords(records: UsageRecord[]): UsageRecord[] {
+  const folded = new Map<string, UsageRecord>()
+  for (const record of records) {
+    const previous = folded.get(`${record.turn}:${record.step}`)
+    if (!previous || record.time >= previous.time) folded.set(`${record.turn}:${record.step}`, record)
+  }
+  return [...folded.values()]
+}
+
+/**
  * 解析会话日志明文行，按 (turn, step) 折叠：
  * assistant/message 的 data.usage 是最终样本，assistant/chunk(usage) 是早期样本，同键后者覆盖前者、不重复计数。
  */
 export function parseSessionLogText(text: string): UsageRecord[] {
-  const folded = new Map<string, UsageRecord>()
+  const found: UsageRecord[] = []
   for (const line of text.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed) continue
@@ -80,19 +95,16 @@ export function parseSessionLogText(text: string): UsageRecord[] {
       usage = entry.data.chunk.usage as Record<string, unknown>
     }
     if (!usage) continue
-    const key = `${entry.data.turn}:${entry.data.step}`
-    const record: UsageRecord = {
+    found.push({
       time: entry.time,
       turn: entry.data.turn,
       step: entry.data.step,
       input: num(usage.inputTokens),
       output: num(usage.outputTokens),
       cacheRead: num(usage.cacheReadTokens),
-    }
-    const previous = folded.get(key)
-    if (!previous || record.time >= previous.time) folded.set(key, record)
+    })
   }
-  return [...folded.values()]
+  return foldUsageRecords(found)
 }
 
 /** 多帧拼接的 zstd 容器逐帧解码；尾部撕裂帧解码失败时跳过。无 zstd 能力时返回空串。 */
@@ -115,31 +127,71 @@ interface ProjcacheSession {
   totals: TokenTotals
 }
 
-/** 解析 DSH 自己落盘的会话投影（storages/session_projcache.json）。 */
+/**
+ * 一条会话投影记录：`{ version, record: { identity, rows } }`。
+ * 0.1.5 起每会话一个文件（`storages/session_projcache/sessions/<id>.json`）；
+ * 旧版单文件里的 `tables.sessions.<id>` 就是这个 record 本身，所以两边共用本函数。
+ */
+export function parseProjcacheRecord(value: unknown): ProjcacheSession | null {
+  const record = (value as {
+    record?: {
+      identity?: { createdAt?: unknown }
+      rows?: { tokenUsage?: { val?: { totals?: Record<string, unknown> } }; sessionListMetadata?: { val?: { lastPromptAt?: unknown } } }
+    }
+  })?.record
+  const totals = record?.rows?.tokenUsage?.val?.totals
+  if (!record?.identity || !totals) return null
+  const lastPromptAt = num(record.rows?.sessionListMetadata?.val?.lastPromptAt)
+  return {
+    createdAt: num(record.identity.createdAt),
+    lastPromptAt: lastPromptAt > 0 ? lastPromptAt : null,
+    totals: {
+      uncachedInput: num(totals.uncachedInputTokens),
+      output: num(totals.outputTokens),
+      cacheRead: num(totals.cacheReadTokens),
+    },
+  }
+}
+
+/** 旧版单文件投影（`storages/session_projcache.json`）里的全部会话。 */
 export function parseProjcacheSessions(json: unknown): Map<string, ProjcacheSession> {
   const out = new Map<string, ProjcacheSession>()
   const tables = (json as { tables?: { sessions?: Record<string, unknown> } })?.tables?.sessions
   if (!tables || typeof tables !== 'object') return out
   for (const [sessionId, entry] of Object.entries(tables)) {
-    const item = entry as {
-      identity?: { createdAt?: unknown }
-      rows?: { tokenUsage?: { val?: { totals?: Record<string, unknown> } }; sessionListMetadata?: { val?: { lastPromptAt?: unknown } } }
-    }
-    const totals = item?.rows?.tokenUsage?.val?.totals
-    if (!item?.identity || !totals) continue
-    const lastPromptAt = num(item.rows?.sessionListMetadata?.val?.lastPromptAt)
-    out.set(sessionId, {
-      createdAt: num(item.identity.createdAt),
-      lastPromptAt: lastPromptAt > 0 ? lastPromptAt : null,
-      totals: {
-        uncachedInput: num(totals.uncachedInputTokens),
-        output: num(totals.outputTokens),
-        cacheRead: num(totals.cacheReadTokens),
-      },
-    })
+    const session = parseProjcacheRecord({ record: entry })
+    if (session) out.set(sessionId, session)
   }
   return out
 }
+
+/** 两种落盘形状都读：先试每会话一个文件的新目录，空/不存在再退回单文件旧版。 */
+async function readProjcacheSessions(dshHome: string): Promise<Map<string, ProjcacheSession>> {
+  const directory = path.join(dshHome, 'storages', 'session_projcache', 'sessions')
+  const files = await readdir(directory).catch(() => null)
+  if (files) {
+    const out = new Map<string, ProjcacheSession>()
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue
+      const raw = await readFile(path.join(directory, file), 'utf8').catch(() => null)
+      if (raw === null) continue
+      try {
+        const session = parseProjcacheRecord(JSON.parse(raw))
+        if (session) out.set(file.slice(0, -'.json'.length), session)
+      } catch {
+        // 撕裂或版本不认识：跳过这一条，而不是让整个用量页报错。
+      }
+    }
+    if (out.size > 0) return out
+  }
+  const legacy = await readFile(path.join(dshHome, 'storages', 'session_projcache.json'), 'utf8').catch(() => null)
+  if (legacy === null) return new Map()
+  // 旧版只有一个文件，读不懂就是真读不懂：让它抛给上层报 error，别伪装成"没有数据"。
+  return parseProjcacheSessions(JSON.parse(legacy))
+}
+
+/** 会话日志的落盘名：0 世代是 session.jsonl，之后每代 session.vN.jsonl，都可能再带 .zstd。 */
+const SESSION_LOG_PATTERN = /^session(?:\.v\d+)?\.jsonl(?:\.zstd)?$/
 
 /** 在 sessions/{projectKey}/{sessionId}/ 下找会话日志；mtime 早于 sinceMs 直接跳过。 */
 async function readSessionRecords(dshHome: string, sessionId: string, sinceMs: number): Promise<UsageRecord[]> {
@@ -150,32 +202,30 @@ async function readSessionRecords(dshHome: string, sessionId: string, sinceMs: n
   } catch {
     return []
   }
+  const found: UsageRecord[] = []
   for (const project of projects) {
-    const dir = path.join(sessionsRoot, project, sessionId)
-    for (const file of ['session.jsonl.zstd', 'session.jsonl'] as const) {
-      const logPath = path.join(dir, file)
+    const directory = path.join(sessionsRoot, project, sessionId)
+    const entries = await readdir(directory).catch(() => null)
+    if (!entries) continue
+    for (const file of entries.filter(name => SESSION_LOG_PATTERN.test(name))) {
+      const logPath = path.join(directory, file)
       try {
         const info = await stat(logPath)
         if (info.mtimeMs < sinceMs) continue
         const text = file.endsWith('.zstd') ? decodeZstdFrames(await readFile(logPath)) : await readFile(logPath, 'utf8')
-        return parseSessionLogText(text)
+        found.push(...parseSessionLogText(text))
       } catch {
-        // 该 project 下没有这个会话，试下一个。
+        // 读到一半被 DSH 改写了：这一代跳过，其它代仍会累计。
       }
     }
   }
-  return []
+  // 同一 (turn, step) 跨世代各留最新样本，避免重写过的日志被重复计数。
+  return foldUsageRecords(found)
 }
 
 export async function readDshUsage(dshHome: string, nowMs = Date.now()): Promise<DshUsageResult> {
   try {
-    let raw: string
-    try {
-      raw = await readFile(path.join(dshHome, 'storages', 'session_projcache.json'), 'utf8')
-    } catch {
-      return { status: 'no-data' }
-    }
-    const sessions = parseProjcacheSessions(JSON.parse(raw))
+    const sessions = await readProjcacheSessions(dshHome)
     if (sessions.size === 0) return { status: 'no-data' }
 
     const todayStart = startOfLocalDay(nowMs)

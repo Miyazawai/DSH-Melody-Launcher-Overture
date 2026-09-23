@@ -57,7 +57,7 @@ describe.runIf(runRealExport && userData !== '')('真实整合包导出', () => 
     workRoot = await mkdtemp(path.join(os.tmpdir(), 'dsh-real-export-'))
     const zipPath = path.join(workRoot, `${packId}.zip`)
     await mkdir(path.dirname(zipPath), { recursive: true })
-    const result = await manager.exportPack(packId, 'light', zipPath)
+    const result = await manager.exportPack(packId, {}, zipPath)
     const info = await stat(result.zipPath)
     const AdmZip = (await import('adm-zip')).default
     const entries = new AdmZip(result.zipPath).getEntries().map(entry => entry.entryName)

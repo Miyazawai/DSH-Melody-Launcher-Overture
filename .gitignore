@@ -10,3 +10,12 @@ release-v*/
 # 大型本地验收样本（真实整合包 1.3GB），不进版本库；tests/_probe_real_scan.test.ts 按其存在与否自动跳过。
 /整合包(1).zip
 design-skills/
+
+# scripts/perf-pack-bench.mts 的临时解包/打包目录
+/.bench-tmp/
+
+# npm run fetch:runtimes 拉来的随包运行时（node + pnpm，约 125MB，由 electron-builder extraResources 取用）
+/vendor/
+
+# 出包体积实测的临时输出目录（--config.directories.output 指到这里，量完删）
+/release-*-probe*/

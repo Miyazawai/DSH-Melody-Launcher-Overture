@@ -22,6 +22,16 @@ export const DEFAULT_NPM_REGISTRY = 'https://registry.npmmirror.com'
 /** npm 官方源：镜像不可用时的回退。 */
 export const NPM_OFFICIAL_REGISTRY = 'https://registry.npmjs.org'
 
+/**
+ * npm registry 候选链：用户自填镜像 → npmmirror → 官方源。
+ *
+ * 大陆直连 registry.npmjs.org 经常超时，所以任何「装 npm 包」的动作都该按这个顺序试，
+ * 而不是只认一个源。去重是为了用户填了 npmmirror 时不重复试两遍。
+ */
+export function npmRegistryCandidates(preferred?: string | null): string[] {
+  return [...new Set([preferred?.trim() ?? '', DEFAULT_NPM_REGISTRY, NPM_OFFICIAL_REGISTRY].filter(Boolean))]
+}
+
 /** 读取 Windows 系统代理，规则代理梯子（Clash 等）开启「系统代理」时返回代理地址。 */
 export function detectWindowsSystemProxy(): string | null {
   if (process.platform !== 'win32') return null

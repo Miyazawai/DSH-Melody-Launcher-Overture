@@ -9,7 +9,7 @@ export interface AppSettings {
   dshHome: string
   /** 当前选中的启动器托管 DSH 版本；null 表示沿用旧版自动检测。 */
   dshVersion?: string | null
-  /** 当前选中的启动器托管 Node.js 版本；null 表示系统 Node 优先。 */
+  /** 当前选中的启动器托管 Node.js 版本；null 表示自动选择（本机达标优先，否则下载）。 */
   nodeVersion?: string | null
   profileName: string
   /** 当前激活的整合包 id（真隔离环境的唯一指针）；与 profileName 同步切换。 */
@@ -336,7 +336,6 @@ export interface RuntimeEnvironmentState {
   dshInstalled: DshVersionInfo[]
   nodeInstalled: NodeVersionInfo[]
   dshAvailable: RuntimeVersionCandidate[]
-  nodeAvailable: RuntimeVersionCandidate[]
 }
 
 export interface LauncherUpdateStatus {
@@ -955,6 +954,16 @@ export interface PackInstalledApplication {
   enabled: boolean
 }
 
+/**
+ * 导出整合包时可以显式带出的隐私内容（默认全不带）。
+ * 与 electron/pack-snapshot.ts 的 SnapshotPrivacyInclude 同一形状，这里独立声明
+ * 是为了让渲染层不必去 import 主进程模块。
+ */
+export interface PackExportPrivacy {
+  credentials?: boolean
+  sessions?: boolean
+}
+
 export interface PackStatus {
   id: string
   name: string
@@ -1099,6 +1108,49 @@ export type PackProgressEvent =
   | { kind: 'done'; result: PackInstallResult }
   | { kind: 'cancelled' }
   | { kind: 'error'; message: string }
+
+/** 会话记录搬运中一类被跳过的原因（label 是给人看的短句，来自 electron/session-transfer.ts）。 */
+export interface SessionImportSkipped {
+  reason: string
+  count: number
+  label: string
+}
+
+/** 会话引用了、但目标包里没有的名字：搬完要如实告诉用户哪里可能异常。 */
+export interface SessionImportDangling {
+  presets: string[]
+  plugins: string[]
+}
+
+/** 「导入会话」确认屏要的信息，全部来自主进程的只读预览。 */
+export interface SessionImportPreview {
+  sourcePackId: string
+  targetPackId: string
+  sourceName: string
+  targetName: string
+  importableCount: number
+  importableBytes: number
+  /** 随会话一并合并的归档与附件字节数。 */
+  extraBytes: number
+  skipped: SessionImportSkipped[]
+  /** 目标包一条会话都没有时，版本门只能放行——界面要说明这是未判定。 */
+  formatUnverified: boolean
+  dangling: SessionImportDangling
+}
+
+/** 执行结果：多了 copiedFiles/copiedBytes 与撤销凭据 undoId。 */
+export interface SessionImportResult extends SessionImportPreview {
+  copiedFiles: number
+  copiedBytes: number
+  undoId: string
+}
+
+export interface SessionImportUndoResult {
+  removed: number
+  /** 被 DSH 追加过、因此不敢删的文件数。 */
+  kept: number
+  error?: string
+}
 
 /** 包体下载进度（即 PackProgressEvent 的 download 分支），给进度条直接用。 */
 export type PackDownloadProgress = Omit<Extract<PackProgressEvent, { kind: 'download' }>, 'kind'>
@@ -1272,7 +1324,15 @@ export interface LauncherApi {
   createPack(request: PackCreateRequest): Promise<PackInstallResult>
   analyzePackImport(path: string): Promise<PackAnalysis>
   importPack(path: string, items?: string[], options?: PackImportOptions): Promise<PackInstallResult>
-  exportPack(packId: string): Promise<string | null>
+  exportPack(packId: string, privacy?: PackExportPrivacy): Promise<string | null>
+  /** 预览把源包会话记录搬进目标包会做什么（只读，不写盘）。 */
+  previewSessionImport(sourcePackId: string, targetPackId: string): Promise<SessionImportPreview>
+  /** 执行搬运：只新增、不覆盖，返回结果与撤销凭据。 */
+  importSessionHistory(sourcePackId: string, targetPackId: string): Promise<SessionImportResult>
+  /** 按 undoId 撤销一次搬运；被动过的文件不会被删。 */
+  undoSessionImport(undoId: string): Promise<SessionImportUndoResult>
+  /** 升版副本：复制出一个新整合包并认 dshVersion，旧包原样留着当退路。 */
+  createVersionClone(packId: string, request: { dshVersion: string; name?: string }): Promise<PackStatus>
   /** 恢复当前版本的官方默认整合包（从 GitHub Release 下载导入）；失败抛错。 */
   restoreOfficialPack(): Promise<PackInstallResult>
   /** 列出 Release 上所有官方默认整合包版本（按版本降序，第一项即推荐版本）。 */

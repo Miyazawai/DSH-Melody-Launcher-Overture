@@ -330,6 +330,8 @@ export interface WriteEntryOptions {
   maxEntryBytes?: number
   /** 累计解压字节上限（配合 budget 使用）。 */
   maxTotalBytes?: number
+  /** 目录已由调用方预先建好时跳过 mkdir（万级条目时省掉同样多次的递归建目录调用）。 */
+  skipMkdir?: boolean
 }
 
 export interface OpenZipPath {
@@ -429,7 +431,7 @@ async function readStream(stream: Readable, maxBytes: number): Promise<Buffer> {
 }
 
 async function writeStreamToFile(stream: Readable, targetPath: string, options?: WriteEntryOptions): Promise<number> {
-  await mkdir(path.dirname(targetPath), { recursive: true })
+  if (!options?.skipMkdir) await mkdir(path.dirname(targetPath), { recursive: true })
   const output = createWriteStream(targetPath)
   let written = 0
   const counter = new Transform({

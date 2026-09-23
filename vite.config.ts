@@ -14,7 +14,9 @@ export default defineConfig(({ mode }) => {
       react(),
       electron({
         main: {
-          entry: 'electron/main.ts',
+          // 第二个入口是整合包打包 worker：导出时在 worker_threads 里跑 CRC/deflate，
+          // 主进程只负责收进度事件。
+          entry: ['electron/main.ts', 'electron/snapshot-pack-worker.ts'],
           vite: {
             define: {
               'process.env.DSH_LAUNCHER_GITHUB_CLIENT_ID': JSON.stringify(githubClientId),
@@ -30,6 +32,11 @@ export default defineConfig(({ mode }) => {
       host: '127.0.0.1',
       port: 4173,
       strictPort: false,
+      // vendor/ 是 npm run fetch:node 解出来的随包 Node：Windows 会锁住刚落地的
+      // node.exe，被 vite 的文件监视器碰上就是 EBUSY 直接崩进程。
+      watch: {
+        ignored: ['**/vendor/**'],
+      },
     },
     build: {
       sourcemap: true,

@@ -201,10 +201,6 @@ const demoDshCandidates: RuntimeVersionCandidate[] = [
   { version: '0.1.5-rc.2', label: 'next', lts: null, date: '2026-09-10T00:00:00.000Z', prerelease: true, recommended: true },
   { version: '0.1.5-rc.1', label: 'latest', lts: null, date: '2026-09-10T00:00:00.000Z', prerelease: true },
 ]
-const demoNodeCandidates: RuntimeVersionCandidate[] = [
-  { version: 'v24.19.0', label: 'Krypton', lts: 'Krypton', date: null, prerelease: false },
-  { version: 'v22.19.0', label: 'Jod', lts: 'Jod', date: null, prerelease: false },
-]
 let demoDshVersions: RuntimeEnvironmentState['dshInstalled'] = [
   { version: '0.1.5-rc.1', root: 'C:\\Users\\demo\\AppData\\Roaming\\dsh-launcher\\dsh-runtime\\versions\\0.1.5-rc.1', executable: 'C:\\Users\\demo\\AppData\\Roaming\\dsh-launcher\\dsh-runtime\\versions\\0.1.5-rc.1\\node_modules\\.bin\\dsh.cmd', source: 'launcher', selected: true, removable: true },
   { version: '0.1.3-alpha.2', root: 'C:\\Users\\demo\\.dsh-runtime', executable: 'C:\\Users\\demo\\.dsh-runtime\\node_modules\\.bin\\dsh.cmd', source: 'legacy', selected: false, removable: true },
@@ -748,6 +744,26 @@ const DEMO_SKILLS_SH_INDEX: SkillsShSkill[] = [
   { id: 'coreyhaines31/marketingskills/seo-audit', skillId: 'seo-audit', name: 'seo-audit', installs: 3120, source: 'coreyhaines31/marketingskills' },
 ]
 
+/** 演示数据里的会话搬运预览：数字是编的，形状与真机一致。 */
+function demoSessionImportPreview(sourcePackId: string, targetPackId: string) {
+  const source = demoPacks.find(item => item.id === sourcePackId)
+  const target = demoPacks.find(item => item.id === targetPackId)
+  if (!source || !target) throw new Error('整合包不存在。')
+  if (sourcePackId === targetPackId) throw new Error('源包和目标包是同一个，没有可搬的记录。')
+  return {
+    sourcePackId,
+    targetPackId,
+    sourceName: source.name,
+    targetName: target.name,
+    importableCount: 2,
+    importableBytes: 460_800,
+    extraBytes: 1_240_000,
+    skipped: [{ reason: 'missing-cwd', count: 1, label: '会话对应的工作目录已经不在了，DSH 不会显示它' }],
+    formatUnverified: false,
+    dangling: { presets: ['study'], plugins: [] },
+  }
+}
+
 export const demoApi: LauncherApi = {
   getSettings: async () => demoSettings,
   saveSettings: async settings => (demoSettings = settings),
@@ -760,7 +776,6 @@ export const demoApi: LauncherApi = {
     dshInstalled: demoDshVersions,
     nodeInstalled: demoNodeVersions,
     dshAvailable: demoDshCandidates,
-    nodeAvailable: demoNodeCandidates,
   }),
   installDshVersion: async version => {
     const normalized = version.replace(/^v/i, '')
@@ -1723,6 +1738,29 @@ export const demoApi: LauncherApi = {
   exportPack: async packId => {
     const pack = demoPacks.find(item => item.id === packId)
     return pack ? `C:\\Users\\demo\\Desktop\\${pack.name}.zip` : null
+  },
+  previewSessionImport: async (sourcePackId, targetPackId) => demoSessionImportPreview(sourcePackId, targetPackId),
+  importSessionHistory: async (sourcePackId, targetPackId) => ({
+    ...demoSessionImportPreview(sourcePackId, targetPackId),
+    copiedFiles: 2,
+    copiedBytes: 460_800,
+    undoId: `${Date.now()}`,
+  }),
+  undoSessionImport: async () => ({ removed: 2, kept: 0 }),
+  createVersionClone: async packId => {
+    const source = demoPacks.find(item => item.id === packId)
+    const now = new Date().toISOString()
+    const clone: PackStatus = {
+      ...(source ?? demoPacks[0])!,
+      id: `${packId}-clone`,
+      name: `${source?.name ?? packId} · DSH 0.1.5-rc.2`,
+      dshVersion: '0.1.5-rc.2',
+      state: 'complete',
+      installedAt: now,
+      updatedAt: now,
+    }
+    demoPacks = [...demoPacks, clone]
+    return clone
   },
   restoreOfficialPack: async () => ({ id: 'pack-official-demo', installed: [], failures: [], state: 'complete' }),
   listOfficialPackVersions: async () => demoOfficialReleases,

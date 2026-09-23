@@ -62,11 +62,12 @@ function managedNode(): NodeRuntime {
 }
 
 /**
- * 轮询等待断言成立（默认 5 秒）。
+ * 轮询等待断言成立（默认 10 秒）。
  * 用来替代「固定 sleep 再看结果」：重启进程、改写凭据都是异步落盘，
  * CI runner 负载高时固定等待会假红（本文件里的凭据重试用例就这样在 CI 上红过两次）。
+ * 预算给到 10 秒：80 个测试文件并行跑满时，5 秒内落不了盘（实测每 3~4 次红一次）。
  */
-async function waitFor(assertion: () => void | Promise<void>, timeoutMs = 5_000): Promise<void> {
+async function waitFor(assertion: () => void | Promise<void>, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
     try {
@@ -384,6 +385,7 @@ describe('应用加载项运行模式', () => {
       const first = fakeChild(4301)
       const second = fakeChild(4302)
       const children = [first, second]
+      const outputs: string[] = []
       const spawnProcess = vi.fn(() => {
         const child = children.shift()
         if (!child) throw new Error('unexpected duplicate launch')
@@ -393,7 +395,7 @@ describe('应用加载项运行模式', () => {
         readSettings: async () => settings,
         prepareNodeRuntime: async () => managedNode(),
         fallbackWorkspace: () => process.cwd(),
-        emitOutput: () => {},
+        emitOutput: (_level, text) => { outputs.push(text) },
         emitState: () => {},
         openExternal: () => {},
         spawnProcess,
@@ -411,10 +413,14 @@ describe('应用加载项运行模式', () => {
 
       second.emit('exit', 0)
       await waitFor(async () => {
-        expect(await readFile(path.join(dshHome, '.credentials.yaml'), 'utf8')).toContain('version: 1')
+        // 把期间的输出并进失败信息：这条用例在 CI 上红过几次，光看"没恢复"分不清是慢还是恢复本身失败。
+        expect(await readFile(path.join(dshHome, '.credentials.yaml'), 'utf8'), outputs.join(' | '))
+          .toContain('version: 1')
       })
     } finally {
       await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
     }
-  })
+  // 这条用例里有两轮 waitFor（各 10 秒预算）。测试超时必须比它们加起来还长，
+  // 否则负载高时先被 vitest 判超时，报错看不出是"没落盘"还是"预算不够"。
+  }, 30_000)
 })

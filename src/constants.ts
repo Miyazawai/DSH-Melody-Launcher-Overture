@@ -153,6 +153,12 @@ export const IPC = {
   packsAnalyzeImport: 'packs:analyze-import',
   packsImport: 'packs:import',
   packsExport: 'packs:export',
+  /** 会话记录跨包搬运：预览 / 执行 / 撤销。 */
+  packsSessionImportPreview: 'packs:session-import-preview',
+  packsSessionImportApply: 'packs:session-import-apply',
+  packsSessionImportUndo: 'packs:session-import-undo',
+  /** 升版副本：复制一个新整合包并认新的 DSH 版本。 */
+  packsCloneVersion: 'packs:clone-version',
   packsRestoreOfficial: 'packs:restore-official',
   /** 列出 Release 上所有官方默认整合包版本。 */
   packsOfficialVersions: 'packs:official-versions',

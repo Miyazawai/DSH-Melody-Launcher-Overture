@@ -19,7 +19,7 @@ import { buildPluginCommandArgs, createInstaller, syncProfilePnpmConfig, validat
 import { registerIpcHandlers } from './ipc'
 import { createLauncherUpdater, type LauncherUpdater } from './launcher-update'
 import { createGitHubAuthService, type GitHubAuthService } from './github-auth'
-import { buildNetworkEnvironment } from './proxy'
+import { buildNetworkEnvironment, npmRegistryCandidates } from './proxy'
 import {
   ensureNodeRuntime,
   ensurePnpmRuntime,
@@ -60,6 +60,23 @@ import { recoverLegacyCredentials } from './dsh-credentials-compat'
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url))
 // 窗口图标与托盘图标共用同一资源；dev 取 public/，打包取 dist/。
 const launcherIconPath = path.join(moduleDirectory, app.isPackaged ? '../dist/launcher-icon.png' : '../public/launcher-icon.png')
+
+/**
+ * 随包运行时的根目录（Node 与 pnpm）。当前**只有开发态生效**：
+ * electron-builder 的 extraResources 会无条件剥掉 node_modules，而 npm 就住在
+ * `vendor/node/node_modules/npm` 里，所以打包态没有可用的随包 Node（见
+ * `usableRuntime()` 的 npm 存在性守卫与 scripts/fetch-node-runtime.mts 顶部说明）。
+ * 发布版因此走：本机 Node（**版本达标才用**）→ 托管下载（镜像优先）→ 再用 npm 装 pnpm。
+ * 「本机装了老 Node 就装不上」那个 bug 的修复点是那道版本门，不是随包本身。
+ * 目录不存在时 ensureNodeRuntime / ensurePnpmRuntime 自己会退回托管路径，这里不做存在性判断。
+ */
+const bundledNodeRoot = app.isPackaged
+  ? path.join(process.resourcesPath, 'node')
+  : path.resolve(moduleDirectory, '../vendor/node')
+
+const bundledPnpmRoot = app.isPackaged
+  ? path.join(process.resourcesPath, 'pnpm')
+  : path.resolve(moduleDirectory, '../vendor/pnpm')
 
 let mainWindow: BrowserWindow | null = null
 let processSupervisor: ProcessSupervisor | null = null
@@ -157,7 +174,9 @@ function createServices(): Services {
         events.output(source, 'info', `${progress.message}（${progress.percent}%）`)
       }
       onProgress?.(progress)
-    }, currentSettings.nodeVersion, (level, text) => events.output(source, level, text)))
+    }, currentSettings.nodeVersion, (level, text) => events.output(source, level, text), {
+      bundledRoot: bundledNodeRoot,
+    }))
   }
 
   const preparePnpmRuntime = (
@@ -166,14 +185,18 @@ function createServices(): Services {
     onProgress?: (progress: NodeRuntimeProgress) => void,
   ): Promise<PnpmRuntime> => {
     let lastBucket = -1
-    return ensurePnpmRuntime(managedPnpmRoot, nodeRuntime, progress => {
+    // 镜像候选来自用户设置；只有没命中随包/已装、真要联网装 pnpm 时才会用到它。
+    return settings.read().then(currentSettings => ensurePnpmRuntime(managedPnpmRoot, nodeRuntime, progress => {
       const bucket = Math.floor(progress.percent / 10)
       if (bucket !== lastBucket || progress.percent === 100) {
         lastBucket = bucket
         events.output(source, 'info', `${progress.message}（${progress.percent}%）`)
       }
       onProgress?.(progress)
-    }, (level, text) => events.output(source, level, text))
+    }, (level, text) => events.output(source, level, text), {
+      bundledRoot: bundledPnpmRoot,
+      registryCandidates: npmRegistryCandidates(buildNetworkEnvironment(currentSettings).npmRegistry),
+    }))
   }
 
   /**

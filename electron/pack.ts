@@ -32,7 +32,9 @@ import type {
   PresetInstallRequest,
   PresetInstallResult,
   ProfileState,
-  ProfileExportMode,
+  SessionImportPreview,
+  SessionImportResult,
+  SessionImportUndoResult,
   SkillInstallRequest,
   SkillInstallResult,
   SkillInstallTarget,
@@ -41,7 +43,17 @@ import { assertMeaningfulPackName, assertPackDshVersion, isValidPackDshVersion, 
 import { extractOfflineSupportFromPath, extractPackBodiesFromPath, extractPresetBodiesFromPath, findManifestInArchiveFromPath, inspectPackZipFromPath } from './pack-zip'
 import { validateFullArchive } from './profile-repository-import'
 import { cleanPackNameHint, extractRawPluginBodiesFromPath, extractRawPresetSourcesFromPath, extractRawSkillSourcesFromPath, scanRawPackZipFromPath, type ExtractByteBudget } from './pack-scan'
-import { describeSnapshotZip, extractSnapshot, planSnapshot, writeSnapshotZip } from './pack-snapshot'
+import { describeSnapshotZip, extractSnapshot, planSnapshot, writeSnapshotZip, type SnapshotPrivacyCategory, type SnapshotPrivacyInclude } from './pack-snapshot'
+import {
+  SESSION_SKIP_LABELS,
+  applySessionTransfer,
+  findDanglingReferences,
+  planSessionTransfer,
+  undoSessionTransfer,
+  writeTransferManifest,
+  type SessionTransferPlan,
+  type TransferManifest,
+} from './session-transfer'
 import { parseDocument } from 'yaml'
 import {
   readPackRegistry,
@@ -104,6 +116,8 @@ export interface PackManagerOptions {
   manifestRoot?: string
   /** 快照落盘目录（对齐 ai-install）。 */
   snapshotRoot: string
+  /** 会话记录跨包搬运的撤销清单目录；缺省 packs.json 同级的 pack-session-imports/。 */
+  sessionImportsRoot?: string
   /** 插件安装凭据文件路径。 */
   pluginReceiptsPath: string
   /** Agent 预设安装凭据文件路径。 */
@@ -148,12 +162,25 @@ export interface PackManager {
   createPack(request: PackCreateRequest): Promise<PackInstallResult>
   analyzeImport(filePath: string): Promise<PackAnalysis>
   importPack(filePath: string, items?: string[], options?: PackImportOptions): Promise<PackInstallResult>
-  exportPack(packId: string, mode?: ProfileExportMode, targetZipPath?: string): Promise<{ zipPath: string; fileName: string }>
+  exportPack(packId: string, include?: SnapshotPrivacyInclude, targetZipPath?: string): Promise<{ zipPath: string; fileName: string }>
+  /** 预览把源包的会话记录搬进目标包会做什么（只读）。 */
+  previewSessionImport(sourcePackId: string, targetPackId: string): Promise<SessionImportPreview>
+  /** 执行会话记录搬运：只新增不覆盖，返回结果与撤销凭据。 */
+  importSessionHistory(sourcePackId: string, targetPackId: string): Promise<SessionImportResult>
+  /** 按 undoId 撤销一次搬运；被 DSH 追加过的文件不会被删。 */
+  undoSessionImport(undoId: string): Promise<SessionImportUndoResult>
   activatePack(packId: string): Promise<AppSettings>
   removePack(packId: string): Promise<{ removed: number }>
   renamePack(packId: string, name: string): Promise<PackStatus>
   /** 新建空白整合包：私有家目录 + 选定 DSH 版本，不自动激活。 */
   createBlankPack(request: { name: string; dshVersion: string | null }): Promise<PackStatus>
+  /**
+   * 升版副本：把这个包整份复制成一个新整合包，新包认另一个 DSH 版本，旧包原样留着。
+   * 复制走快照管线（含隐私，因为这是同一台机器上自己的东西），于是 profiles/<旧id>
+   * 改名、符号链接重建、包外本体相对化这些细节与"导入别人给的包"完全一致。
+   * 见 docs/adr/0002：故意不做原地升级，也不做兼容性预检。
+   */
+  createVersionClone(packId: string, request: { dshVersion: string; name?: string }): Promise<PackStatus>
   /** 整合包私有目录占用字节数（删除确认框展示）。 */
   packDiskUsage(packId: string): Promise<number>
   rollback(): Promise<{ restored: number; profileName: string }>
@@ -170,6 +197,34 @@ export interface PackManager {
   removePackPreset(packId: string, presetName: string): Promise<PackStatus>
   removePackSkill(packId: string, skillName: string): Promise<PackStatus>
   removePackApplication(packId: string, addonId: string): Promise<PackStatus>
+}
+
+/**
+ * 含隐私导出包里的警告文件。**文件名用 ASCII**：压缩包里的非 ASCII 文件名在部分解压
+ * 工具下会乱码，那时警告反而看不见。内容给人读，用中文。
+ */
+export const PRIVACY_WARNING_FILENAME = '_PRIVATE-DO-NOT-SHARE.txt'
+
+/**
+ * 改新包 profile.yaml 里的 dshVersion：升版副本的全部意义就在这一行。
+ * 注册表记录同样带版本，激活时以记录为准，这里是让包内自述与之一致。
+ */
+async function setProfileDshVersion(home: string, packId: string, version: string): Promise<void> {
+  const target = path.join(home, 'profiles', packId, 'profile.yaml')
+  const text = await readFile(target, 'utf8').catch(() => null)
+  if (text === null) return
+  const next = /^dshVersion:.*$/m.test(text)
+    ? text.replace(/^dshVersion:.*$/m, `dshVersion: ${version}`)
+    : `dshVersion: ${version}\n${text}`
+  await writeFile(target, next, 'utf8')
+}
+
+function privacyWarningText(packName: string, categories: SnapshotPrivacyCategory[]): string {
+  const lines = ['这个整合包里带的是私人的东西，不是可以分享的内容。', '']
+  if (categories.includes('credentials')) lines.push('- API 密钥：拿到这个包的人可以直接用它花你的额度。')
+  if (categories.includes('sessions')) lines.push('- 会话记录：包含对话内容、会话里收发过的文件，以及你电脑上的文件夹路径。')
+  lines.push('', '要分享整合包，请回到启动器用默认方式（不勾选任何隐私项）重新导出一份。', `导出时间：${new Date().toISOString()}`)
+  return `${lines.join('\n')}\n`.replace(/^/, `包名：${packName}\n`)
 }
 
 function asErrorMessage(error: unknown): string {
@@ -277,6 +332,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
 
   const getDshHome = async (): Promise<string> => options.dshHome || (await options.readSettings()).dshHome
   const packsRoot = options.packsRoot ?? path.join(path.dirname(options.registryPath), 'dsh-packs')
+  const sessionImportsRoot = options.sessionImportsRoot ?? path.join(path.dirname(options.registryPath), 'pack-session-imports')
 
   /** 存储的默认家目录（无私有目录的包共用；不受激活包派生影响）。 */
   async function defaultHome(): Promise<string> {
@@ -696,6 +752,35 @@ export function createPackManager(options: PackManagerOptions): PackManager {
 
   function selectedPackKey(settings: AppSettings): string | null | undefined {
     return options.unifiedProfiles ? settings.profileName : settings.activePackId
+  }
+
+  /**
+   * 组一份搬运预览：确认屏与执行结果共用同一次计算，
+   * 免得"预览说有 12 条、实际搬了 10 条"这种两边各算各的口径差。
+   */
+  async function buildSessionImportPreview(sourcePackId: string, targetPackId: string): Promise<{ plan: SessionTransferPlan; preview: SessionImportPreview }> {
+    if (sourcePackId === targetPackId) throw new Error('源包和目标包是同一个，没有可搬的记录。')
+    const source = await findRecord(sourcePackId)
+    const target = await findRecord(targetPackId)
+    const sourceHome = await homeOfRecord(source)
+    const targetHome = await homeOfRecord(target)
+    if (!existsSync(sourceHome)) throw new Error(`整合包「${source.name}」的家目录不存在。`)
+    const plan = await planSessionTransfer(sourceHome, targetHome)
+    return {
+      plan,
+      preview: {
+        sourcePackId: source.id,
+        targetPackId: target.id,
+        sourceName: source.name,
+        targetName: target.name,
+        importableCount: plan.importableCount,
+        importableBytes: plan.importableBytes,
+        extraBytes: plan.extraBytes,
+        skipped: plan.skipped.map(item => ({ reason: item.reason, count: item.count, label: SESSION_SKIP_LABELS[item.reason] })),
+        formatUnverified: plan.formatUnverified,
+        dangling: await findDanglingReferences(plan, targetHome),
+      },
+    }
   }
 
   function toInstalledPlugins(installed: string[]): PackInstalledPlugin[] {
@@ -1712,7 +1797,7 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       }
     },
 
-    async exportPack(packId, _exportMode: ProfileExportMode = 'light', targetZipPath?: string) {
+    async exportPack(packId, include: SnapshotPrivacyInclude = {}, targetZipPath?: string) {
       const reason = guarded()
       if (reason) throw new Error(reason)
       active = true
@@ -1722,9 +1807,17 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         const dshHome = await homeOfRecord(record)
         if (!existsSync(dshHome)) throw new Error(`整合包「${packId}」的家目录不存在：${dshHome}`)
         options.emitEvent({ kind: 'status', message: '正在扫描整合包目录…' })
-        // 快照式导出：家目录镜像（剔除个人数据、file: 依赖相对化），没有清单。
-        const plan = await planSnapshot(dshHome, { packId })
+        // 快照式导出：家目录镜像（默认剔除个人数据、file: 依赖相对化），没有清单。
+        const plan = await planSnapshot(dshHome, { packId, include })
         if (plan.entries.length === 0) throw new Error(`整合包「${packId}」没有可导出的内容。`)
+        const privacy = plan.privacy ?? []
+        if (privacy.length > 0) {
+          // 三个月后拿到这个 zip 的人（可能就是机主自己）不会记得勾过什么，
+          // 所以警告跟着包走，而不是只留在导出那一刻的弹窗里。
+          const warning = Buffer.from(privacyWarningText(record.name, privacy), 'utf8')
+          plan.entries.push({ rel: PRIVACY_WARNING_FILENAME, data: warning })
+          plan.totalBytes += warning.length
+        }
         for (const warning of plan.warnings) log('info', warning)
         if (plan.longPaths.length > 0) {
           log('info', `有 ${plan.longPaths.length} 个路径较长（如 ${plan.longPaths[0]}），导入到更深的目录时可能失败。`)
@@ -1755,6 +1848,152 @@ export function createPackManager(options: PackManagerOptions): PackManager {
         // 导出只发阶段事件、从不发 done/error：必须在这里自己收口，否则界面横幅
         // 会一直停在最后一句「打包中…」，看起来像还在导（文件其实早写完了）。
         options.emitEvent({ kind: 'status', message: '' })
+      }
+    },
+
+    async createVersionClone(packId, request) {
+      const reason = guarded()
+      if (reason) throw new Error(reason)
+      // 与导出同类：只占用 active 标记，不进 beginTask 的回滚台账（那套是给插件安装用的）。
+      active = true
+      const version = request.dshVersion.trim()
+      const scratchZip = path.join(options.snapshotRoot, `clone-${packId}-${Date.now()}.zip`)
+      let createdHome: string | null = null
+      try {
+        if (!version) throw new Error('要先选好新版本。')
+        const source = await findRecord(packId)
+        const sourceHome = await homeOfRecord(source)
+        if (!existsSync(sourceHome)) throw new Error(`整合包「${source.name}」的家目录不存在：${sourceHome}`)
+        const name = (request.name ?? '').trim() || `${source.name} · DSH ${version}`
+        const baseId = packProfileName(name)
+        const existing = await readPackRegistry(options.registryPath)
+        let newId = baseId
+        for (let suffix = 2; existing.some(record => record.id === newId); suffix += 1) {
+          if (suffix > 999) throw new Error('同名整合包过多，请换一个名字。')
+          newId = `${baseId}-${suffix}`
+        }
+        const homePath = path.join(packsRoot, newId)
+
+        // 先把目标版本装好：下载/校验失败时旧包与磁盘上的新目录都还没动，失败面最小。
+        options.emitEvent({ kind: 'stage', label: `正在准备 DSH ${version}`, percent: null })
+        if (options.ensureDshVersionInstalled) await options.ensureDshVersionInstalled(version)
+
+        options.emitEvent({ kind: 'stage', label: '正在复制整合包内容…', percent: 0 })
+        const plan = await planSnapshot(sourceHome, { packId, include: { credentials: true, sessions: true } })
+        await mkdir(path.dirname(scratchZip), { recursive: true })
+        await writeSnapshotZip(plan, scratchZip, {
+          onProgress: (written, total) => options.emitEvent({ kind: 'stage', label: '正在复制整合包内容…', percent: packPercent(written, total) }),
+        })
+        await extractSnapshot(scratchZip, homePath, { newId })
+        createdHome = homePath
+        await setProfileDshVersion(homePath, newId, version)
+
+        const now = new Date().toISOString()
+        const record: PackRecord = {
+          id: newId,
+          name,
+          description: source.description,
+          version: '1.0.0',
+          dshVersion: version,
+          homePath,
+          source: 'created',
+          installedAt: now,
+          updatedAt: now,
+          state: 'complete',
+          plugins: source.plugins.map(plugin => ({ ...plugin })),
+        }
+        await upsertPackRecord(options.registryPath, record)
+        await writeRecordManifest(record).catch(() => undefined)
+        options.onPackCreated?.(newId)
+        log('success', `已复制出「${name}」（DSH ${version}）。原来的「${source.name}」没有改动。`)
+        return toPackStatus(record, (await options.readSettings()).activePackId)
+      } catch (error) {
+        // 复制失败不留半个包：目录删掉、注册表里也不会有它，旧包毫发无损。
+        if (createdHome) await rm(createdHome, { recursive: true, force: true }).catch(() => undefined)
+        throw error
+      } finally {
+        await rm(scratchZip, { force: true }).catch(() => undefined)
+        active = false
+        options.emitEvent({ kind: 'status', message: '' })
+      }
+    },
+
+    async previewSessionImport(sourcePackId, targetPackId) {
+      return (await buildSessionImportPreview(sourcePackId, targetPackId)).preview
+    },
+
+    async importSessionHistory(sourcePackId, targetPackId) {
+      const reason = guarded()
+      if (reason) throw new Error(reason)
+      active = true
+      // 清单先建好：中途失败也要能撤销已复制出去的那部分，不然留下没有退路的半成品。
+      const manifest: TransferManifest = { version: 1, targetHome: '', createdAt: new Date().toISOString(), files: [] }
+      const undoId = `${Date.now()}`
+      let manifestWritten = false
+      try {
+        const { plan, preview } = await buildSessionImportPreview(sourcePackId, targetPackId)
+        manifest.targetHome = plan.targetHome
+        if (plan.importableCount === 0) {
+          return { ...preview, copiedFiles: 0, copiedBytes: 0, undoId: '' }
+        }
+        const totalBytes = plan.importableBytes + plan.extraBytes
+        options.emitEvent({
+          kind: 'stage',
+          label: `正在复制 ${plan.importableCount} 条会话记录（约 ${Math.round(totalBytes / (1024 * 1024))}MB）…`,
+          percent: 0,
+        })
+        await applySessionTransfer(plan, {
+          manifest,
+          onProgress: progress => options.emitEvent({
+            kind: 'stage',
+            label: `已复制 ${progress.files} 个文件（${Math.round(progress.bytes / (1024 * 1024))}MB）`,
+            percent: packPercent(progress.bytes, totalBytes),
+          }),
+        })
+        const manifestPath = path.join(sessionImportsRoot, `${targetPackId}-${undoId}.json`)
+        await writeTransferManifest(manifestPath, manifest)
+        manifestWritten = true
+        log('success', `已把「${preview.sourceName}」的 ${plan.importableCount} 条会话记录复制进「${preview.targetName}」。`)
+        if (preview.dangling.presets.length + preview.dangling.plugins.length > 0) {
+          log('info', `这些名字在「${preview.targetName}」里没有：${[...preview.dangling.presets, ...preview.dangling.plugins].join('、')}；相关记录能看，但可能发不出新消息。`)
+        }
+        return {
+          ...preview,
+          copiedFiles: manifest.files.length,
+          copiedBytes: manifest.files.reduce((total, file) => total + file.bytes, 0),
+          undoId: manifest.files.length > 0 ? undoId : '',
+        }
+      } catch (error) {
+        // 失败也留清单：撤销靠它把已经拷过去的文件收回去。
+        if (manifest.files.length > 0 && !manifestWritten) {
+          await writeTransferManifest(path.join(sessionImportsRoot, `${targetPackId}-${undoId}.json`), manifest).catch(() => undefined)
+        }
+        throw error
+      } finally {
+        active = false
+        // 与导出同一条规矩：只发 stage 不收口，界面横幅会永远停在「已复制 N 个文件」。
+        options.emitEvent({ kind: 'status', message: '' })
+      }
+    },
+
+    async undoSessionImport(undoId) {
+      const reason = guarded()
+      if (reason) throw new Error(reason)
+      active = true
+      try {
+        if (!/^\d+$/.test(undoId)) throw new Error('撤销凭据无效。')
+        const files = await readdir(sessionImportsRoot).catch(() => [] as string[])
+        // 清单文件名是 <目标包 id>-<undoId>.json；undoId 已限定为数字，不会拼出越界路径。
+        const matches = files.filter(name => name.endsWith(`-${undoId}.json`))
+        if (matches.length !== 1) throw new Error('找不到这次导入的记录，无法撤销。')
+        const manifestPath = path.join(sessionImportsRoot, matches[0]!)
+        const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as TransferManifest
+        const result = await undoSessionTransfer(manifest)
+        // 全删干净了才丢清单；有文件被 DSH 追加过就留着，让用户能看到还剩多少。
+        if (result.kept === 0 && !result.error) await rm(manifestPath, { force: true })
+        return result
+      } finally {
+        active = false
       }
     },
 

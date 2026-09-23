@@ -182,9 +182,16 @@ function isReadOnlyPowerShellRequest(request: AcpPermissionRequest): boolean {
   return /get-(childitem|content|item|command|location)|test-path|resolve-path|select-string|measure-object|git\s+(status|log|diff|show|branch|remote)|\b(pwd|dir|ls|type)\b/.test(command)
 }
 
+/**
+ * 临时文件名必须每次唯一：persist() 没有串行锁，后台分析收尾和用户操作会同时写。
+ * 共用同一个 `.tmp` 时，一条写流还在 writeFile，另一条已经把同名文件 rename 走了，
+ * 目标文件就会短暂出现"两份内容拼起来"的坏 JSON（实测表现为读回 33 行处解析失败）。
+ */
+let temporaryWriteSequence = 0
+
 async function atomicWrite(target: string, content: string): Promise<void> {
   await mkdir(path.dirname(target), { recursive: true })
-  const temporary = `${target}.tmp`
+  const temporary = `${target}.${process.pid}.${Date.now()}.${++temporaryWriteSequence}.tmp`
   await writeFile(temporary, content, 'utf8')
   try {
     await rename(temporary, target)

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { buildDshCoreOverrides, buildManagedDshInstallArgs, buildManagedDshPnpmArgs, listAvailableDshVersions, MissingDshDependencyError, resolveDshCoreOverrides } from '../electron/runtime-versions'
-import { listAvailableNodeVersions } from '../electron/node-runtime'
+import path from 'node:path'
+import { buildDshCoreOverrides, buildManagedDshInstallArgs, buildManagedDshPnpmArgs, createRuntimeVersionService, listAvailableDshVersions, MissingDshDependencyError, resolveDshCoreOverrides } from '../electron/runtime-versions'
+import type { AppSettings } from '../src/types'
 
 describe('runtime version indexes', () => {
   it('derives exact DSH core overrides from registry manifests', () => {
@@ -136,19 +137,63 @@ describe('runtime version indexes', () => {
     await expect(listAvailableDshVersions(allFail, ['https://a.example', 'https://b.example'])).rejects.toThrow('HTTP 503')
   })
 
-  it('normalizes Node.js index entries and identifies prereleases', async () => {
-    const fetchImpl: typeof fetch = async () => ({
-      ok: true,
-      status: 200,
-      json: async () => [
-        { version: 'v24.19.0', date: '2026-08-20', lts: 'Krypton' },
-        { version: 'v25.0.0-nightly20260820', date: '2026-08-20', lts: false },
-      ],
-    } as Response)
+})
 
-    await expect(listAvailableNodeVersions(fetchImpl)).resolves.toEqual([
-      { version: 'v24.19.0', label: 'Krypton', lts: 'Krypton', date: '2026-08-20', prerelease: false },
-      { version: 'v25.0.0-nightly20260820', label: null, lts: false, date: '2026-08-20', prerelease: true },
-    ])
+/**
+ * 回归锁：随包 pnpm 那轮删掉了「Node 可下载版本列表」的 fetch，`read()` 缓存门里那句
+ * `|| nodeAvailable.length === 0` 必须一起去掉——那个字段再也不会被填，留着就等于
+ * 每次读环境都判定缓存过期、重新拉一遍 DSH 版本列表（比删之前更频繁联网）。
+ */
+describe('运行环境读缓存', () => {
+  function makeService(counter: { fetches: number }) {
+    const dshRoot = path.join('C:', 'dsh-launcher-test', 'dsh-runtime')
+    const settings = {
+      dshInstallPath: dshRoot,
+      dshHome: path.join('C:', 'dsh-launcher-test', 'home'),
+      dshVersion: null,
+      nodeVersion: null,
+      profileName: 'web',
+      // 指在 dshRoot 里，读环境时就不会去探测「系统 DSH」（那条分支要跑外部命令）。
+      launchExecutable: path.join(dshRoot, 'node_modules', '.bin', 'dsh.cmd'),
+      launchArgs: ['web'],
+      webPort: 3080,
+      openAfterLaunch: false,
+    } as unknown as AppSettings
+    const githubFetch: typeof fetch = async () => {
+      counter.fetches += 1
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ versions: { '1.0.0': {} }, 'dist-tags': { latest: '1.0.0' }, time: { '1.0.0': '2026-08-20T00:00:00.000Z' } }),
+      } as Response
+    }
+    return createRuntimeVersionService({
+      dshRoot,
+      nodeRoot: path.join('C:', 'dsh-launcher-test', 'node-runtime'),
+      readSettings: async () => settings,
+      saveSettings: async next => next,
+      prepareNodeRuntime: async () => { throw new Error('读环境列表不该准备 Node') },
+      preparePnpmRuntime: async () => { throw new Error('读环境列表不该准备 pnpm') },
+      isRuntimeRunning: () => false,
+      emitOutput: () => {},
+      emitProgress: () => {},
+      githubFetch,
+    })
+  }
+
+  it('连续两次 read() 只联网一次', async () => {
+    const counter = { fetches: 0 }
+    const service = makeService(counter)
+
+    await service.read()
+    expect(counter.fetches).toBeGreaterThan(0)
+    const afterFirst = counter.fetches
+
+    await service.read()
+    expect(counter.fetches).toBe(afterFirst)
+
+    // 显式 refresh 仍然要真的去刷。
+    await service.read(true)
+    expect(counter.fetches).toBe(afterFirst + 1)
   })
 })

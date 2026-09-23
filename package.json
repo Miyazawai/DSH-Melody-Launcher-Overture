@@ -28,6 +28,7 @@
     "test": "vitest run",
     "preview": "vite preview --host 127.0.0.1",
     "pack:official": "vite-node scripts/build-official-pack.mts",
+    "fetch:runtimes": "vite-node scripts/fetch-node-runtime.mts",
     "package:win": "npm run build && electron-builder --win portable"
   },
   "dependencies": {
