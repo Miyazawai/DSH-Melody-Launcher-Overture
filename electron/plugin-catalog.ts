@@ -9,6 +9,7 @@ import type {
   RepositoryAnalysis,
 } from '../src/types'
 import { isSafePackageName, isSafeRepositoryName, repositoryFullNameFromSpecifier } from './profile'
+import { requestNpmMetadata } from './proxy'
 
 interface PackageManifest {
   name?: string
@@ -257,9 +258,7 @@ async function publishedPackage(
 ): Promise<PackageManifest | null> {
   let response: Response
   try {
-    response = await requestWithRetry(`https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`, {
-      headers: { Accept: 'application/json', 'User-Agent': 'DSH-Launcher' },
-    }, fetchImpl)
+    response = await requestNpmMetadata(`/${encodeURIComponent(packageName)}/latest`, fetchImpl)
   } catch {
     return null
   }

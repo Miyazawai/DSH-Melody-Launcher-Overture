@@ -32,7 +32,7 @@ import { describeInstallFailure } from './install-diagnostics'
 import { runCommand, type CommandResult, type OutputLevel } from './command'
 import { withExecutableDirectoryOnPath } from './process'
 import { candidatesFromPackument, compareVersions, readDshVersionIndex, validVersion } from './dsh-release'
-import { buildNetworkEnvironment, npmRegistryCandidates } from './proxy'
+import { buildNetworkEnvironment, npmRegistryCandidates, requestNpmMetadata } from './proxy'
 import {
   DSH_SUBPROCESS_LOCAL_PACKAGE,
   ensureDshScriptPolicy,
@@ -126,10 +126,7 @@ async function readRegistryManifest(name: string, version: string, fetchImpl: ty
   else signal?.addEventListener('abort', abort, { once: true })
   try {
     const encodedName = encodeURIComponent(name).replace(/%2F/gi, '%2f')
-    const response = await fetchImpl(`https://registry.npmjs.org/${encodedName}/${encodeURIComponent(version)}`, {
-      headers: { Accept: 'application/json', 'User-Agent': 'DSH-Launcher' },
-      signal: controller.signal,
-    })
+    const response = await requestNpmMetadata(`/${encodedName}/${encodeURIComponent(version)}`, fetchImpl, { signal: controller.signal })
     if (response.status === 404) throw new MissingDshDependencyError(name, version)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     return await response.json() as RegistryPackageManifest

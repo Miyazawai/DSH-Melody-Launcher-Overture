@@ -5,6 +5,7 @@ import type {
   ApplicationRepositoryAnalysis,
 } from '../src/types'
 import { isSafePackageName, isSafeRepositoryName, repositoryFullNameFromSpecifier } from './profile'
+import { requestNpmMetadata } from './proxy'
 
 export const APPLICATION_MANIFEST_PATH = '.dsh-launcher/addon.json'
 
@@ -171,9 +172,7 @@ async function fetchPackageManifest(
 }
 
 async function fetchPublishedPackage(packageName: string, fetchImpl: typeof fetch): Promise<PackageManifest | null> {
-  const response = await requestWithRetry(`https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`, {
-    headers: { Accept: 'application/json', 'User-Agent': 'DSH-Launcher' },
-  }, fetchImpl)
+  const response = await requestNpmMetadata(`/${encodeURIComponent(packageName)}/latest`, fetchImpl)
   if (response.status === 404) return null
   if (!response.ok) throw new Error(`读取 npm 包 ${packageName} 失败（HTTP ${response.status}）。`)
   try {

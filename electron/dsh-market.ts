@@ -16,6 +16,7 @@ import {
   buildNetworkEnvironment,
   DEFAULT_NPM_REGISTRY,
   NPM_OFFICIAL_REGISTRY,
+  requestNpmMetadata,
 } from './proxy'
 import { readProfile } from './profile'
 import { resolveNodeExecutable, ensureNodeRuntime, ensurePnpmRuntime, type NodeRuntime, type PnpmRuntime } from './node-runtime'
@@ -635,7 +636,7 @@ export function createDshMarketService(options: DshMarketOptions) {
       const npmName = npmAliasByName.get(entry.name) ?? entry.npm
       try {
         if (npmName) {
-          const response = await fetchImpl(`https://registry.npmjs.org/${encodeURIComponent(npmName)}/latest`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(10_000) })
+          const response = await requestNpmMetadata(`/${encodeURIComponent(npmName)}/latest`, fetchImpl)
           const latest = response.ok ? ((await response.json() as { version?: string }).version ?? null) : null
           const current = installed.records.find(item => item.name === name)?.version ?? null
           result[name] = { kind: 'npm', current, latest, updateAvailable: compareDshMarketVersions(current, latest) !== null && (compareDshMarketVersions(current, latest) ?? 0) < 0 }
