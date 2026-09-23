@@ -1,6 +1,7 @@
-import { Check, CopyPlus, X } from 'lucide-react'
+import { Check, CopyPlus } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import type { PackStatus } from '../../types'
+import { ModalShell } from './ModalShell'
 
 export interface PackVersionCloneDialogProps {
   packName: string
@@ -46,61 +47,59 @@ export function PackVersionCloneDialog(props: PackVersionCloneDialogProps) {
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.currentTarget === event.target) onClose() }}>
-      <section className="modal pack-clone-dialog" role="dialog" aria-modal="true" aria-labelledby="pack-clone-title">
-        <header>
-          <div><CopyPlus size={19} /><h2 id="pack-clone-title">切换版本</h2></div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button>
-        </header>
-        <div className="modal-content">
-          {done ? (
-            <>
-              <p className="pack-clone-done"><Check size={15} />已复制出「{done.name}」，它使用 DSH {done.dshVersion}。</p>
-              <p className="dialog-note">原来的「{packName}」仍是 DSH {currentVersion ?? '未标注'}，随时可以在整合包页切回去用。</p>
-            </>
-          ) : candidates.length === 0 ? (
-            <div className="custom-api-empty">
-              <strong>还没有其它 DSH 版本可用</strong>
-              <span>到「DSH版本」页面装一个，再回来切换。</span>
-            </div>
-          ) : (
-            <>
-              <p className="dialog-note">当前包「{packName}」<strong>不会有任何改动</strong>：这里是复制一个新包去用你选的版本，用不惯随时切回来。</p>
-              <div className="dialog-choice-list pack-clone-versions">
-                {candidates.map(candidate => (
-                  <label key={candidate} className={`dialog-choice${version === candidate ? ' selected' : ''}`}>
-                    <input
-                      type="radio"
-                      name="pack-clone-version"
-                      checked={version === candidate}
-                      disabled={disabled}
-                      onChange={() => { setVersion(candidate); setName('') }}
-                    />
-                    <span>
-                      <strong>DSH {candidate}</strong>
-                      <small>{installedVersions.includes(candidate) ? '本机已装' : '需要下载（约 100MB）'}</small>
-                    </span>
-                  </label>
-                ))}
-              </div>
-              <label className="form-field">
-                <span>新包名称</span>
-                <input type="text" value={resolvedName} disabled={disabled} onChange={event => setName(event.target.value)} />
-              </label>
-              {needsDownload && <p className="dialog-note">会先下载并安装 DSH {version}，再复制包内内容；期间不要关机。</p>}
-              <p className="dialog-note">包内插件不会自动升级。新包里如果有的插件用不了，通常是插件还没跟上 DSH {version}。</p>
-            </>
-          )}
+    <ModalShell
+      className="pack-clone-dialog"
+      titleId="pack-clone-title"
+      icon={<CopyPlus size={19} />}
+      title="切换版本"
+      onClose={onClose}
+      footer={<>
+        <button type="button" className="secondary-button" disabled={working} onClick={onClose}>{done ? '关闭' : '取消'}</button>
+        {!done && (
+          <button type="button" className="primary-command" disabled={disabled} onClick={() => void cloneNow()}>
+            {working ? '正在复制…' : '复制为新包'}
+          </button>
+        )}
+      </>}
+    >
+      {done ? (
+        <>
+          <p className="pack-clone-done"><Check size={15} />已复制出「{done.name}」，它使用 DSH {done.dshVersion}。</p>
+          <p className="dialog-note">原来的「{packName}」仍是 DSH {currentVersion ?? '未标注'}，随时可以在整合包页切回去用。</p>
+        </>
+      ) : candidates.length === 0 ? (
+        <div className="custom-api-empty">
+          <strong>还没有其它 DSH 版本可用</strong>
+          <span>到「DSH版本」页面装一个，再回来切换。</span>
         </div>
-        <footer>
-          <button type="button" className="secondary-button" disabled={working} onClick={onClose}>{done ? '关闭' : '取消'}</button>
-          {!done && (
-            <button type="button" className="primary-command" disabled={disabled} onClick={() => void cloneNow()}>
-              {working ? '正在复制…' : '复制为新包'}
-            </button>
-          )}
-        </footer>
-      </section>
-    </div>
+      ) : (
+        <>
+          <p className="dialog-note">当前包「{packName}」<strong>不会有任何改动</strong>：这里是复制一个新包去用你选的版本，用不惯随时切回来。</p>
+          <div className="dialog-choice-list pack-clone-versions">
+            {candidates.map(candidate => (
+              <label key={candidate} className={`dialog-choice${version === candidate ? ' selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="pack-clone-version"
+                  checked={version === candidate}
+                  disabled={disabled}
+                  onChange={() => { setVersion(candidate); setName('') }}
+                />
+                <span>
+                  <strong>DSH {candidate}</strong>
+                  <small>{installedVersions.includes(candidate) ? '本机已装' : '需要下载（约 100MB）'}</small>
+                </span>
+              </label>
+            ))}
+          </div>
+          <label className="form-field">
+            <span>新包名称</span>
+            <input type="text" value={resolvedName} disabled={disabled} onChange={event => setName(event.target.value)} />
+          </label>
+          {needsDownload && <p className="dialog-note">会先下载并安装 DSH {version}，再复制包内内容；期间不要关机。</p>}
+          <p className="dialog-note">包内插件不会自动升级。新包里如果有的插件用不了，通常是插件还没跟上 DSH {version}。</p>
+        </>
+      )}
+    </ModalShell>
   )
 }

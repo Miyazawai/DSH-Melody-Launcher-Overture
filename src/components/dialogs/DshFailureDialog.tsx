@@ -1,7 +1,8 @@
-import { Check, Copy, TriangleAlert, X } from 'lucide-react'
+import { Check, Copy, TriangleAlert } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import packageMetadata from '../../../package.json'
 import type { RuntimeFailure } from '../../types'
+import { ModalShell } from './ModalShell'
 
 /**
  * PCL2 式启动失败弹窗：错误摘要 + 完整诊断 + 一键复制「修复引导提示词」。
@@ -72,42 +73,28 @@ export function DshFailureDialog({ failure, onClose }: DshFailureDialogProps) {
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.currentTarget === event.target) onClose() }}>
-      <section className="modal dsh-failure-dialog" role="dialog" aria-modal="true" aria-labelledby="dsh-failure-title">
-        <header>
-          <div><TriangleAlert size={19} /><h2 id="dsh-failure-title">DSH 进程异常退出</h2></div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button>
-        </header>
-        <div className="modal-content">
-          <p className="dsh-failure-headline">{headline}</p>
-          <div className="dsh-failure-meta">
-            <span className="dsh-failure-chip">整合包：{failure.profileName || '未知'}</span>
-            <span className="dsh-failure-chip">{new Date(failure.failedAt).toLocaleString('zh-CN', { hour12: false })}</span>
-          </div>
-          <pre className="dsh-failure-log" role="log">{failure.diagnostics.trim()}</pre>
-          <p className="dsh-failure-hint">
-            把「修复引导提示词」复制给其它 AI 助手或原版 DSH，让它带着完整日志直接开始修复。
-          </p>
-        </div>
-        <footer>
-          <button type="button" className="secondary-button" onClick={onClose}>关闭</button>
-          <button type="button" className={`primary-command${copied ? ' is-copied' : ''}`} onClick={handleCopy}>
-            {copied ? <Check size={16} /> : <Copy size={16} />}{copied ? '已复制' : '复制修复引导提示词'}
-          </button>
-        </footer>
-      </section>
-      <style>{dialogStyle}</style>
-    </div>
+    <ModalShell
+      className="dsh-failure-dialog"
+      titleId="dsh-failure-title"
+      icon={<TriangleAlert size={19} />}
+      title="DSH 进程异常退出"
+      onClose={onClose}
+      footer={<>
+        <button type="button" className="secondary-button" onClick={onClose}>关闭</button>
+        <button type="button" className={`primary-command${copied ? ' is-copied' : ''}`} onClick={handleCopy}>
+          {copied ? <Check size={16} /> : <Copy size={16} />}{copied ? '已复制' : '复制修复引导提示词'}
+        </button>
+      </>}
+    >
+      <p className="dsh-failure-headline">{headline}</p>
+      <div className="dsh-failure-meta">
+        <span className="dsh-failure-chip">整合包：{failure.profileName || '未知'}</span>
+        <span className="dsh-failure-chip">{new Date(failure.failedAt).toLocaleString('zh-CN', { hour12: false })}</span>
+      </div>
+      <pre className="dsh-failure-log" role="log">{failure.diagnostics.trim()}</pre>
+      <p className="dsh-failure-hint">
+        把「修复引导提示词」复制给其它 AI 助手或原版 DSH，让它带着完整日志直接开始修复。
+      </p>
+    </ModalShell>
   )
 }
-
-const dialogStyle = `
-.dsh-failure-dialog { max-width: 720px; width: min(720px, calc(100vw - 64px)); }
-.dsh-failure-dialog .modal-content { display: flex; flex-direction: column; gap: 10px; }
-.dsh-failure-headline { margin: 0; color: var(--ink); font-size: 14px; font-weight: 700; }
-.dsh-failure-meta { display: flex; gap: 8px; flex-wrap: wrap; }
-.dsh-failure-chip { padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 12%, transparent); color: var(--quiet); font-size: 11px; font-weight: 600; }
-.dsh-failure-log { margin: 0; max-height: 300px; overflow: auto; padding: 10px 12px; border-radius: 10px; background: var(--surface-strong); color: var(--ink); font: 12px/1.7 ui-monospace, "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
-.dsh-failure-hint { margin: 0; color: var(--quiet); font-size: 12px; line-height: 1.6; }
-.primary-command.is-copied { background: #2f9e54; border-color: #2f9e54; }
-`

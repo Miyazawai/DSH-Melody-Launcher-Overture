@@ -9149,3 +9149,13 @@ input:focus-visible {
 .pack-clone-dialog .form-field { margin-top: 2px; }
 .pack-clone-done { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; font-weight: 600; line-height: 1.5; }
 .pack-clone-versions { max-height: 210px; overflow-y: auto; }
+
+/* DSH 异常退出弹窗：原本写在组件里的 <style> 模板串，挪到这里和其他弹窗同一处。 */
+.dsh-failure-dialog { max-width: 720px; width: min(720px, calc(100vw - 64px)); }
+.dsh-failure-dialog .modal-content { display: flex; flex-direction: column; gap: 10px; }
+.dsh-failure-headline { margin: 0; color: var(--ink); font-size: 14px; font-weight: 700; }
+.dsh-failure-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+.dsh-failure-chip { padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 12%, transparent); color: var(--quiet); font-size: 11px; font-weight: 600; }
+.dsh-failure-log { margin: 0; max-height: 300px; overflow: auto; padding: 10px 12px; border-radius: 10px; background: var(--surface-strong); color: var(--ink); font: 12px/1.7 ui-monospace, "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+.dsh-failure-hint { margin: 0; color: var(--quiet); font-size: 12px; line-height: 1.6; }
+.primary-command.is-copied { background: #2f9e54; border-color: #2f9e54; }
