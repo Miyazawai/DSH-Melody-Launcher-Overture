@@ -99,7 +99,19 @@ function checkedAt(): string {
   return new Date().toISOString()
 }
 
+/** 网络层失败要翻成中文：这里拼的是 failures.join('；')，直接进用户可见的更新失败文案。 */
+const NETWORK_ERROR_TEXT: Record<string, string> = {
+  ECONNREFUSED: '连不上 GitHub（连接被拒绝，通常是代理没开）。',
+  ETIMEDOUT: '连 GitHub 超时。',
+  ECONNRESET: '连 GitHub 的连接被重置。',
+  ENOTFOUND: '解析不到 GitHub 域名（离线或 DNS 被劫持）。',
+  EAI_AGAIN: 'DNS 暂时解析失败。',
+}
+
 function errorMessage(error: unknown): string {
+  // fetch 失败时真实错误码在 cause 上，error.message 只有没信息量的 "fetch failed"。
+  const code = (error as { cause?: { code?: unknown } })?.cause?.code ?? (error as { code?: unknown })?.code
+  if (typeof code === 'string' && NETWORK_ERROR_TEXT[code]) return NETWORK_ERROR_TEXT[code]
   return error instanceof Error ? error.message : String(error)
 }
 

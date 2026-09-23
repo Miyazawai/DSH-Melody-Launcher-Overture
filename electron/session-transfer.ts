@@ -287,8 +287,16 @@ async function copyFileTree(
         continue
       }
       if (!await stat(from).then(info => info.isFile()).catch(() => false)) continue
-      if (await stat(to).then(target => target.isFile()).catch(() => false)) continue
-      await pipeline(createReadStream(from), createWriteStream(to, { flags: 'wx' }))
+      // 目标已存在就跳过（绝不覆盖用户自己的会话）。判存交给 wx 的排他创建：
+      // 先 stat 再开在两者之间留竞态窗口，中途冒出来的文件会把整次迁移抛死。
+      try {
+        await pipeline(createReadStream(from), createWriteStream(to, { flags: 'wx' }))
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue
+        // 写一半失败要收掉，否则下次重跑撞上 EEXIST，把半截文件当成已拷好跳过。
+        await rm(to, { force: true }).catch(() => undefined)
+        throw error
+      }
       // 清单记的是目标文件自己的大小与时间：撤销时比的是它，不是源文件（拷过去 mtime 就变了）。
       const written = await stat(to).catch(() => null)
       if (!written) continue
@@ -304,6 +312,16 @@ async function copyFileTree(
 export async function writeTransferManifest(manifestPath: string, manifest: TransferManifest): Promise<void> {
   await mkdir(path.dirname(manifestPath), { recursive: true })
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+}
+
+/**
+ * 严格位于 root 之下（不含 root 自身）。Windows 路径大小写不敏感，
+ * 清单里记的 targetHome 与盘上实际大小写不一致时，裸 startsWith 会走不出收空目录的循环。
+ */
+function isStrictlyInside(target: string, root: string): boolean {
+  const a = process.platform === 'win32' ? target.toLowerCase() : target
+  const b = process.platform === 'win32' ? root.toLowerCase() : root
+  return a.startsWith(`${b}${path.sep}`)
 }
 
 /**
@@ -333,7 +351,7 @@ export async function undoSessionTransfer(manifest: TransferManifest): Promise<{
   // 由深到浅收掉空目录，不留 sessions/<项目键>/ 这种空壳。
   for (const directory of [...new Set(createdDirectories)].sort((a, b) => b.split(path.sep).length - a.split(path.sep).length)) {
     let current = directory
-    while (current.startsWith(manifest.targetHome + path.sep)) {
+    while (isStrictlyInside(current, manifest.targetHome)) {
       const leftovers = await readdir(current).catch(() => null)
       if (leftovers === null || leftovers.length > 0) break
       await rm(current, { recursive: true, force: true }).catch(() => undefined)
