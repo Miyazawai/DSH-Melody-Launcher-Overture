@@ -1,7 +1,6 @@
 import { Check, ExternalLink, LoaderCircle, RefreshCw, Search, Star, Store, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLauncherApi } from '../api/client'
-import { useLauncherStore } from '../hooks/use-launcher-store'
 import { PageHeading } from '../components/PageHeading'
 import { SkeletonCards } from '../components/Skeleton'
 import { formatStars } from '../lib/format'
@@ -20,9 +19,11 @@ interface DshMarketViewProps {
   onProfileChanged?: () => Promise<void> | void
   /** 嵌入 C 端设置页时：去掉整页容器与 PageHeading，改用紧凑面板头。 */
   embedded?: boolean
+  /** 当前激活整合包名：变化时重拉安装态。由上层传，不在这里再开一份 store。 */
+  activeProfileName: string | null
 }
 
-export function DshMarketView({ onProfileChanged, embedded = false }: DshMarketViewProps) {
+export function DshMarketView({ onProfileChanged, embedded = false, activeProfileName }: DshMarketViewProps) {
   const api = useLauncherApi()
   const [catalog, setCatalog] = useState<DshMarketCatalog | null>(cachedCatalog)
   const [query, setQuery] = useState('')
@@ -73,8 +74,6 @@ export function DshMarketView({ onProfileChanged, embedded = false }: DshMarketV
 
   // 激活整合包变化时——新建/删除/切换整合包——重新拉一次安装态，
   // 避免出现「整合包已删但 DSH Market 还显示已启用」的错觉。
-  const store = useLauncherStore()
-  const activeProfileName = store.settings?.profileName ?? null
   useEffect(() => { void load() }, [activeProfileName])
 
   const visible = useMemo(() => {

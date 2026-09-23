@@ -26,7 +26,6 @@ import {
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useLauncherApi } from '../api/client'
 import { resolveLauncherApi } from '../api/client'
-import { useLauncherStore } from '../hooks/use-launcher-store'
 import { downloadPercent, formatBytes, formatSpeed } from '../lib/format'
 import { SkeletonStrip } from '../components/Skeleton'
 import { DshMarketView } from './DshMarketView'
@@ -93,6 +92,7 @@ interface SettingsPanelsProps {
   onTogglePlugin: (plugin: ManagedPlugin, enabled: boolean) => Promise<boolean>
   onUninstallPlugin: (plugin: ManagedPlugin) => Promise<boolean>
   onToggleSkill: (skill: InstalledSkill, enabled: boolean) => void
+  onUninstallSkill: (skill: InstalledSkill) => Promise<boolean>
   onTogglePreset: (preset: InstalledPreset, enabled: boolean) => void
   onSkillInstalled: (result: SkillInstallResult) => void
   onProfileChanged: () => void
@@ -148,6 +148,7 @@ export function SettingsPanels({
   onTogglePlugin,
   onUninstallPlugin,
   onToggleSkill,
+  onUninstallSkill,
   onTogglePreset,
   onSkillInstalled,
   onProfileChanged,
@@ -238,6 +239,8 @@ export function SettingsPanels({
             <SettingsPluginsTab
               profile={profile}
               busy={locked}
+              busyKey={busy}
+              activeProfileName={settings.profileName}
               onTogglePlugin={onTogglePlugin}
               onUninstallPlugin={onUninstallPlugin}
               onOpenPluginFolder={onOpenPluginFolder}
@@ -250,8 +253,10 @@ export function SettingsPanels({
             <SettingsSkillsTab
               installedSkills={installedSkills}
               busy={locked}
+              busyKey={busy}
               dshHome={settings.dshHome}
               onToggleSkill={onToggleSkill}
+              onUninstallSkill={onUninstallSkill}
               onSkillInstalled={onSkillInstalled}
               onRefresh={onRefresh}
               refreshLocked={locked}
@@ -262,6 +267,7 @@ export function SettingsPanels({
             <SettingsPresetsTab
               installedPresets={installedPresets}
               busy={locked}
+              busyKey={busy}
               dshHome={settings.dshHome}
               onTogglePreset={onTogglePreset}
               onOpenPath={onOpenPath}
@@ -517,6 +523,8 @@ function VersionGroup({
 function SettingsPluginsTab({
   profile,
   busy,
+  busyKey,
+  activeProfileName,
   onTogglePlugin,
   onUninstallPlugin,
   onOpenPluginFolder,
@@ -526,6 +534,9 @@ function SettingsPluginsTab({
 }: {
   profile: ProfileState
   busy: boolean
+  /** 全局忙碌标识；ResourceRow 的单项转圈要按包名比对，不能用聚合后的 boolean。 */
+  busyKey: string | null
+  activeProfileName: string | null
   onTogglePlugin: (plugin: ManagedPlugin, enabled: boolean) => Promise<boolean>
   onUninstallPlugin: (plugin: ManagedPlugin) => Promise<boolean>
   onOpenPluginFolder: (packageName: string) => void
@@ -533,7 +544,6 @@ function SettingsPluginsTab({
   onRefresh: () => void
   refreshLocked: boolean
 }) {
-  const store = useLauncherStore()
   const [subView, setSubView] = useState<'installed' | 'market'>('installed')
   return (
     <div className="settings-stack">
@@ -558,7 +568,7 @@ function SettingsPluginsTab({
                 locked={plugin.locked}
                 enabled={plugin.enabled}
                 busy={busy}
-                working={store.busy === plugin.packageName}
+                working={busyKey === plugin.packageName}
                 onToggle={enabled => { void onTogglePlugin(plugin, enabled) }}
                 onRemove={!plugin.locked ? () => { void onUninstallPlugin(plugin) } : undefined}
                 onOpenFolder={plugin.builtin ? undefined : () => onOpenPluginFolder(plugin.packageName)}
@@ -570,7 +580,7 @@ function SettingsPluginsTab({
       </div>
       <div className={subView === 'market' ? undefined : 'view-hidden'}>
         <section className="settings-panel">
-          <DshMarketView embedded onProfileChanged={onProfileChanged} />
+          <DshMarketView embedded activeProfileName={activeProfileName} onProfileChanged={onProfileChanged} />
         </section>
       </div>
     </div>
@@ -580,8 +590,10 @@ function SettingsPluginsTab({
 function SettingsSkillsTab({
   installedSkills,
   busy,
+  busyKey,
   dshHome,
   onToggleSkill,
+  onUninstallSkill,
   onSkillInstalled,
   onRefresh,
   refreshLocked,
@@ -589,14 +601,15 @@ function SettingsSkillsTab({
 }: {
   installedSkills: InstalledSkill[]
   busy: boolean
+  busyKey: string | null
   dshHome: string
   onToggleSkill: (skill: InstalledSkill, enabled: boolean) => void
+  onUninstallSkill: (skill: InstalledSkill) => Promise<boolean>
   onSkillInstalled: (result: SkillInstallResult) => void
   onRefresh: () => void
   refreshLocked: boolean
   onOpenPath: (targetPath: string) => void
 }) {
-  const store = useLauncherStore()
   const [subView, setSubView] = useState<'installed' | 'market'>('installed')
   return (
     <div className="settings-stack">
@@ -619,9 +632,9 @@ function SettingsSkillsTab({
               subtitle={skill.description || skill.path}
               enabled={skill.enabled}
               busy={busy}
-              working={store.busy === `skill-remove:${skill.name}`}
+              working={busyKey === `skill-remove:${skill.name}`}
               onToggle={enabled => onToggleSkill(skill, enabled)}
-              onRemove={() => { void store.uninstallSkill(skill) }}
+              onRemove={() => { void onUninstallSkill(skill) }}
               onOpenFolder={() => onOpenPath(skill.path)}
             />
           ))}
@@ -631,6 +644,8 @@ function SettingsSkillsTab({
         <SkillMarketPanel
           installedSkills={installedSkills}
           busy={busy}
+          busyKey={busyKey}
+          onUninstallSkill={onUninstallSkill}
           onInstalled={onSkillInstalled}
           onRefresh={onRefresh}
           refreshLocked={refreshLocked}
@@ -643,6 +658,7 @@ function SettingsSkillsTab({
 function SettingsPresetsTab({
   installedPresets,
   busy,
+  busyKey,
   dshHome,
   onTogglePreset,
   onOpenPath,
@@ -651,6 +667,7 @@ function SettingsPresetsTab({
 }: {
   installedPresets: InstalledPreset[]
   busy: boolean
+  busyKey: string | null
   dshHome: string
   onTogglePreset: (preset: InstalledPreset, enabled: boolean) => void
   onOpenPath: (targetPath: string) => void
@@ -658,7 +675,6 @@ function SettingsPresetsTab({
   refreshLocked: boolean
 }) {
   const api = useLauncherApi()
-  const store = useLauncherStore()
   const [builtin, setBuiltin] = useState<BuiltinAgentPreset[] | null>(null)
   useEffect(() => {
     let alive = true
@@ -704,7 +720,7 @@ function SettingsPresetsTab({
             subtitle={preset.enabled ? preset.path : `已停用（${preset.path}）`}
             enabled={preset.enabled}
             busy={busy}
-            working={store.busy === preset.name}
+            working={busyKey === `preset:${preset.name}`}
             onToggle={enabled => onTogglePreset(preset, enabled)}
             onOpenFolder={() => onOpenPath(preset.path)}
           />
@@ -786,12 +802,16 @@ const SkillMarketCard = memo(function SkillMarketCard({
 function SkillMarketPanel({
   installedSkills,
   busy,
+  busyKey,
+  onUninstallSkill,
   onInstalled,
   onRefresh,
   refreshLocked,
 }: {
   installedSkills: InstalledSkill[]
   busy: boolean
+  busyKey: string | null
+  onUninstallSkill: (skill: InstalledSkill) => Promise<boolean>
   onInstalled: (result: SkillInstallResult) => void
   onRefresh: () => void
   refreshLocked: boolean
@@ -875,12 +895,11 @@ function SkillMarketPanel({
   const handleToggle = useCallback((name: string, enabled: boolean) => {
     void api.toggleSkill(name, enabled).then(onRefresh)
   }, [api, onRefresh])
-  const store = useLauncherStore()
   const handleUninstall = useCallback((name: string) => {
     const skill = installedSkills.find(item => item.name === name)
     if (!skill) return
-    void store.uninstallSkill(skill).then(ok => { if (ok) onRefresh() })
-  }, [installedSkills, onRefresh, store])
+    void onUninstallSkill(skill).then(ok => { if (ok) onRefresh() })
+  }, [installedSkills, onRefresh, onUninstallSkill])
   const handleOpenRepo = useCallback((url: string) => { void api.openExternal(url) }, [api])
 
   return (
@@ -936,7 +955,7 @@ function SkillMarketPanel({
             key={entry.key}
             entry={entry}
             busy={busy}
-            isBusy={busyName === entry.name || store.busy === `skill-remove:${entry.name}`}
+            isBusy={busyName === entry.name || busyKey === `skill-remove:${entry.name}`}
             onInstall={handleInstall}
             onToggle={handleToggle}
             onUninstall={handleUninstall}

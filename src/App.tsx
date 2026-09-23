@@ -168,6 +168,7 @@ function LauncherShell() {
                     installedPresets={store.installedPresets}
                     packs={store.packs}
                     busy={store.busy}
+                    onUninstallSkill={store.uninstallSkill}
                     profileMutationLocked={profileMutationLocked}
                     installProgress={store.installProgress}
                     onRefresh={() => {
