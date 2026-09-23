@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { writeFileAtomic } from '../electron/fs-atomic'
@@ -52,6 +52,23 @@ describe('writeFileAtomic', () => {
     await mkdir(target)
     await expect(writeFileAtomic(target, payload('second', 8))).rejects.toThrow()
     expect(await readdir(root)).toEqual(['config.json'])
+  })
+
+  // Windows 上重命名覆盖一个正被打开的目标会 EPERM——旧代码为此退回截断直写，
+  // 那正是撕裂的成因。这条锁住新语义：写失败可以，把已有完好内容截断不行。
+  it.skipIf(process.platform !== 'win32')('rename 被并发读者挡住时抛错，且不截断已有内容', async () => {
+    const root = await workspace()
+    const target = path.join(root, 'packs.json')
+    const original = payload('original', 4096)
+    await writeFileAtomic(target, original)
+    const handle = await open(target, 'r+')
+    try {
+      await expect(writeFileAtomic(target, payload('replacement', 8192), { fallbackToDirectWrite: true })).rejects.toThrow()
+    } finally {
+      await handle.close()
+    }
+    expect(await readFile(target, 'utf8')).toBe(original)
+    expect((await readdir(root)).filter(name => name.endsWith('.tmp'))).toEqual([])
   })
 
   // POSIX 权限位；Windows 上 mode 不参与访问控制，跳过而不是写成恒真断言。

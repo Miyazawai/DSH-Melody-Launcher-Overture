@@ -45,8 +45,11 @@ export interface AtomicWriteOptions {
   /** 目标所在目录的权限，如 0o700。 */
   dirMode?: number
   /**
-   * rename 始终失败时退回直接写目标。这会让读者看到半截文件，属于有损兜底：
-   * 只在"宁可半截也不要整份丢失"的场景（可重建缓存）打开。
+   * rename 始终失败时，是否退回"直接写目标"。
+   *
+   * 直接写会先截断再写，读者能在中间看到半截文件——所以它只在**目标还不存在**时才放行：
+   * 那种情况下没有完好内容可破坏。目标已存在时宁可抛错，因为对注册表/收据这类用户数据，
+   * 撕坏（= 用户的包整列表消失）远比这次写失败（可以重试）严重得多。
    */
   fallbackToDirectWrite?: boolean
 }
@@ -82,7 +85,9 @@ export async function writeFileAtomic(targetPath: string, data: string | Buffer,
       await renameOverwrite(temporary, targetPath)
     } catch (error) {
       if (!options.fallbackToDirectWrite) throw error
-      // 有损兜底：目标盘连 rename 覆盖都做不到时，直接写至少不丢整份内容。
+      // 目标已存在时绝不截断重写：那正是并发读者读到撕裂 JSON 的成因。
+      const targetExists = await stat(targetPath).then(() => true, () => false)
+      if (targetExists) throw error
       await writeFile(targetPath, data, modeOptions)
       await rm(temporary, { force: true }).catch(() => undefined)
     }
