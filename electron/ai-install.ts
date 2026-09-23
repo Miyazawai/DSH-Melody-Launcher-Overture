@@ -18,8 +18,9 @@
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { writeFileAtomic } from './fs-atomic'
 import { createInterface } from 'node:readline'
 import type {
   AiInstallEvent,
@@ -907,17 +908,9 @@ async function readTextIfExists(filePath: string): Promise<string | null> {
   }
 }
 
-/** 临时文件 + rename 原子写（对齐 plugin-receipts.ts）。 */
+/** 统一走 writeFileAtomic：临时名必须唯一，否则并发写同一文件时后 rename 的会把对方半截载荷带走。 */
 async function atomicWrite(target: string, content: string): Promise<void> {
-  await mkdir(path.dirname(target), { recursive: true })
-  const temporaryPath = `${target}.dsh-launcher.tmp`
-  await writeFile(temporaryPath, content, 'utf8')
-  try {
-    await rename(temporaryPath, target)
-  } catch {
-    await writeFile(target, content, 'utf8')
-    await unlink(temporaryPath).catch(() => undefined)
-  }
+  await writeFileAtomic(target, content, { fallbackToDirectWrite: true })
 }
 
 /** relPath 只允许单层普通文件名，杜绝 ../ 或绝对路径穿越。 */

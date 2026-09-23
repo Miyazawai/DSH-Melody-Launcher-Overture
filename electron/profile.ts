@@ -1,4 +1,5 @@
-import { access, mkdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises'
+import { access, readFile, realpath } from 'node:fs/promises'
+import { writeFileAtomic } from './fs-atomic'
 import path from 'node:path'
 import type { ManagedPlugin, ProfileState } from '../src/types'
 import { readPluginReceipts } from './plugin-receipts'
@@ -177,7 +178,7 @@ export async function updateBundles(
   transform: (bundles: string[], manifest: PackageManifest) => string[],
   pluginReceiptsPath?: string,
 ): Promise<ProfileState> {
-  const { profileDir, manifestPath } = profilePaths(dshHome, profileName)
+  const { manifestPath } = profilePaths(dshHome, profileName)
   const manifest = await readJson<PackageManifest>(manifestPath)
   if (!manifest) throw new Error('此配置尚未初始化。请先启动 DSH，或从“资源市场”安装一个 Plugin。')
 
@@ -188,15 +189,7 @@ export async function updateBundles(
     ...manifest.dsh,
     profile: { ...manifest.dsh?.profile, bundles: next },
   }
-  await mkdir(profileDir, { recursive: true })
-  const temporaryPath = `${manifestPath}.dsh-launcher.tmp`
-  await writeFile(temporaryPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
-  try {
-    await rename(temporaryPath, manifestPath)
-  } catch {
-    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
-    await unlink(temporaryPath).catch(() => undefined)
-  }
+  await writeFileAtomic(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { fallbackToDirectWrite: true })
   return readProfile(dshHome, profileName, pluginReceiptsPath)
 }
 

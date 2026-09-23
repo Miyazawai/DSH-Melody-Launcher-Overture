@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { writeFileAtomic } from './fs-atomic'
 import { DEFAULT_PROFILE_NAME, DSH_PACKAGE_NAME } from '../src/constants'
 import type {
   ApplicationRepositoryAnalysis,
@@ -247,15 +248,7 @@ export async function syncProfilePnpmConfig(
   kept.push(`store-dir=${storeRoot.replace(/\\/g, '/')}`)
   kept.push(`registry=${registry}`)
   const content = `${kept.join('\n')}\n`
-  const temporary = `${npmrcPath}.dsh-launcher.tmp`
-  await mkdir(profileDir, { recursive: true })
-  await writeFile(temporary, content, 'utf8')
-  try {
-    await rename(temporary, npmrcPath)
-  } catch {
-    await writeFile(npmrcPath, content, 'utf8')
-    await rm(temporary, { force: true }).catch(() => undefined)
-  }
+  await writeFileAtomic(npmrcPath, content, { fallbackToDirectWrite: true })
 }
 
 export function createInstaller(options: InstallerOptions): Installer {

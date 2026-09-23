@@ -11,8 +11,8 @@
  *   - 写入用 `{ version: 1, records: [...] }` 信封结构，为将来 schema 演进留位。
  */
 
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
-import path from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { writeFileAtomic } from './fs-atomic'
 import type { PackInstalledApplication, PackInstalledPlugin, PackInstalledPreset, PackInstalledSkill, PackSource, PackStatus } from '../src/types'
 
 /** 注册表里的一条整合包记录。id = pack-<safeName>，只对应本地清单，不是 DSH profile 名。 */
@@ -56,18 +56,9 @@ interface RegistryFile {
   records: PackRecord[]
 }
 
-/** 原子写 `packs.json`：临时文件 + rename，rename 失败回退直接写（对齐 plugin-receipts）。 */
+/** 原子写 `packs.json`：与 receipts 走同一个 writeFileAtomic 实现。 */
 async function writeRegistryFile(registryPath: string, value: RegistryFile): Promise<void> {
-  await mkdir(path.dirname(registryPath), { recursive: true })
-  const temporaryPath = `${registryPath}.tmp`
-  const content = `${JSON.stringify(value, null, 2)}\n`
-  await writeFile(temporaryPath, content, 'utf8')
-  try {
-    await rename(temporaryPath, registryPath)
-  } catch {
-    await writeFile(registryPath, content, 'utf8')
-    await unlink(temporaryPath).catch(() => undefined)
-  }
+  await writeFileAtomic(registryPath, `${JSON.stringify(value, null, 2)}\n`, { fallbackToDirectWrite: true })
 }
 
 /**

@@ -1,4 +1,5 @@
-import { readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
+import { writeFileAtomic } from './fs-atomic'
 import { parse, stringify } from 'yaml'
 import { repositoryFullNameFromSpecifier } from './profile'
 
@@ -93,13 +94,6 @@ async function setBuildKeys(workspacePath: string, buildKeys: string[], allowed:
   for (const key of changed) cleaned[key] = allowed
   workspace.allowBuilds = cleaned
 
-  const temporaryPath = `${workspacePath}.dsh-launcher.tmp`
-  await writeFile(temporaryPath, stringify(workspace, { lineWidth: 0 }), 'utf8')
-  try {
-    await rename(temporaryPath, workspacePath)
-  } catch {
-    await writeFile(workspacePath, stringify(workspace, { lineWidth: 0 }), 'utf8')
-    await unlink(temporaryPath).catch(() => undefined)
-  }
+  await writeFileAtomic(workspacePath, stringify(workspace, { lineWidth: 0 }), { fallbackToDirectWrite: true })
   return changed
 }

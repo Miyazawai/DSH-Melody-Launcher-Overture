@@ -1,5 +1,6 @@
-import { mkdir, readFile, rename, unlink, writeFile, rm } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
+import { writeFileAtomic } from './fs-atomic'
 import type { PackManifest } from '../src/types'
 import { parsePackManifest, serializePackManifest } from './pack-manifest'
 
@@ -9,17 +10,8 @@ export function packManifestPath(root: string, packId: string): string {
 }
 
 export async function writePackManifest(root: string, packId: string, manifest: PackManifest): Promise<string> {
-  await mkdir(root, { recursive: true })
   const target = packManifestPath(root, packId)
-  const temporary = `${target}.tmp`
-  const content = serializePackManifest(manifest)
-  await writeFile(temporary, content, 'utf8')
-  try {
-    await rename(temporary, target)
-  } catch {
-    await writeFile(target, content, 'utf8')
-    await unlink(temporary).catch(() => undefined)
-  }
+  await writeFileAtomic(target, serializePackManifest(manifest), { fallbackToDirectWrite: true })
   return target
 }
 

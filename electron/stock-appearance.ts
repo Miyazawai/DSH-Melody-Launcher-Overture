@@ -1,4 +1,4 @@
-import { mkdir, rename, unlink, writeFile } from 'node:fs/promises'
+import { writeFileAtomic } from './fs-atomic'
 import path from 'node:path'
 
 /**
@@ -20,16 +20,8 @@ export function activeSkinStatePath(dshHome: string): string {
 export async function applyStockAppearance(dshHome: string): Promise<boolean> {
   try {
     const target = activeSkinStatePath(dshHome)
-    await mkdir(path.dirname(target), { recursive: true })
     const body = `${JSON.stringify(STOCK_ACTIVE_SKIN_STATE, null, 2)}\n`
-    const temporary = `${target}.dsh-launcher.tmp`
-    await writeFile(temporary, body, 'utf8')
-    try {
-      await rename(temporary, target)
-    } catch {
-      await writeFile(target, body, 'utf8')
-      await unlink(temporary).catch(() => undefined)
-    }
+    await writeFileAtomic(target, body, { fallbackToDirectWrite: true })
     return true
   } catch {
     return false

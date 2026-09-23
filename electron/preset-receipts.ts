@@ -1,5 +1,5 @@
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
-import path from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { writeFileAtomic } from './fs-atomic'
 
 /**
  * Agent 预设安装凭据。
@@ -40,15 +40,7 @@ async function readReceiptFile(filePath: string): Promise<ReceiptFile> {
 }
 
 async function writeReceiptFile(filePath: string, value: ReceiptFile): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true })
-  const temporaryPath = `${filePath}.tmp`
-  await writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
-  try {
-    await rename(temporaryPath, filePath)
-  } catch {
-    await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
-    await unlink(temporaryPath).catch(() => undefined)
-  }
+  await writeFileAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`, { fallbackToDirectWrite: true })
 }
 
 export async function readPresetReceipts(filePath: string): Promise<PresetInstallReceipt[]> {

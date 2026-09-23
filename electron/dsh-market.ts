@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
+import { writeFileAtomic } from './fs-atomic'
 import path from 'node:path'
 import type {
   AppSettings,
@@ -220,10 +221,7 @@ export function createDshMarketService(options: DshMarketOptions) {
   const writeDiskCache = async (registry: Registry, validator: string | null) => {
     if (!options.cachePath) return
     try {
-      await mkdir(path.dirname(options.cachePath), { recursive: true })
-      const temporaryPath = `${options.cachePath}.dsh-launcher.tmp`
-      await writeFile(temporaryPath, JSON.stringify({ version: 1, fetchedAt: Date.now(), validator, registry } satisfies DshMarketCacheFile), 'utf8')
-      await rename(temporaryPath, options.cachePath)
+      await writeFileAtomic(options.cachePath, JSON.stringify({ version: 1, fetchedAt: Date.now(), validator, registry } satisfies DshMarketCacheFile))
     } catch {
       // 磁盘缓存只是加速器，写失败不影响本次返回。
     }
@@ -537,12 +535,7 @@ export function createDshMarketService(options: DshMarketOptions) {
       const bundles = [...(manifest.dsh?.profile?.bundles ?? [])]
       if (bundles.includes(packageName)) return
       manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: [...bundles, packageName] } }
-      const temporary = `${manifestPath}.dsh-market.tmp`
-      await writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
-      try { await rename(temporary, manifestPath) } catch {
-        await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
-        await unlink(temporary).catch(() => undefined)
-      }
+      await writeFileAtomic(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { fallbackToDirectWrite: true })
     } catch { /* 整合包写入失败不阻断安装 */ }
   }
 
@@ -702,10 +695,7 @@ export function createDshMarketService(options: DshMarketOptions) {
       const bundles = [...(manifest.dsh?.profile?.bundles ?? [])]
       const next = enabled ? [...new Set([...bundles, alias])] : bundles.filter(item => item !== alias)
       manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: next } }
-      await mkdir(profileDir, { recursive: true })
-      const temporary = `${manifestPath}.dsh-market.tmp`
-      await writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
-      try { await rename(temporary, manifestPath) } catch { await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8'); await unlink(temporary).catch(() => undefined) }
+      await writeFileAtomic(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { fallbackToDirectWrite: true })
       return (await buildCatalog()).plugins.filter(item => item.installed)
     },
     updates: checkUpdates,
