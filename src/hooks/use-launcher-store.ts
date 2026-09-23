@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLauncherApi } from '../api/client'
 import { DSH_REPOSITORY, EMPTY_DSH_INSTALLATION, EMPTY_RUNTIME_STATE, MAX_LOG_LINES } from '../constants'
 import { downloadProgressText, errorText } from '../lib/format'
+import { launchFailureHeadline, launchFailureStageLabel } from '../lib/launch-failure'
 import { finalizeInstallProgress } from '../lib/install-progress'
 import { reorderProfilePlugins } from '../lib/profile-order'
 import type {
@@ -298,10 +299,8 @@ export function useLauncherStore() {
         const failure = state.lastFailure
         if (failure && failure.failedAt !== runtimeFailureToastedAt.current) {
           runtimeFailureToastedAt.current = failure.failedAt
-          const lines = failure.diagnostics.split('\n').map(line => line.trim()).filter(Boolean)
-          const reason = lines.find(line => !line.startsWith('启动命令') && !line.startsWith('工作目录') && !line.startsWith('退出代码'))
-            ?? '进程没有输出诊断信息'
-          showToast({ kind: 'error', message: `DSH 异常退出：${reason}`.slice(0, 220) })
+          // 与弹窗共用同一套解析，避免 toast 和弹窗各说一句话。
+          showToast({ kind: 'error', message: `DSH ${launchFailureStageLabel(failure.stage)}：${launchFailureHeadline(failure.diagnostics)}`.slice(0, 220) })
           setDshFailure(failure)
         }
       }),

@@ -2,7 +2,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createServer } from 'node:net'
 import path from 'node:path'
 import { DSH_PACKAGE_NAME } from '../src/constants'
-import type { AppSettings, RuntimeFailure, RuntimeOutput, RuntimeState } from '../src/types'
+import type { AppSettings, LaunchFailureStage, RuntimeFailure, RuntimeOutput, RuntimeState } from '../src/types'
+import { LAUNCH_STAGE_LABELS } from '../src/lib/launch-failure'
 import type { ApplicationLaunchPlan, ApplicationLaunchSpec } from './application-addons'
 import { requiresNodeRuntime, resolveNodeExecutable, type NodeRuntime } from './node-runtime'
 import { pathExists } from './profile'
@@ -298,6 +299,16 @@ export function createRuntimeController(options: RuntimeControllerOptions): Runt
     if (child) return state()
 
     const settings = await options.readSettings()
+    // 所有启动失败都从这里落，诊断第一行带阶段：弹窗与提示词才知道该往哪边查——
+    // 端口/拉起失败多半是环境问题，运行中退出才可能是 DSH 本身的问题。
+    const recordLaunchFailure = (stage: LaunchFailureStage, lines: string[]): void => {
+      lastFailure = {
+        profileName: settings.profileName,
+        stage,
+        diagnostics: [`失败阶段：${LAUNCH_STAGE_LABELS[stage]}`, ...lines.filter(Boolean)].join('\n').slice(-STDERR_CAPTURE_LIMIT),
+        failedAt: new Date().toISOString(),
+      }
+    }
     const defaultCwd = (await pathExists(settings.workspace)) ? settings.workspace : options.fallbackWorkspace()
     const applicationPlan = options.resolveApplicationLaunchPlan
       ? await options.resolveApplicationLaunchPlan()
@@ -331,6 +342,13 @@ export function createRuntimeController(options: RuntimeControllerOptions): Runt
       if (selectedPort === null) {
         const message = `从端口 ${settings.webPort} 开始连续检测 ${PORT_FALLBACK_ATTEMPTS} 个端口，均不可用。`
         options.emitOutput('error', message)
+        recordLaunchFailure('port', [
+          message,
+          `期望端口：${settings.webPort}（可在「设置 → Web 端口」改）`,
+          `启动命令：${formatCommandLine(executable, launchArgs)}`,
+          '常见原因：上一个没退干净的 DSH 还占着端口，或被本机其它服务占用。',
+        ])
+        broadcast()
         throw new Error(message)
       }
       port = selectedPort
@@ -415,17 +433,13 @@ export function createRuntimeController(options: RuntimeControllerOptions): Runt
         options.emitOutput('error', '选中的本地端口在启动过程中被其他进程占用，请重新启动，启动器会继续选择其他可用端口。')
       }
       if (!expected && code !== 0) {
-        lastFailure = {
-          profileName: settings.profileName,
-          diagnostics: [
-            `启动命令：${commandLine}`,
-            `工作目录：${cwd}`,
-            `退出代码：${code ?? '未知'}`,
-            '',
-            diagnosticOutput.trim() || '进程没有输出诊断信息。',
-          ].join('\n').slice(-STDERR_CAPTURE_LIMIT),
-          failedAt: new Date().toISOString(),
-        }
+        recordLaunchFailure('exited', [
+          `启动命令：${commandLine}`,
+          `工作目录：${cwd}`,
+          `退出代码：${code ?? '未知'}`,
+          '',
+          diagnosticOutput.trim() || '进程没有输出诊断信息。',
+        ])
       }
       const processName = replacement?.name ?? 'DSH'
       options.emitOutput(code === 0 || expected ? 'success' : 'error', `${processName} 已退出（代码 ${code ?? '未知'}）`)
@@ -448,6 +462,16 @@ export function createRuntimeController(options: RuntimeControllerOptions): Runt
       try {
         started = startProcess(executable, launchArgs, { cwd, env: environment })
       } catch (error) {
+        // 同步抛错＝进程根本没起来（可执行文件不存在、路径非法、EPERM）。
+        // 不记就只剩一条 toast，用户和 agent 都不知道死在哪。
+        const message = error instanceof Error ? error.message : String(error)
+        recordLaunchFailure('spawn', [
+          `原因：${message}`,
+          `启动命令：${commandLine}`,
+          `工作目录：${cwd}`,
+          error instanceof Error ? (error.stack ?? '') : '',
+        ])
+        broadcast()
         await restoreLegacyCredentials()
         throw error
       }
@@ -460,11 +484,13 @@ export function createRuntimeController(options: RuntimeControllerOptions): Runt
       started.stderr.on('data', handleData('error'))
 
       started.once('error', error => {
-        lastFailure = {
-          profileName: settings.profileName,
-          diagnostics: `启动命令：${commandLine}\n工作目录：${cwd}\n\n${diagnosticOutput}\n${error.stack ?? error.message}`.slice(-STDERR_CAPTURE_LIMIT),
-          failedAt: new Date().toISOString(),
-        }
+        recordLaunchFailure('spawn', [
+          `原因：${error.message}`,
+          `启动命令：${commandLine}`,
+          `工作目录：${cwd}`,
+          diagnosticOutput,
+          error.stack ?? '',
+        ])
         options.emitOutput('error', `启动失败：${error.message}`)
         void stopCompanions()
         void restoreLegacyCredentials()

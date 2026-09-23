@@ -699,8 +699,15 @@ export interface RuntimeState {
   lastFailure?: RuntimeFailure | null
 }
 
+/**
+ * 启动失败发生在哪一步。决定弹窗标题与给 agent 的提示词方向：
+ * 端口/拉起失败是环境问题，运行中退出才可能是 DSH 本身的问题。
+ */
+export type LaunchFailureStage = 'port' | 'spawn' | 'exited'
+
 export interface RuntimeFailure {
   profileName: string
+  stage: LaunchFailureStage
   diagnostics: string
   failedAt: string
 }

@@ -2,6 +2,7 @@ import { Check, Copy, TriangleAlert } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import packageMetadata from '../../../package.json'
 import type { RuntimeFailure } from '../../types'
+import { LAUNCH_STAGE_TITLES, launchFailureHeadline, launchFailureStageLabel } from '../../lib/launch-failure'
 import { ModalShell } from './ModalShell'
 
 /**
@@ -41,31 +42,36 @@ function legacyCopy(value: string): boolean {
 
 export function DshFailureDialog({ failure, onClose }: DshFailureDialogProps) {
   const [copied, setCopied] = useState(false)
+  const stage = failure.stage ?? 'exited'
+  const stageLabel = launchFailureStageLabel(stage)
 
-  const headline = useMemo(() => {
-    const lines = failure.diagnostics.split('\n').map(line => line.trim()).filter(Boolean)
-    return lines.find(line => !line.startsWith('启动命令') && !line.startsWith('工作目录') && !line.startsWith('退出代码'))
-      ?? '进程没有输出诊断信息'
-  }, [failure])
+  const headline = useMemo(() => launchFailureHeadline(failure.diagnostics), [failure])
 
   const fixPrompt = useMemo(() => {
     const time = new Date(failure.failedAt).toLocaleString('zh-CN', { hour12: false })
+    // 阶段决定排查方向：没起来与起来又停，根因类别完全不同。
+    const stageHint = stage === 'port'
+      ? '- 进程尚未启动，端口选择阶段就失败了：优先排查谁占用了该端口、以及是否有残留的 DSH 进程；不要改动 DSH 代码。'
+      : stage === 'spawn'
+        ? '- 进程没能拉起（可执行文件缺失 / 路径非法 / 权限）：优先排查 Node 运行时与 DSH 安装是否完整、包目录是否被移动或删过；不要改动 DSH 代码。'
+        : '- 问题发生在整合包隔离环境内：若与插件 / 技能 / 预设相关，请在包内修复（调整或更换对应组件、依赖版本），不要修改 DSH 本体。'
     return [
       '你是 DeepSeek Harness（DSH）的启动诊断与修复助手。下面是一次启动失败的完整诊断，请定位根因并给出可执行、最小改动的修复步骤。',
       '',
       '## 环境',
       `- 启动器：DSH 旋律启动器（序曲 Overture）v${packageMetadata.version}`,
       `- 整合包：${failure.profileName || '未知'}`,
+      `- 失败阶段：${stageLabel}`,
       `- 失败时间：${time}`,
       '',
       '## 诊断输出',
       failure.diagnostics.trim(),
       '',
       '## 约束与建议',
-      '- 问题发生在整合包隔离环境内：若与插件 / 技能 / 预设相关，请在包内修复（调整或更换对应组件、依赖版本），不要修改 DSH 本体。',
+      stageHint,
       '- 若诊断不足以定位，请先给出下一步排查命令。',
     ].join('\n')
-  }, [failure])
+  }, [failure, stage, stageLabel])
 
   const handleCopy = () => {
     void copyText(fixPrompt).then(ok => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1600) } })
@@ -76,7 +82,7 @@ export function DshFailureDialog({ failure, onClose }: DshFailureDialogProps) {
       className="dsh-failure-dialog"
       titleId="dsh-failure-title"
       icon={<TriangleAlert size={19} />}
-      title="DSH 进程异常退出"
+      title={LAUNCH_STAGE_TITLES[stage]}
       onClose={onClose}
       footer={<>
         <button type="button" className="secondary-button" onClick={onClose}>关闭</button>
@@ -87,6 +93,7 @@ export function DshFailureDialog({ failure, onClose }: DshFailureDialogProps) {
     >
       <p className="dsh-failure-headline">{headline}</p>
       <div className="dsh-failure-meta">
+        <span className="dsh-failure-chip dsh-failure-stage">{stageLabel}</span>
         <span className="dsh-failure-chip">整合包：{failure.profileName || '未知'}</span>
         <span className="dsh-failure-chip">{new Date(failure.failedAt).toLocaleString('zh-CN', { hour12: false })}</span>
       </div>
