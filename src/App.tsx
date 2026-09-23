@@ -82,6 +82,11 @@ function LauncherShell() {
   // installer is still active; only an in-flight Profile switch disables it.
   const profileSwitcherLocked = store.busy?.startsWith('profile-switch:') === true
   const runtimeBusy = store.busy === BUSY.runtime || installingResource || installingApplication || Boolean(store.busy?.startsWith('application'))
+  // 包级弹窗按 id 回查那个包；查不到就用 id 兜底，标题里不留空白。
+  const packById = (id: string) => store.packs.find(pack => pack.id === id) ?? null
+  const packNameById = (id: string) => packById(id)?.name ?? id
+  // 三个包级弹窗共用的写锁：store 正忙，或整合包注册表被安装占用。
+  const packDialogBusy = store.busy !== null || profileMutationLocked
 
   const toggleRuntime = async () => {
     await store.toggleRuntime()
@@ -271,9 +276,9 @@ function LauncherShell() {
         <Suspense fallback={null}>
           <SessionImportDialog
             targetPackId={sessionImportTarget}
-            targetPackName={store.packs.find(pack => pack.id === sessionImportTarget)?.name ?? sessionImportTarget}
+            targetPackName={packNameById(sessionImportTarget)}
             packs={store.packs}
-            busy={store.busy !== null || profileMutationLocked}
+            busy={packDialogBusy}
             onPreview={sourcePackId => store.previewSessionImport(sourcePackId, sessionImportTarget)}
             onImport={async sourcePackId => {
               const done = await store.importSessionHistory(sourcePackId, sessionImportTarget)
@@ -288,8 +293,8 @@ function LauncherShell() {
       {exportTarget && (
         <Suspense fallback={null}>
           <PackExportDialog
-            packName={store.packs.find(pack => pack.id === exportTarget)?.name ?? exportTarget}
-            busy={store.busy !== null || profileMutationLocked}
+            packName={packNameById(exportTarget)}
+            busy={packDialogBusy}
             onExport={privacy => store.exportPack(exportTarget, privacy)}
             onClose={() => setExportTarget(null)}
           />
@@ -298,11 +303,11 @@ function LauncherShell() {
       {cloneTarget && (
         <Suspense fallback={null}>
           <PackVersionCloneDialog
-            packName={store.packs.find(pack => pack.id === cloneTarget)?.name ?? cloneTarget}
-            currentVersion={store.packs.find(pack => pack.id === cloneTarget)?.dshVersion ?? null}
+            packName={packNameById(cloneTarget)}
+            currentVersion={packById(cloneTarget)?.dshVersion ?? null}
             installedVersions={(store.runtimeEnvironment?.dshInstalled ?? []).map(item => item.version)}
             availableVersions={(store.runtimeEnvironment?.dshAvailable ?? []).map(item => item.version)}
-            busy={store.busy !== null || profileMutationLocked}
+            busy={packDialogBusy}
             onClone={async request => {
               const created = await store.createVersionClone(cloneTarget, request)
               if (created) void store.refreshPacks()

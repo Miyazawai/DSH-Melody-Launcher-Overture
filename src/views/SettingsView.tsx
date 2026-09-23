@@ -645,6 +645,7 @@ function SettingsSkillsTab({
           installedSkills={installedSkills}
           busy={busy}
           busyKey={busyKey}
+          onToggleSkill={onToggleSkill}
           onUninstallSkill={onUninstallSkill}
           onInstalled={onSkillInstalled}
           onRefresh={onRefresh}
@@ -803,6 +804,7 @@ function SkillMarketPanel({
   installedSkills,
   busy,
   busyKey,
+  onToggleSkill,
   onUninstallSkill,
   onInstalled,
   onRefresh,
@@ -811,6 +813,7 @@ function SkillMarketPanel({
   installedSkills: InstalledSkill[]
   busy: boolean
   busyKey: string | null
+  onToggleSkill: (skill: InstalledSkill, enabled: boolean) => void
   onUninstallSkill: (skill: InstalledSkill) => Promise<boolean>
   onInstalled: (result: SkillInstallResult) => void
   onRefresh: () => void
@@ -893,8 +896,11 @@ function SkillMarketPanel({
   // 传给 memo 卡片的回调必须稳定，否则每次渲染都会击穿 memo。
   const handleInstall = useCallback((entry: SkillMarketEntry) => { void install(entry) }, [install])
   const handleToggle = useCallback((name: string, enabled: boolean) => {
-    void api.toggleSkill(name, enabled).then(onRefresh)
-  }, [api, onRefresh])
+    const skill = installedSkills.find(item => item.name === name)
+    // 走 store 的 action 而不是直接打 IPC：否则这次开关不进 busy、不弹 toast，
+    // 失败时是一条没人接的 rejection。
+    if (skill) onToggleSkill(skill, enabled)
+  }, [installedSkills, onToggleSkill])
   const handleUninstall = useCallback((name: string) => {
     const skill = installedSkills.find(item => item.name === name)
     if (!skill) return
