@@ -14,12 +14,11 @@ import { runCommand, type CommandOptions, type CommandResult, type OutputLevel }
 import { approveAllIgnoredBuilds, approveBuildKeys, gitPrepareBuildKeys } from './plugin-install'
 import {
   buildNetworkEnvironment,
-  DEFAULT_NPM_REGISTRY,
   NPM_OFFICIAL_REGISTRY,
   requestNpmMetadata,
 } from './proxy'
 import { readProfile } from './profile'
-import { resolveNodeExecutable, ensureNodeRuntime, ensurePnpmRuntime, type NodeRuntime, type PnpmRuntime } from './node-runtime'
+import { resolveNodeExecutable, type NodeRuntime, type PnpmRuntime } from './node-runtime'
 import { withExecutableDirectoryOnPath } from './process'
 
 const REGISTRY_URL = 'https://awesome-dsh-plugin.com/plugins.json'

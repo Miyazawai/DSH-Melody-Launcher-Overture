@@ -1,5 +1,4 @@
 import {
-  ArrowLeft,
   BookOpen,
   Check,
   ChevronDown,
@@ -9,8 +8,6 @@ import {
   FolderOpen,
   Layers3,
   LoaderCircle,
-  Maximize2,
-  Minus,
   Package,
   Pencil,
   RefreshCw,

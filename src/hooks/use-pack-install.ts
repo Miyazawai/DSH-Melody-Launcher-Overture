@@ -257,4 +257,3 @@ export function usePackInstall(onSettled: () => void, showToast: (toast: ToastSt
   }
 }
 
-export type PackInstallState = ReturnType<typeof usePackInstall>

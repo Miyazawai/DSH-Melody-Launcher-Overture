@@ -1,5 +1,5 @@
 import { Layers3, LoaderCircle } from 'lucide-react'
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { LauncherApiProvider, resolveLauncherApi, useLauncherApi } from './api/client'
 import { LauncherHome } from './components/LauncherHome'
 import { TopBar } from './components/TopBar'

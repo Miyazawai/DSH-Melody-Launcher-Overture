@@ -42,11 +42,10 @@ function legacyCopy(value: string): boolean {
 export function DshFailureDialog({ failure, onClose }: DshFailureDialogProps) {
   const [copied, setCopied] = useState(false)
 
-  const { headline, lines } = useMemo(() => {
+  const headline = useMemo(() => {
     const lines = failure.diagnostics.split('\n').map(line => line.trim()).filter(Boolean)
-    const headline = lines.find(line => !line.startsWith('启动命令') && !line.startsWith('工作目录') && !line.startsWith('退出代码'))
+    return lines.find(line => !line.startsWith('启动命令') && !line.startsWith('工作目录') && !line.startsWith('退出代码'))
       ?? '进程没有输出诊断信息'
-    return { headline, lines }
   }, [failure])
 
   const fixPrompt = useMemo(() => {

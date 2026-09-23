@@ -82,7 +82,6 @@ export function SessionImportDialog(props: SessionImportDialogProps) {
     }
   }
 
-  const sourceName = packs.find(pack => pack.id === sourcePackId)?.name ?? ''
   const shown = result ?? preview
   const disabled = busy || working
 
