@@ -12,7 +12,7 @@ Download one executable: the first run auto-imports the **official default modpa
 [![Build](https://img.shields.io/github/actions/workflow/status/Miyazawai/DSH-Melody-Launcher-Overture/build.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/actions/workflows/build.yml)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases)
 [![Upstream](https://img.shields.io/badge/upstream-rirko%2Fdsh--melody--launcher-6C7BFF?style=for-the-badge&logo=github&logoColor=white)](https://github.com/rirko/dsh-melody-launcher)
-[![Tests](https://img.shields.io/badge/tests-857%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
+[![Tests](https://img.shields.io/badge/tests-860%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
 
 **[简体中文](README.md) · English**
 
@@ -22,6 +22,11 @@ Download one executable: the first run auto-imports the **official default modpa
 
 > [!NOTE]
 > **Overture** is the C-end ("modpack-first") line of [rirko/dsh-melody-launcher](https://github.com/rirko/dsh-melody-launcher). The upstream repo hosts the mainline; this branch focuses on the first-km experience for individual players: zero-dependency onboarding, per-pack isolation, whole-pack sharing. See the [Chinese README](README.md) for the full documentation.
+
+## What's new in v1.0.1
+
+- **Downloading a DSH version no longer stalls at 82%** — that code path never got the mirror setting, so it went straight to the official registry and timed out on 0.1.7's multi-megabyte native binary. It now shares the same network configuration as plugin installs.
+- **Command-line deployments are recognised** — if you ran `dsh` yourself before installing the launcher, that modpack now carries a "deployed from CLI" badge saying your config and history are still where they were; only the DSH version is unbound.
 
 ## What's new in v1.0.0
 
