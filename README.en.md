@@ -12,7 +12,7 @@ Download one executable: the first run auto-imports the **official default modpa
 [![Build](https://img.shields.io/github/actions/workflow/status/Miyazawai/DSH-Melody-Launcher-Overture/build.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/actions/workflows/build.yml)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases)
 [![Upstream](https://img.shields.io/badge/upstream-rirko%2Fdsh--melody--launcher-6C7BFF?style=for-the-badge&logo=github&logoColor=white)](https://github.com/rirko/dsh-melody-launcher)
-[![Tests](https://img.shields.io/badge/tests-860%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
+[![Tests](https://img.shields.io/badge/tests-861%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
 
 **[简体中文](README.md) · English**
 
@@ -23,9 +23,13 @@ Download one executable: the first run auto-imports the **official default modpa
 > [!NOTE]
 > **Overture** is the C-end ("modpack-first") line of [rirko/dsh-melody-launcher](https://github.com/rirko/dsh-melody-launcher). The upstream repo hosts the mainline; this branch focuses on the first-km experience for individual players: zero-dependency onboarding, per-pack isolation, whole-pack sharing. See the [Chinese README](README.md) for the full documentation.
 
+## What's new in v1.0.2
+
+- **The DSH download is actually fixed this time.** v1.0.1 claimed a fix that did nothing. The cause wasn't the registry either: one pnpm flag capped the whole request at 30 seconds, while 0.1.7 pulls a 115.9 MB LibreOffice native binary that takes 190 seconds at the 610 KB/s measured here. No registry survives that. The timeout is now 600 seconds, and the mirror is passed the way pnpm actually reads.
+
 ## What's new in v1.0.1
 
-- **Downloading a DSH version no longer stalls at 82%** — that code path never got the mirror setting, so it went straight to the official registry and timed out on 0.1.7's multi-megabyte native binary. It now shares the same network configuration as plugin installs.
+- **Downloading a DSH version no longer stalls at 82%** — this one didn't land. pnpm 11 ignores the environment variable that was set; see v1.0.2 for the real cause and fix.
 - **Command-line deployments are recognised** — if you ran `dsh` yourself before installing the launcher, that modpack now carries a "deployed from CLI" badge saying your config and history are still where they were; only the DSH version is unbound.
 
 ## What's new in v1.0.0

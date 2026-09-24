@@ -14,7 +14,7 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/Miyazawai/DSH-Melody-Launcher-Overture/build.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/actions/workflows/build.yml)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases)
 [![Upstream](https://img.shields.io/badge/上游-rirko%2Fdsh--melody--launcher-6C7BFF?style=for-the-badge&logo=github&logoColor=white)](https://github.com/rirko/dsh-melody-launcher)
-[![Tests](https://img.shields.io/badge/tests-860%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
+[![Tests](https://img.shields.io/badge/tests-861%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
 
 [![Electron](https://img.shields.io/badge/Electron-43-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
@@ -50,9 +50,13 @@
 | 把自己的配置折腾半天分享给朋友 | 导出 = 整个环境打包成 zip，对方导入即可启动 |
 | 开终端、记命令、盯输出 | 一个按钮启动，进程与日志全程托管 |
 
+## v1.0.2 更新亮点
+
+- **下载 DSH 版本这回真修好了** —— v1.0.1 说修了但其实没有。原因也不是镜像源，是一条 30 秒的请求超时：0.1.7 依赖里那个 LibreOffice 原生包压缩后 115.9MB，实测 610KB/s 的连接光下它就要 190 秒，换哪个源都过不去。现在超时放到 600 秒，镜像源也改成 pnpm 真正认的那条路。
+
 ## v1.0.1 更新亮点
 
-- **下载 DSH 版本不再卡在 82%** —— 这条链路此前漏配了镜像源，只会直连官方 registry；碰上 0.1.7 那种带几十 MB 原生二进制的版本就是超时失败。现在跟装插件走同一份网络设置。
+- **下载 DSH 版本不再卡在 82%** —— 这条修复其实没生效（pnpm 不读当时设的那个环境变量），真正的原因见上面 v1.0.2。
 - **认得出你命令行部署过的旧环境** —— 装启动器之前就用 `dsh` 命令跑过的话，那个包现在带一枚「命令行部署」徽标，说清你的配置和聊天记录仍在原处，只是还没绑 DSH 版本。
 
 ## v1.0.0 更新亮点
