@@ -49,5 +49,6 @@
 ## 备注
 
 - **从 0.1.x 升上来的话，整合包、聊天记录、插件都不用重装**，直接覆盖运行即可。
-- **0.1.7 的官方整合包还没上线**。CI 在 9 月 23 日确实打出了 `official-pack-v0.1.7-rc.1.1.zip`（`@linxin666/dsh-web-all` 从 0.3.23 升到 0.4.1 触发），但仓库缺 `OVERTURE_RELEASE_TOKEN` 这个 secret，工作流跳过了自动上传，zip 只留在那次运行的 artifact 里。补上 secret 再手动跑一次就会挂到 Release。在那之前用户能下到的官方包仍是 `0.1.5-rc.2.1`。
+- **官方整合包已经跟上 DSH 0.1.7**：`official-pack-v0.1.7-rc.1.1.zip`（适配 DSH `0.1.7-rc.1`、`@linxin666/dsh-web-all` 0.4.1、OfficeCLI v1.0.152，64MB / 3047 个文件）已挂到 Release。体积比上一包小了一半，原因在 web-all 0.4.1：它不再把 codemirror / lezer / iconify 那套前端依赖摊进包里的 `node_modules`，同时去掉了三个插件——`dsh-better-sidebar`、`@linxin666/dsh-doctor`、`@linxin666/dsh-tool-describe-image`。用旧官方包、依赖这三样的人重新下载官方包后就没有它们了，需要的话去插件页单独装。
+- 已经装过旧版官方包的用户**不会**被动重下：新版本只提醒，由你决定何时下载。
 - 反馈请开 [Issues](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/issues)，附上启动器版本和复现步骤。启动失败弹窗里那段提示词直接贴过来最好。
