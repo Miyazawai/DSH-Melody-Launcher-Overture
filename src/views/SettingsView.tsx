@@ -360,6 +360,8 @@ function SettingsVersions({
   const dshProgress = installProgress && installProgress.kind === 'dsh'
     && installProgress.phase !== 'complete' && installProgress.phase !== 'error'
     ? installProgress : null
+  // 进度事件里的 repository 就是正在装的那个版本号；只有它对应的那一行该转圈。
+  const downloadingVersion = dshProgress?.repository ?? null
 
   if (!environment) {
     return <div className="settings-empty"><LoaderCircle className="spin" size={20} />正在读取 DSH 版本</div>
@@ -439,6 +441,7 @@ function SettingsVersions({
             expanded={expandedGroup === group.key}
             onToggle={() => setExpandedGroup(value => value === group.key ? null : group.key)}
             busy={busy || dshProgress !== null}
+            downloadingVersion={downloadingVersion}
             installedVersions={installedVersions}
             onInstall={onInstall}
           />
@@ -455,6 +458,7 @@ function VersionGroup({
   expanded,
   onToggle,
   busy,
+  downloadingVersion,
   installedVersions,
   onInstall,
 }: {
@@ -463,6 +467,8 @@ function VersionGroup({
   expanded: boolean
   onToggle: () => void
   busy: boolean
+  /** 正在下载的那个版本号；只有对应行转圈，其余行只是禁用（同一时刻只允许装一个版本）。 */
+  downloadingVersion: string | null
   installedVersions: ReadonlySet<string>
   onInstall: (version: string) => Promise<boolean>
 }) {
@@ -506,7 +512,7 @@ function VersionGroup({
                 {installed
                   ? <span className="settings-row-badge"><Check size={12} />已安装</span>
                   : <button type="button" className="secondary-button" disabled={busy} onClick={() => { void onInstall(candidate.version) }}>
-                    {busy ? <LoaderCircle size={13} className="spin" /> : <Download size={13} />}下载
+                    {downloadingVersion === candidate.version ? <LoaderCircle size={13} className="spin" /> : <Download size={13} />}下载
                   </button>}
               </div>
             </div>
