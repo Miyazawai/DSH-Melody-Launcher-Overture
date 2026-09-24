@@ -246,7 +246,10 @@ describe('DSH 版本安装的网络环境', () => {
           const pkg = path.join(versionRoot, 'node_modules', '@deepseek-ai', 'dsh')
           await mkdir(bin, { recursive: true })
           await mkdir(pkg, { recursive: true })
+          // 两个平台名都造：托管入口在 Windows 下是 dsh.cmd、在 POSIX 下是 dsh，
+          // 只造一个会让这条测试在 CI 的 ubuntu 矩阵里假红。
           await writeFile(path.join(bin, 'dsh.cmd'), '@echo off\r\n', 'utf8')
+          await writeFile(path.join(bin, 'dsh'), '#!/bin/sh\n', 'utf8')
           await writeFile(path.join(pkg, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.1.7-rc.1' }), 'utf8')
           return { exitCode: 0, output: '' }
         },
