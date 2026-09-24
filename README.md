@@ -14,7 +14,7 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/Miyazawai/DSH-Melody-Launcher-Overture/build.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/actions/workflows/build.yml)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases)
 [![Upstream](https://img.shields.io/badge/上游-rirko%2Fdsh--melody--launcher-6C7BFF?style=for-the-badge&logo=github&logoColor=white)](https://github.com/rirko/dsh-melody-launcher)
-[![Tests](https://img.shields.io/badge/tests-771%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
+[![Tests](https://img.shields.io/badge/tests-857%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
 
 [![Electron](https://img.shields.io/badge/Electron-43-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
@@ -49,6 +49,13 @@
 | 多套环境互相污染，删了重装 | 新建一个整合包，天然隔离，互不影响 |
 | 把自己的配置折腾半天分享给朋友 | 导出 = 整个环境打包成 zip，对方导入即可启动 |
 | 开终端、记命令、盯输出 | 一个按钮启动，进程与日志全程托管 |
+
+## v1.0.0 更新亮点
+
+- **聊天记录可以跨包搬** —— 一个包攒了几十条会话，想挪到另一个包不用再重聊一遍。搬之前先看预览（能搬几条、多大、哪些搬不了以及原因），搬完能一键撤销，源包始终不改动。
+- **导出可以带走自己的东西** —— 默认导出的包仍然不含任何私人数据；想带走 API 密钥或会话记录时勾一下，弹窗会先说清这东西发出去收不回来，压缩包里也会放一份勿转发提醒。
+- **切换版本不改原包** —— 想试另一个 DSH 版本，就复制一个新包去用，原包分毫未动，用不惯回原包继续。数据格式只能往上升，所以列表里只列更新的版本，往回退会当场拦下并说明原因。
+- **起不来时会告诉你死在哪一步** —— 端口被占、进程没拉起来、跑一半退出，三种情况各有各的原因和排查方向，末尾附一段能直接复制给 AI 的修复提示词。
 
 ## v0.1.3 更新亮点
 

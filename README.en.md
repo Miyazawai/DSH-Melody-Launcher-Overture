@@ -12,7 +12,7 @@ Download one executable: the first run auto-imports the **official default modpa
 [![Build](https://img.shields.io/github/actions/workflow/status/Miyazawai/DSH-Melody-Launcher-Overture/build.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/actions/workflows/build.yml)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases)
 [![Upstream](https://img.shields.io/badge/upstream-rirko%2Fdsh--melody--launcher-6C7BFF?style=for-the-badge&logo=github&logoColor=white)](https://github.com/rirko/dsh-melody-launcher)
-[![Tests](https://img.shields.io/badge/tests-771%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
+[![Tests](https://img.shields.io/badge/tests-857%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
 
 **[简体中文](README.md) · English**
 
@@ -22,6 +22,13 @@ Download one executable: the first run auto-imports the **official default modpa
 
 > [!NOTE]
 > **Overture** is the C-end ("modpack-first") line of [rirko/dsh-melody-launcher](https://github.com/rirko/dsh-melody-launcher). The upstream repo hosts the mainline; this branch focuses on the first-km experience for individual players: zero-dependency onboarding, per-pack isolation, whole-pack sharing. See the [Chinese README](README.md) for the full documentation.
+
+## What's new in v1.0.0
+
+- **Sessions now move between modpacks** — dozens of conversations stuck in one pack can be copied into another. You get a preview first (how many, how big, which ones can't move and why), and an undo token afterwards. The source pack is never touched.
+- **Export can take your own stuff along** — the default export still contains no personal data. Two opt-in checkboxes add your API keys or your session history; the dialog warns you before you ship either, and the zip carries a do-not-forward note.
+- **Switching DSH version copies a new pack** — your current pack is left exactly as it was, so going back means switching back to it. Data formats only migrate forward, so the picker only offers newer versions and refuses to hand newer data to an older runtime.
+- **A failed launch says where it died** — port unavailable, process never started, or it exited mid-run: each gets its own reason line and next step, plus a prompt you can paste straight into an AI with the command, working directory, exit code and raw output attached.
 
 ## What's new in v0.1.3
 
