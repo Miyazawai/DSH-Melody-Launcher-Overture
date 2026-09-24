@@ -9,7 +9,7 @@ export interface SessionImportDialogProps {
   targetPackName: string
   packs: PackStatus[]
   busy: boolean
-  onPreview(sourcePackId: string): Promise<SessionImportPreview>
+  onPreview(sourcePackId: string): Promise<SessionImportPreview | undefined>
   onImport(sourcePackId: string): Promise<SessionImportResult | undefined>
   onUndo(undoId: string): Promise<SessionImportUndoResult | undefined>
   onClose(): void
@@ -51,7 +51,10 @@ export function SessionImportDialog(props: SessionImportDialogProps) {
     if (!sourcePackId) return
     setWorking(true)
     try {
-      setPreview(await onPreview(sourcePackId))
+      const next = await onPreview(sourcePackId)
+      // 拿不到预览说明失败了，吐司已经说清原因；停在选包这一步，不带着空预览往下走。
+      if (!next) return
+      setPreview(next)
       setPhase('preview')
     } finally {
       setWorking(false)
@@ -129,8 +132,8 @@ export function SessionImportDialog(props: SessionImportDialogProps) {
 
       {phase === 'pick' && (candidates.length === 0 ? (
         <div className="custom-api-empty">
-          <strong>本机只有这一个整合包</strong>
-          <span>先新建或导入一个包，再来搬会话。</span>
+          <strong>没有可搬进来的整合包</strong>
+          <span>要么本机只有这一个包，要么其它包的 DSH 版本比「{targetPackName}」还新——记录格式只能往上升，搬过来这个包就读不动了。</span>
         </div>
       ) : (
         <div className="dialog-choice-list">

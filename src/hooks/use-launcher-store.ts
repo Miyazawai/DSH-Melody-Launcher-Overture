@@ -1029,10 +1029,10 @@ export function useLauncherStore() {
     }
   }, [api, run, showToast])
 
-  /** 会话搬运预览：只读，不进任务队列，失败照常弹错。 */
+  /** 会话搬运预览：只读、不进任务队列，但照样走 run——被拒绝降级挡下时要弹得出来。 */
   const previewSessionImport = useCallback((sourcePackId: string, targetPackId: string) => (
-    api.previewSessionImport(sourcePackId, targetPackId)
-  ), [api])
+    run(`pack-session-preview:${targetPackId}`, () => api.previewSessionImport(sourcePackId, targetPackId))
+  ), [api, run])
 
   /** 把源包的会话记录复制进目标包；失败返回 undefined（run 已经弹过吐司）。 */
   const importSessionHistory = useCallback(async (sourcePackId: string, targetPackId: string) => {

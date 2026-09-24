@@ -54,6 +54,7 @@ import {
   type SessionTransferPlan,
   type TransferManifest,
 } from './session-transfer'
+import { isDshVersionOlderThan } from '../src/lib/dsh-version'
 import { parseDocument } from 'yaml'
 import {
   readPackRegistry,
@@ -217,6 +218,17 @@ async function setProfileDshVersion(home: string, packId: string, version: strin
     ? text.replace(/^dshVersion:.*$/m, `dshVersion: ${version}`)
     : `dshVersion: ${version}\n${text}`
   await writeFile(target, next, 'utf8')
+}
+
+/**
+ * DSH 的数据格式只往上升：跑过一次新 DSH，包里的会话记录就被就地写成新格式，而旧 DSH 里没有
+ * 反向的迁移边——轻则记录整批看不见，重则在 Web 服务绑定端口之前就退出。所以凡"把 A 版包的
+ * 数据交给更旧的 B 版去跑"的操作都要当场拦下，而不是等启动失败再让启动器背锅。
+ * 任一侧没有版本标注（raw 包 / 旧记录）就不拦：猜出来的拒绝比读不到的元数据更伤人。
+ */
+function downgradeRejection(sourceVersion: string | null | undefined, targetVersion: string | null | undefined): string | null {
+  if (!isDshVersionOlderThan(targetVersion, sourceVersion)) return null
+  return `DSH ${targetVersion} 比这份数据现在的版本（${sourceVersion}）更旧：新版跑过一次之后，聊天记录等数据就被写成旧版读不懂的格式，切回去会看不见记录甚至起不来。要用 ${targetVersion} 请新建一个空整合包；也可以往 ${sourceVersion} 或更高的版本复制。`
 }
 
 function privacyWarningText(packName: string, categories: SnapshotPrivacyCategory[]): string {
@@ -762,6 +774,8 @@ export function createPackManager(options: PackManagerOptions): PackManager {
     if (sourcePackId === targetPackId) throw new Error('源包和目标包是同一个，没有可搬的记录。')
     const source = await findRecord(sourcePackId)
     const target = await findRecord(targetPackId)
+    const rejection = downgradeRejection(source.dshVersion, target.dshVersion)
+    if (rejection) throw new Error(rejection)
     const sourceHome = await homeOfRecord(source)
     const targetHome = await homeOfRecord(target)
     if (!existsSync(sourceHome)) throw new Error(`整合包「${source.name}」的家目录不存在。`)
@@ -1862,6 +1876,8 @@ export function createPackManager(options: PackManagerOptions): PackManager {
       try {
         if (!version) throw new Error('要先选好新版本。')
         const source = await findRecord(packId)
+        const sourceRejection = downgradeRejection(source.dshVersion, version)
+        if (sourceRejection) throw new Error(sourceRejection)
         const sourceHome = await homeOfRecord(source)
         if (!existsSync(sourceHome)) throw new Error(`整合包「${source.name}」的家目录不存在：${sourceHome}`)
         const name = (request.name ?? '').trim() || `${source.name} · DSH ${version}`

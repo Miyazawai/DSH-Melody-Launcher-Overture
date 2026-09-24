@@ -32,13 +32,13 @@ async function makeEnv(): Promise<{ root: string; packsRoot: string; registryPat
   }
 }
 
-function record(env: ReturnType<typeof makeEnv> extends Promise<infer T> ? T : never, id: string, name: string): PackRecord {
+function record(env: ReturnType<typeof makeEnv> extends Promise<infer T> ? T : never, id: string, name: string, dshVersion = '0.1.5-rc.2'): PackRecord {
   return {
     id,
     name,
     description: '',
     version: '1.0.0',
-    dshVersion: '0.1.5-rc.2',
+    dshVersion,
     homePath: path.join(env.packsRoot, id),
     source: 'created',
     installedAt: '2026-09-22T00:00:00.000Z',
@@ -56,7 +56,7 @@ async function writeSession(homePath: string, projectKey: string, sessionId: str
   return logPath
 }
 
-function makeManager(env: Awaited<ReturnType<typeof makeEnv>>, events: PackProgressEvent[], runtimeRunning = false) {
+function makeManager(env: Awaited<ReturnType<typeof makeEnv>>, events: PackProgressEvent[], runtimeRunning = false, ensureDshVersionInstalled?: (version: string) => Promise<void>) {
   let settings: AppSettings = {
     ...defaultSettings({ homeDirectory: os.homedir(), documentsDirectory: os.homedir() }),
     dshHome: path.join(env.root, 'dsh-home'),
@@ -89,6 +89,7 @@ function makeManager(env: Awaited<ReturnType<typeof makeEnv>>, events: PackProgr
     isInstallerBusy: () => false,
     unifiedProfiles: true,
     packsRoot: env.packsRoot,
+    ...(ensureDshVersionInstalled ? { ensureDshVersionInstalled } : {}),
   })
 }
 
@@ -123,6 +124,25 @@ describe('整合包会话记录搬运', () => {
     expect(await readFile(sourceLog, 'utf8')).toContain('"session-a"')
     // 与导出同一条规矩：最后一件必须是收口事件，否则界面横幅停在「已复制 1 个文件」。
     expect(events.at(-1)).toEqual({ kind: 'status', message: '' })
+  })
+
+  it('源包数据比目标包的 DSH 更新时拒绝搬运，也不先花一次下载', async () => {
+    const env = await makeEnv()
+    const installs: string[] = []
+    const manager = makeManager(env, [], false, async version => { installs.push(version) })
+    await mkdir(path.join(env.packsRoot, 'pack-a'), { recursive: true })
+    await mkdir(path.join(env.packsRoot, 'pack-b'), { recursive: true })
+    await writeSession(path.join(env.packsRoot, 'pack-a'), '--project--', 'session-a', env.project)
+    await upsertPackRecord(env.registryPath, record(env, 'pack-a', '升过的包', '0.1.7-rc.1'))
+    await upsertPackRecord(env.registryPath, record(env, 'pack-b', '旧版本的包', '0.1.5-rc.2'))
+
+    await expect(manager.previewSessionImport('pack-a', 'pack-b')).rejects.toThrow(/更旧/)
+    await expect(manager.importSessionHistory('pack-a', 'pack-b')).rejects.toThrow(/更旧/)
+    expect(await readdir(path.join(env.packsRoot, 'pack-b'))).toEqual([])
+    // 反方向（旧包记录搬进新版本包）是升级，照旧放行。
+    await upsertPackRecord(env.registryPath, record(env, 'pack-a', '升过的包', '0.1.5-rc.2'))
+    await upsertPackRecord(env.registryPath, record(env, 'pack-b', '旧版本的包', '0.1.7-rc.1'))
+    expect(await manager.importSessionHistory('pack-a', 'pack-b')).toMatchObject({ copiedFiles: 1 })
   })
 
   it('撤销删掉复制进来的文件并清掉清单；再撤销就找不到凭据', async () => {
@@ -244,6 +264,26 @@ describe('整合包升版副本', () => {
     // 旧包原样：目录名一个没多、profile.yaml 里还是老版本。
     expect(await readdir(sourceHome)).toEqual(before)
     expect(await readFile(path.join(sourceHome, 'profiles', 'pack-a', 'profile.yaml'), 'utf8')).toContain('dshVersion: 0.1.5-rc.1')
+  })
+
+  it('拒绝把数据交给更旧的 DSH：不下载运行时、不留半个包', async () => {
+    const env = await makeEnv()
+    const installs: string[] = []
+    const manager = makeManager(env, [], false, async version => { installs.push(version) })
+    const sourceHome = await makeSourcePack(env)
+    // 旧包已经被 0.1.7 跑过：它的会话日志从此是 0.1.5 读不动的格式。
+    await upsertPackRecord(env.registryPath, record(env, 'pack-a', '旧包', '0.1.7-rc.1'))
+    const before = await readdir(sourceHome)
+
+    await expect(manager.createVersionClone('pack-a', { dshVersion: '0.1.5-rc.2' })).rejects.toThrow(/0\.1\.5-rc\.2 比这份数据现在的版本（0\.1\.7-rc\.1）更旧/)
+    // 拦在下载之前：拒绝降级不该先花掉一次 100MB。
+    expect(installs).toEqual([])
+    // 旧包目录与注册表都原样——报错不该留下任何副作用。
+    expect(await readdir(sourceHome)).toEqual(before)
+    expect(await readdir(env.packsRoot)).toEqual(['pack-a'])
+    // 反过来往新版本复制不受影响。
+    const up = await manager.createVersionClone('pack-a', { dshVersion: '0.1.7-rc.1' })
+    expect(up).toMatchObject({ dshVersion: '0.1.7-rc.1' })
   })
 
   it('目标版本要先装好；装失败不留半个包也不写注册表', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dshChannelMeta, dshChannelRank, groupDshVersionsByChannel, parseDshVersion } from '../src/lib/dsh-version'
+import { compareDshVersions, dshChannelMeta, dshChannelRank, groupDshVersionsByChannel, isDshVersionOlderThan, parseDshVersion } from '../src/lib/dsh-version'
 import type { RuntimeVersionCandidate } from '../src/types'
 
 const candidate = (version: string, extra: Partial<RuntimeVersionCandidate> = {}): RuntimeVersionCandidate => ({
@@ -62,5 +62,33 @@ describe('groupDshVersionsByChannel', () => {
     expect(groups).toHaveLength(1)
     expect(groups[0]?.candidates).toEqual([installed])
     expect(groupDshVersionsByChannel([])).toEqual([])
+  })
+})
+
+describe('compareDshVersions / isDshVersionOlderThan', () => {
+  it('core 高的更新，且不被字符串比较坑到（0.1.10 > 0.1.9）', () => {
+    expect(compareDshVersions('0.1.10', '0.1.9')).toBeGreaterThan(0)
+    expect(compareDshVersions('0.1.7-rc.1', '0.1.5-rc.3')).toBeGreaterThan(0)
+    expect(isDshVersionOlderThan('0.1.5-rc.3', '0.1.7-rc.1')).toBe(true)
+    expect(isDshVersionOlderThan('0.1.7-rc.1', '0.1.5-rc.3')).toBe(false)
+  })
+
+  it('正式版高于它自己的任何预发布，预发布逐段按 SemVer 比', () => {
+    expect(compareDshVersions('0.1.7', '0.1.7-rc.1')).toBeGreaterThan(0)
+    // rc > alpha（字母段按字典序），rc.2 > rc.1（数字段按数值）。
+    expect(compareDshVersions('0.1.7-rc.2', '0.1.7-alpha.9')).toBeGreaterThan(0)
+    // 前缀全等时字段多的一方更新。
+    expect(compareDshVersions('0.1.7-rc.1.1', '0.1.7-rc.1')).toBeGreaterThan(0)
+    expect(isDshVersionOlderThan('0.1.7', '0.1.7')).toBe(false)
+  })
+
+  it('v 前缀与构建元数据不影响判断', () => {
+    expect(compareDshVersions('v0.1.7+build.9', '0.1.7')).toBe(0)
+  })
+
+  it('任一侧读不出来就不判旧：宁可不拦，也不凭猜出来的版本拒绝用户', () => {
+    expect(isDshVersionOlderThan(null, '0.1.7-rc.1')).toBe(false)
+    expect(isDshVersionOlderThan('0.1.5-rc.2', null)).toBe(false)
+    expect(isDshVersionOlderThan(undefined, undefined)).toBe(false)
   })
 })

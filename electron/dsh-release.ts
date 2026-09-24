@@ -1,5 +1,5 @@
 import { DSH_PACKAGE_NAME } from '../src/constants'
-import { dshChannelRank } from '../src/lib/dsh-version'
+import { compareDshVersions, dshChannelRank } from '../src/lib/dsh-version'
 import type { RuntimeVersionCandidate } from '../src/types'
 
 /**
@@ -28,47 +28,15 @@ export function validVersion(version: string): boolean {
   return /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version.trim())
 }
 
-interface ParsedVersion {
-  core: [number, number, number]
-  prerelease: string[]
-}
-
-function parseVersion(version: string): ParsedVersion | null {
-  const match = normalizeVersion(version).match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/)
-  if (!match) return null
-  return {
-    core: [Number(match[1]), Number(match[2]), Number(match[3])],
-    prerelease: match[4] ? match[4].split('.') : [],
-  }
-}
-
-/** Returns a positive number when remote is newer than local. */
+/**
+ * Returns a positive number when remote is newer than local.
+ *
+ * 方向与 SemVer 惯例相反，是这条链路早定下的口径（`compareVersions(local, remote) > 0`
+ * 读作"该更新了"）。真正的比较实现已经收进 src/lib/dsh-version.ts 的 compareDshVersions，
+ * 与渲染层共用一份；这里只保留这个历史签名，别再往它身上加语义。
+ */
 export function compareVersions(local: string, remote: string): number {
-  const left = parseVersion(local)
-  const right = parseVersion(remote)
-  if (!left || !right) return normalizeVersion(remote).localeCompare(normalizeVersion(local))
-
-  for (let index = 0; index < left.core.length; index += 1) {
-    if (left.core[index] !== right.core[index]) return right.core[index] - left.core[index]
-  }
-  if (left.prerelease.length === 0 || right.prerelease.length === 0) {
-    if (left.prerelease.length === right.prerelease.length) return 0
-    return left.prerelease.length === 0 ? -1 : 1
-  }
-  const length = Math.max(left.prerelease.length, right.prerelease.length)
-  for (let index = 0; index < length; index += 1) {
-    const localPart = left.prerelease[index]
-    const remotePart = right.prerelease[index]
-    if (localPart === undefined || remotePart === undefined) return localPart === undefined ? 1 : -1
-    if (localPart === remotePart) continue
-    const localNumber = /^\d+$/.test(localPart) ? Number(localPart) : null
-    const remoteNumber = /^\d+$/.test(remotePart) ? Number(remotePart) : null
-    if (localNumber !== null && remoteNumber !== null) return remoteNumber - localNumber
-    if (localNumber !== null) return -1
-    if (remoteNumber !== null) return 1
-    return remotePart.localeCompare(localPart)
-  }
-  return 0
+  return -compareDshVersions(local, remote)
 }
 
 /** 版本号最高者（列表里真正最新的那个）；空列表返回 null。 */

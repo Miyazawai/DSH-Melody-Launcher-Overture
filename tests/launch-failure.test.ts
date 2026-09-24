@@ -168,3 +168,29 @@ describe('启动失败的阶段标记', () => {
     expect(launchFailureHeadline('启动命令：dsh.cmd web\n工作目录：/tmp')).toBe('进程没有输出更多信息')
   })
 })
+
+describe('launchFailureHeadline 认 DSH 的数据格式拒绝', () => {
+  const nested = (message: string): string => [
+    '失败阶段：运行中退出',
+    '启动命令：dsh.cmd --profile pack-a --no-open --port 3080',
+    '退出代码：1',
+    '',
+    `file:///.../dsh-app-boot/lib/index.js:240 ${message}`,
+    '    at async WorkspaceRegistry.listStoredHeaders',
+  ].join('\n')
+
+  it('新版 DSH 写过的记录被旧版拒绝时，给人话而不是英文堆栈', () => {
+    const headline = launchFailureHeadline(nested('session "a1" uses log format v4, but this harness reads only v3: the log was written by a newer harness — upgrade the harness to open it'))
+    expect(headline).toContain('数据格式只升不降')
+    expect(headline).not.toContain('log format v4')
+  })
+
+  it('压缩编码与旧扁平布局的拒绝同样认得', () => {
+    expect(launchFailureHeadline(nested('session artifact "..." uses .jsonl, but this backend is configured for compression "zstd"'))).toContain('读不动')
+    expect(launchFailureHeadline(nested('session artifact "..." uses the unsupported flat-file layout; use a separate root'))).toContain('读不动')
+  })
+
+  it('认不出的原因仍走原来的取行规则，不被强行解释', () => {
+    expect(launchFailureHeadline(nested('Error: listen EADDRINUSE 127.0.0.1:3080'))).toContain('EADDRINUSE')
+  })
+})

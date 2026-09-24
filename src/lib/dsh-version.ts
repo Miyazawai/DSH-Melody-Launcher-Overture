@@ -63,6 +63,52 @@ export function dshChannelRank(version: string): number {
   return CHANNEL_DEFINITIONS[channel]?.rank ?? UNKNOWN_RANK
 }
 
+function comparableParts(version: string): { core: [number, number, number]; prerelease: string[] } | null {
+  const match = version.trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/)
+  if (!match) return null
+  return {
+    core: [Number(match[1]), Number(match[2]), Number(match[3])],
+    prerelease: match[4] ? match[4].split('.') : [],
+  }
+}
+
+/**
+ * 按 SemVer 优先级比较，left 更新时返回正数（与 SemVer 文档同一方向）。
+ * 解析不了的版本退化成字符串比较，不抛错：调用方要的是排序和"谁更新"，不是校验。
+ */
+export function compareDshVersions(left: string, right: string): number {
+  const a = comparableParts(left)
+  const b = comparableParts(right)
+  if (!a || !b) return left.localeCompare(right)
+  for (let index = 0; index < a.core.length; index += 1) {
+    if (a.core[index] !== b.core[index]) return a.core[index] - b.core[index]
+  }
+  if (a.prerelease.length === 0 || b.prerelease.length === 0) {
+    if (a.prerelease.length === b.prerelease.length) return 0
+    return a.prerelease.length === 0 ? 1 : -1
+  }
+  const length = Math.max(a.prerelease.length, b.prerelease.length)
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = a.prerelease[index]
+    const rightPart = b.prerelease[index]
+    if (leftPart === undefined || rightPart === undefined) return leftPart === undefined ? -1 : 1
+    if (leftPart === rightPart) continue
+    const leftNumber = /^\d+$/.test(leftPart) ? Number(leftPart) : null
+    const rightNumber = /^\d+$/.test(rightPart) ? Number(rightPart) : null
+    if (leftNumber !== null && rightNumber !== null) return leftNumber - rightNumber
+    if (leftNumber !== null) return -1
+    if (rightNumber !== null) return 1
+    return leftPart.localeCompare(rightPart)
+  }
+  return 0
+}
+
+/** candidate 是否比 reference 更旧——把新数据交给它去读就是降级。任一侧重不出来就答 false。 */
+export function isDshVersionOlderThan(candidate: string | null | undefined, reference: string | null | undefined): boolean {
+  if (!candidate || !reference) return false
+  return compareDshVersions(candidate, reference) < 0
+}
+
 export interface DshChannelMeta {
   /** 渠道中文名，如「候选发布版」。 */
   name: string

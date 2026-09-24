@@ -14,6 +14,7 @@ import { useNavigation } from './hooks/use-navigation'
 import { usePackInstall } from './hooks/use-pack-install'
 import { isInstallProgressActive } from './lib/install-progress'
 import { HOME_TAB_ORDER } from './lib/nav'
+import { isDshVersionOlderThan } from './lib/dsh-version'
 import type { HomeTab } from './types'
 
 // 启动页只看得到 LauncherHome；整合包/插件/技能/预设/版本这一整块面板（以及导入对话框）
@@ -277,7 +278,8 @@ function LauncherShell() {
           <SessionImportDialog
             targetPackId={sessionImportTarget}
             targetPackName={packNameById(sessionImportTarget)}
-            packs={store.packs}
+            // 记录格式只升不降：比目标包新的那些包搬过来，目标包的 DSH 读不动，所以根本不列。
+            packs={store.packs.filter(pack => !isDshVersionOlderThan(pack.dshVersion, packById(sessionImportTarget)?.dshVersion))}
             busy={packDialogBusy}
             onPreview={sourcePackId => store.previewSessionImport(sourcePackId, sessionImportTarget)}
             onImport={async sourcePackId => {
