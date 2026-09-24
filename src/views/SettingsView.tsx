@@ -1288,7 +1288,7 @@ function SettingsPacks({
       )}
       {activePack && !activePack.dshVersion && packs.length > 0 && (
         <div className="settings-pack-create-hint">
-          <span>当前整合包「{activePack.name}」还没有绑定 DSH 版本，启动前请先下载一个版本。</span>
+          <span>当前整合包「{activePack.name}」还没有绑定 DSH 版本，启动前请先下载一个版本。{activePack.native ? '这是你之前用 dsh 命令跑出来的环境，配置和聊天记录都在原处，绑一个版本不会动它们。' : ''}</span>
           <button type="button" className="secondary-button" onClick={() => onNavigateTab('versions')}>去下载版本</button>
         </div>
       )}
@@ -1408,6 +1408,7 @@ function SettingsPacks({
                     <strong>{pack.name}</strong>
                     <span className="settings-pack-badge">DSH {pack.dshVersion ?? '未绑定'}</span>
                     {pack.officialVersion && <span className="settings-pack-badge settings-pack-official-badge" title={`官方默认整合包 ${pack.officialVersion}：可删除，可随时一键恢复`}>官方</span>}
+                    {pack.native && <span className="settings-pack-badge settings-pack-native-badge" title="装启动器之前，这个环境是用 dsh 命令自己跑起来的：你之前的配置、API 密钥和聊天记录都还在原处，启动器只是接管它。它住在默认家目录里，和其它同样没绑私有家目录的包共用一份数据，不是新建的隔离环境。">命令行部署</span>}
                     <button type="button" className="icon-button settings-pack-edit" onClick={() => setRenaming({ id: pack.id, value: pack.name })} title="重命名" aria-label="重命名"><Pencil size={13} /></button>
                   </span>
                 )}

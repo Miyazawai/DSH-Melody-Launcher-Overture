@@ -56,6 +56,25 @@ describe('migrateToPackHomesV2', () => {
     expect(env.stored.activePackId).toBe('web')
     expect(env.stored.profileName).toBe('web')
     expect(env.stored.packsV2Migrated).toBe(true)
+    // 这个 fixture 的家目录里没有 DSH 自己跑出来的数据，所以不该挂「命令行部署」。
+    expect(records.some(record => record.native)).toBe(false)
+  })
+
+  it('家目录里已有会话记录时，收编进来的包标为命令行部署', async () => {
+    const env = await fixture()
+    await mkdir(path.join(env.dshHome, 'sessions', '--C-demo-project--', 'session-old'), { recursive: true })
+
+    await migrateToPackHomesV2(env.deps)
+    const records = await readPackRegistry(env.registryPath)
+    expect(records.map(record => `${record.id}:${record.native === true}`).sort()).toEqual(['pack-legacy-import:true', 'web:true'])
+  })
+
+  it('只有 API 凭据、一条会话都没有，也算命令行部署过的环境', async () => {
+    const env = await fixture()
+    await writeFile(path.join(env.dshHome, '.credentials.yaml'), 'version: 1\nrefs: {}\n')
+
+    await migrateToPackHomesV2(env.deps)
+    expect((await readPackRegistry(env.registryPath)).every(record => record.native === true)).toBe(true)
   })
 
   it('零包引导态：已迁移且注册表为空时不重建任何包', async () => {

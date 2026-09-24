@@ -31,6 +31,11 @@ export interface PackRecord {
   /** 安装 DSH 版本时自动生成的包（界面上可区分、可改名）。 */
   auto?: boolean
   /**
+   * 装启动器之前这个家目录里就已经有 DSH 数据（用户用 `dsh` 命令自己跑过）。
+   * 只在一次性迁移里判定，之后不再改：启动器自己建的包永远不带这个标记。
+   */
+  native?: boolean
+  /**
    * 官方默认整合包的版本号（如 0.1.1）。有值 = 官方包：列表页挂「官方」徽标，
    * 首启/恢复逻辑据此判断当前版本官方包是否已存在（可删，删后可一键恢复）。
    */
@@ -120,6 +125,7 @@ export function toPackStatus(record: PackRecord, activePackId: string | null | u
     source: record.source,
     enabled: record.id === activePackId,
     ...(record.auto ? { auto: true } : {}),
+    ...(record.native ? { native: true } : {}),
     ...(record.officialVersion ? { officialVersion: record.officialVersion } : {}),
     state: record.state,
     plugins: record.plugins,

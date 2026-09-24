@@ -8514,6 +8514,14 @@ input:focus-visible {
   font-weight: 700;
 }
 
+/* 「命令行部署」：装启动器之前就存在的 DSH 环境。用琥珀色区别于「官方」，但不带危险语义。 */
+.settings-pack-badge.settings-pack-native-badge {
+  border-color: color-mix(in srgb, var(--amber) 45%, transparent);
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-weight: 700;
+}
+
 .settings-pack-edit {
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-out);

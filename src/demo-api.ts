@@ -298,6 +298,9 @@ let demoPacks: PackStatus[] = [
     description: 'Web 工作台 + UI 集合，日常使用的基础组合。',
     version: '1.0.0',
     dshVersion: '0.1.5-rc.1',
+    // 对应真实用户机器上那个迁移进来的 `web` 包：装启动器之前就用 dsh 命令跑过。
+    // 演示环境里留一个，「命令行部署」徽标才看得见。
+    native: true,
     source: 'created',
     enabled: true,
     state: 'complete',

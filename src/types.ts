@@ -983,6 +983,11 @@ export interface PackStatus {
   enabled: boolean
   /** 安装 DSH 版本时自动生成的包。 */
   auto?: boolean
+  /**
+   * 这个包住在启动器之外的 DSH 环境里：装启动器之前就用 `dsh` 命令跑过，
+   * 配置与会话都在默认家目录。它不是一套新的隔离环境，与其它同家目录的包共用数据。
+   */
+  native?: boolean
   /** 官方默认整合包的版本号（有值 = 官方包，可删可恢复）。 */
   officialVersion?: string
   state: 'complete' | 'partial' | 'failed'

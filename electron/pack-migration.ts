@@ -10,11 +10,25 @@
  */
 
 import { readdir } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import type { AppSettings } from '../src/types'
 import { isSafeProfileName } from './profile'
 import { readProfileMetadata } from './profile-service'
 import { readPackRegistry, upsertPackRecord } from './pack-registry'
+
+/**
+ * 这个家目录里是不是已经有 DSH 自己跑出来的东西。
+ *
+ * 判据用数据而不是目录时间戳：会话日志或凭据文件只要存在，就说明这台机器在装启动器
+ * 之前就用 `dsh` 命令起过服务——用户关心的「我之前的配置和记录还在不在」正是这件事。
+ * 迁移只跑一次，此刻启动器自己还没建过任何包，所以不会把启动器建的包误标。
+ */
+async function homeHasNativeDshData(home: string): Promise<boolean> {
+  if (existsSync(path.join(home, '.credentials.yaml'))) return true
+  const projects = await readdir(path.join(home, 'sessions'), { withFileTypes: true }).catch(() => [])
+  return projects.some(entry => entry.isDirectory())
+}
 
 export interface PackHomeMigrationDeps {
   registryPath: string
@@ -33,6 +47,9 @@ export async function migrateToPackHomesV2(deps: PackHomeMigrationDeps): Promise
   // 已迁移就不再跑：注册表为空 = 用户删光了所有包（零包引导态），绝不能重建复活。
   if (settings.packsV2Migrated) return
 
+  // 这两类包都住在默认家目录里；那个目录若已有 DSH 数据，就是命令行部署留下的。
+  const native = await homeHasNativeDshData(settings.dshHome)
+
   // 1) 默认包：homePath 缺省（永远跟随用户可改的默认家目录）。
   if (!records.some(record => record.id === DEFAULT_PACK_ID)) {
     await upsertPackRecord(deps.registryPath, {
@@ -41,6 +58,7 @@ export async function migrateToPackHomesV2(deps: PackHomeMigrationDeps): Promise
       description: '',
       version: '1.0.0',
       ...(settings.dshVersion ? { dshVersion: settings.dshVersion } : {}),
+      ...(native ? { native: true } : {}),
       source: 'created',
       installedAt: now,
       updatedAt: now,
@@ -64,6 +82,7 @@ export async function migrateToPackHomesV2(deps: PackHomeMigrationDeps): Promise
       description: metadata?.description ?? '',
       version: '1.0.0',
       ...(metadata?.dshVersion ? { dshVersion: metadata.dshVersion } : {}),
+      ...(native ? { native: true } : {}),
       source: 'created',
       installedAt: metadata?.createdAt ?? now,
       updatedAt: now,
