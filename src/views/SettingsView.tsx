@@ -1459,7 +1459,6 @@ function SettingsPacks({
                       type="button"
                       className="icon-button pack-actions-toggle"
                       data-open={railOpen ? 'true' : 'false'}
-                      disabled={busy}
                       onClick={() => { setRailPackId(railOpen ? null : pack.id); if (railOpen) setArmedRemove(null) }}
                       aria-expanded={railOpen}
                       aria-controls={`pack-rail-${pack.id}`}
