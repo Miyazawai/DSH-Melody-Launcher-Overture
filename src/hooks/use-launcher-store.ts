@@ -1058,7 +1058,10 @@ export function useLauncherStore() {
   const createVersionClone = useCallback(async (packId: string, request: { dshVersion: string; name?: string }) => {
     setPackActivity(`正在复制整合包到 DSH ${request.dshVersion}：原包不会有任何改动…`)
     try {
-      return await run(`pack-clone:${packId}`, () => api.createVersionClone(packId, request), { success: '新整合包已复制出来。' })
+      return await run(`pack-clone:${packId}`, () => api.createVersionClone(packId, request), {
+        // 弹窗点完就关了，成功与否全靠这条吐司说清楚：新包叫什么、原包没动。
+        success: created => `已复制出「${created.name}」（DSH ${created.dshVersion}），原包未改动，可在整合包页切回去用。`,
+      })
     } finally {
       setPackActivity(null)
     }

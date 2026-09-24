@@ -9147,7 +9147,6 @@ input:focus-visible {
 /* 切换版本（升版副本）对话框：选版本 + 命名，首句说明"旧包不动"。 */
 .pack-clone-dialog .modal-content { display: grid; gap: 10px; }
 .pack-clone-dialog .form-field { margin-top: 2px; }
-.pack-clone-done { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; font-weight: 600; line-height: 1.5; }
 .pack-clone-versions { max-height: 210px; overflow-y: auto; }
 
 /* DSH 异常退出弹窗：原本写在组件里的 <style> 模板串，挪到这里和其他弹窗同一处。 */

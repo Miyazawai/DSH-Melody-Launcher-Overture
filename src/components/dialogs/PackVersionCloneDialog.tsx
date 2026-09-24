@@ -1,4 +1,4 @@
-import { Check, CopyPlus, Download } from 'lucide-react'
+import { CopyPlus, Download } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import type { PackStatus } from '../../types'
 import { compareDshVersions, isDshVersionOlderThan } from '../../lib/dsh-version'
@@ -39,23 +39,18 @@ export function PackVersionCloneDialog(props: PackVersionCloneDialogProps) {
     .sort((left, right) => compareDshVersions(right, left)), [installedVersions, availableVersions, currentVersion])
   const [version, setVersion] = useState(candidates[0] ?? '')
   const [name, setName] = useState('')
-  const [working, setWorking] = useState(false)
-  const [done, setDone] = useState<PackStatus | null>(null)
   const hasOlderOnly = useMemo(() => currentVersion !== null
     && [...installedVersions, ...availableVersions].some(item => isDshVersionOlderThan(item, currentVersion)),
   [installedVersions, availableVersions, currentVersion])
   const needsDownload = version !== '' && !installedVersions.includes(version)
   const resolvedName = name.trim() || `${packName} · DSH ${version}`
-  const disabled = busy || working || !version
+  const disabled = busy || !version
 
-  async function cloneNow(): Promise<void> {
-    setWorking(true)
-    try {
-      const created = await onClone({ dshVersion: version, name: resolvedName })
-      if (created) setDone(created)
-    } finally {
-      setWorking(false)
-    }
+  function cloneNow(): void {
+    // 立刻关窗：复制大包要几分钟，进度只有整合包页那条横幅画得出来，弹窗挡在上面
+    // 就等于把唯一的反馈遮住；成功与否改由吐司报（见 use-launcher-store 的 createVersionClone）。
+    onClose()
+    void onClone({ dshVersion: version, name: resolvedName })
   }
 
   return (
@@ -66,24 +61,17 @@ export function PackVersionCloneDialog(props: PackVersionCloneDialogProps) {
       title="切换版本"
       onClose={onClose}
       footer={<>
-        <button type="button" className="secondary-button" disabled={working} onClick={onClose}>{done ? '关闭' : '取消'}</button>
-        {!done && (needsDownload ? (
-          <button type="button" className="primary-command" disabled={busy || !version} onClick={() => onDownloadFirst(version)}>
+        <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>取消</button>
+        {needsDownload ? (
+          <button type="button" className="primary-command" disabled={disabled} onClick={() => onDownloadFirst(version)}>
             <Download size={16} />先下载 DSH {version}
           </button>
         ) : (
-          <button type="button" className="primary-command" disabled={disabled} onClick={() => void cloneNow()}>
-            {working ? '正在复制…' : '复制为新包'}
-          </button>
-        ))}
+          <button type="button" className="primary-command" disabled={disabled} onClick={cloneNow}>复制为新包</button>
+        )}
       </>}
     >
-      {done ? (
-        <>
-          <p className="pack-clone-done"><Check size={15} />已复制出「{done.name}」，它使用 DSH {done.dshVersion}。</p>
-          <p className="dialog-note">原来的「{packName}」仍是 DSH {currentVersion ?? '未标注'}，随时可以在整合包页切回去用。</p>
-        </>
-      ) : candidates.length === 0 ? (
+      {candidates.length === 0 ? (
         <div className="custom-api-empty">
           {hasOlderOnly ? <>
             <strong>只能往更新的版本复制</strong>
@@ -120,6 +108,7 @@ export function PackVersionCloneDialog(props: PackVersionCloneDialogProps) {
           {needsDownload
             ? <p className="dialog-note">这个版本本机还没有：先点「先下载 DSH {version}」去「DSH版本」页装好（那里有进度条），回来再复制。</p>
             : null}
+          <p className="dialog-note">复制要几分钟（包越大越久），期间这条进度会显示在整合包页顶部。</p>
           <p className="dialog-note">包内插件不会自动升级。新包里如果有的插件用不了，通常是插件还没跟上 DSH {version}。</p>
           <p className="dialog-note">这份副本连聊天记录一起复制，而<strong>数据格式只能往上升</strong>：新 DSH 跑过一次，这些记录就交不回旧版本了（所以列表里不列更旧的版本）。</p>
         </>
