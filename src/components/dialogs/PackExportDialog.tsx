@@ -1,4 +1,4 @@
-import { Check, Package, ShieldAlert } from 'lucide-react'
+import { Package, ShieldAlert } from 'lucide-react'
 import { useState } from 'react'
 import type { PackExportPrivacy } from '../../types'
 import { ModalShell } from './ModalShell'
@@ -21,24 +21,18 @@ export function PackExportDialog(props: PackExportDialogProps) {
   const [credentials, setCredentials] = useState(false)
   const [sessions, setSessions] = useState(false)
   const [warned, setWarned] = useState(false)
-  const [working, setWorking] = useState(false)
-  const [savedTo, setSavedTo] = useState<string | null>(null)
   const anyPrivacy = credentials || sessions
-  const disabled = busy || working
 
-  async function exportNow(): Promise<void> {
+  function exportNow(): void {
     if (anyPrivacy && !warned) {
       setWarned(true)
       return
     }
-    setWorking(true)
-    try {
-      const path = await onExport({ credentials, sessions })
-      if (path) setSavedTo(path)
-      else onClose()
-    } finally {
-      setWorking(false)
-    }
+    // 立刻关窗：主进程是先弹原生保存框、选完位置才开始打包（大包要几分钟）。
+    // 弹窗留着会在这段时间里挡死界面，而且 store.exportPack 已经在整合包页
+    // 驱动 packStage 进度条 + 完成 toast，这里再挂一个静态「正在导出…」是第二套进度。
+    onClose()
+    void onExport({ credentials, sessions })
   }
 
   return (
@@ -48,26 +42,16 @@ export function PackExportDialog(props: PackExportDialogProps) {
       icon={<Package size={19} />}
       title={`导出「${packName}」`}
       onClose={onClose}
-      footer={savedTo ? (
-        <button type="button" className="primary-command" onClick={onClose}>完成</button>
-      ) : (
-        <>
-          <button type="button" className="secondary-button" disabled={disabled} onClick={onClose}>取消</button>
-          {warned ? (
-            <button type="button" className="danger-button" disabled={disabled} onClick={() => void exportNow()}>
-              {working ? '正在导出…' : '我已明白，继续导出'}
-            </button>
-          ) : (
-            <button type="button" className="primary-command" disabled={disabled} onClick={() => void exportNow()}>
-              {working ? '正在导出…' : '导出'}
-            </button>
-          )}
-        </>
-      )}
+      footer={<>
+        <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>取消</button>
+        {warned ? (
+          <button type="button" className="danger-button" disabled={busy} onClick={exportNow}>我已明白，继续导出</button>
+        ) : (
+          <button type="button" className="primary-command" disabled={busy} onClick={exportNow}>导出</button>
+        )}
+      </>}
     >
-      {savedTo ? (
-        <p className="pack-export-done"><Check size={15} />已导出到 {savedTo}</p>
-      ) : warned ? (
+      {warned ? (
         <div className="dialog-warning">
           <p className="pack-export-warning-title"><ShieldAlert size={16} />这个压缩包里会有你的隐私</p>
           <ul>
@@ -80,14 +64,14 @@ export function PackExportDialog(props: PackExportDialogProps) {
         <>
           <p className="dialog-note">默认导出的整合包不含任何私人数据，可以直接发给别人。要带走自己的东西时再勾下面两项。</p>
           <label className={`dialog-choice${credentials ? ' selected' : ''}`}>
-            <input type="checkbox" checked={credentials} disabled={disabled} onChange={event => { setCredentials(event.target.checked); setWarned(false) }} />
+            <input type="checkbox" checked={credentials} disabled={busy} onChange={event => { setCredentials(event.target.checked); setWarned(false) }} />
             <span>
               <strong>附带 API 密钥</strong>
               <small>把这台机器上配置的模型密钥一起打进包。拿到包的人可以直接用它花你的额度。</small>
             </span>
           </label>
           <label className={`dialog-choice${sessions ? ' selected' : ''}`}>
-            <input type="checkbox" checked={sessions} disabled={disabled} onChange={event => { setSessions(event.target.checked); setWarned(false) }} />
+            <input type="checkbox" checked={sessions} disabled={busy} onChange={event => { setSessions(event.target.checked); setWarned(false) }} />
             <span>
               <strong>附带会话记录</strong>
               <small>对话内容、会话里收发过的文件，以及你电脑上的文件夹路径。</small>

@@ -313,6 +313,13 @@ function LauncherShell() {
               if (created) void store.refreshPacks()
               return created
             }}
+            onDownloadFirst={version => {
+              // 关窗 → 跳到「DSH版本」页 → 走那套带进度条的下载流程。
+              // 复制动作等用户装完再回来点，别在这个弹窗里偷偷下一个 100MB。
+              setCloneTarget(null)
+              navigation.goHome('versions')
+              void store.installDshVersion(version)
+            }}
             onClose={() => setCloneTarget(null)}
           />
         </Suspense>

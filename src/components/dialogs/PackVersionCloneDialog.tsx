@@ -1,4 +1,4 @@
-import { Check, CopyPlus } from 'lucide-react'
+import { Check, CopyPlus, Download } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import type { PackStatus } from '../../types'
 import { ModalShell } from './ModalShell'
@@ -12,6 +12,11 @@ export interface PackVersionCloneDialogProps {
   availableVersions: string[]
   busy: boolean
   onClone(request: { dshVersion: string; name?: string }): Promise<PackStatus | undefined>
+  /**
+   * 选中的版本本机还没装时走这里：关窗、跳到「DSH版本」页并启动下载。
+   * 下载交给版本页那套有进度条的流程，本弹窗不再偷偷先装一遍。
+   */
+  onDownloadFirst(version: string): void
   onClose(): void
 }
 
@@ -23,7 +28,7 @@ export interface PackVersionCloneDialogProps {
  * 约束可依据，装不上就当场失败并把原因讲清楚。
  */
 export function PackVersionCloneDialog(props: PackVersionCloneDialogProps) {
-  const { packName, currentVersion, installedVersions, availableVersions, busy, onClone, onClose } = props
+  const { packName, currentVersion, installedVersions, availableVersions, busy, onClone, onDownloadFirst, onClose } = props
   const candidates = useMemo(() => [...new Set([...installedVersions, ...availableVersions])]
     .filter(version => version !== currentVersion)
     // 版本号降序：最上面就是"升到最新"这条最常见路径。
@@ -55,11 +60,15 @@ export function PackVersionCloneDialog(props: PackVersionCloneDialogProps) {
       onClose={onClose}
       footer={<>
         <button type="button" className="secondary-button" disabled={working} onClick={onClose}>{done ? '关闭' : '取消'}</button>
-        {!done && (
+        {!done && (needsDownload ? (
+          <button type="button" className="primary-command" disabled={busy || !version} onClick={() => onDownloadFirst(version)}>
+            <Download size={16} />先下载 DSH {version}
+          </button>
+        ) : (
           <button type="button" className="primary-command" disabled={disabled} onClick={() => void cloneNow()}>
             {working ? '正在复制…' : '复制为新包'}
           </button>
-        )}
+        ))}
       </>}
     >
       {done ? (
@@ -96,7 +105,9 @@ export function PackVersionCloneDialog(props: PackVersionCloneDialogProps) {
             <span>新包名称</span>
             <input type="text" value={resolvedName} disabled={disabled} onChange={event => setName(event.target.value)} />
           </label>
-          {needsDownload && <p className="dialog-note">会先下载并安装 DSH {version}，再复制包内内容；期间不要关机。</p>}
+          {needsDownload
+            ? <p className="dialog-note">这个版本本机还没有：先点「先下载 DSH {version}」去「DSH版本」页装好（那里有进度条），回来再复制。</p>
+            : null}
           <p className="dialog-note">包内插件不会自动升级。新包里如果有的插件用不了，通常是插件还没跟上 DSH {version}。</p>
         </>
       )}
