@@ -411,6 +411,7 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
     return runExclusive(`安装 DSH ${normalized}`, async () => {
       if (options.isRuntimeRunning()) throw new Error('请先停止 DSH，再安装或更新本地 DSH。')
       const settings = await options.readSettings()
+      const installNetwork = buildNetworkEnvironment(settings)
       const root = dshVersionRoot(settings.dshInstallPath, normalized)
       await mkdir(root, { recursive: true })
       const manifestPath = path.join(root, 'package.json')
@@ -509,7 +510,17 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
         heartbeat.unref()
         return executeTrackedCommand(pnpm.executable, args, {
           cwd: root,
-          env: withExecutableDirectoryOnPath(node.node, { ...process.env, FORCE_COLOR: '0', NPM_CONFIG_UPDATE_NOTIFIER: 'false' }),
+          // 与插件安装同一套网络环境：镜像源 + 用户代理。此前这条链漏了，pnpm 只会
+          // 按默认值去 registry.npmjs.org，大陆网络下新发布的大体积二进制（如 0.1.7 引入的
+          // @deepseek-ai/libreoffice-kit-win32-x64）一超时就是几十秒的「看起来卡住了」。
+          env: withExecutableDirectoryOnPath(node.node, {
+            ...process.env,
+            ...installNetwork.proxy,
+            npm_config_registry: installNetwork.npmRegistry,
+            NPM_CONFIG_REGISTRY: installNetwork.npmRegistry,
+            FORCE_COLOR: '0',
+            NPM_CONFIG_UPDATE_NOTIFIER: 'false',
+          }),
           onOutput: handlePackageOutput,
         }).finally(() => clearInterval(heartbeat))
       }

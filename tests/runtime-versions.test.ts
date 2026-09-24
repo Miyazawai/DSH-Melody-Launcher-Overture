@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { buildDshCoreOverrides, buildManagedDshInstallArgs, buildManagedDshPnpmArgs, createRuntimeVersionService, listAvailableDshVersions, MissingDshDependencyError, resolveDshCoreOverrides } from '../electron/runtime-versions'
 import type { AppSettings } from '../src/types'
+import type { NodeRuntime, PnpmRuntime } from '../electron/node-runtime'
 
 describe('runtime version indexes', () => {
   it('derives exact DSH core overrides from registry manifests', () => {
@@ -195,5 +198,70 @@ describe('运行环境读缓存', () => {
     // 显式 refresh 仍然要真的去刷。
     await service.read(true)
     expect(counter.fetches).toBe(afterFirst + 1)
+  })
+})
+
+describe('DSH 版本安装的网络环境', () => {
+  it('pnpm 安装带上用户镜像源与代理，不再默认打官方源', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-install-net-'))
+    const versionRoot = path.join(root, 'versions', '0.1.7-rc.1')
+    // 0.1.7 的依赖清单里有大体积二进制包，官方源在大陆网络下会超时；
+    // 这条测试守的就是「安装链有没有把镜像源交给 pnpm」。
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ versions: { '0.1.7-rc.1': {} }, 'dist-tags': { latest: '0.1.7-rc.1' }, time: {} }),
+    })) as unknown as typeof fetch)
+
+    const commands: { args: string[]; env: NodeJS.ProcessEnv }[] = []
+    const settings = {
+      dshInstallPath: root,
+      dshHome: path.join(root, 'home'),
+      dshVersion: '0.1.5-rc.2',
+      nodeVersion: null,
+      profileName: 'pack-a',
+      activePackId: 'pack-a',
+      launchExecutable: path.join(versionRoot, 'node_modules', '.bin', 'dsh.cmd'),
+      launchArgs: ['web'],
+      webPort: 3080,
+      openAfterLaunch: false,
+      network: { npmRegistry: 'https://mirror.test', proxy: 'http://127.0.0.1:7890' },
+    } as unknown as AppSettings
+
+    try {
+      const service = createRuntimeVersionService({
+        dshRoot: root,
+        nodeRoot: path.join(root, 'node-runtime'),
+        readSettings: async () => settings,
+        saveSettings: async next => next,
+        prepareNodeRuntime: async () => ({ root, node: path.join(root, 'node.exe'), npm: '', npx: '', managed: false }) as NodeRuntime,
+        preparePnpmRuntime: async () => ({ root, executable: path.join(root, 'pnpm.cmd') }) as PnpmRuntime,
+        isRuntimeRunning: () => false,
+        emitOutput: () => {},
+        emitProgress: () => {},
+        githubFetch: async () => { throw new Error('本条测试不该联网读版本列表') },
+        runCommand: async (_executable, args, options) => {
+          commands.push({ args, env: (options.env ?? {}) as NodeJS.ProcessEnv })
+          const bin = path.join(versionRoot, 'node_modules', '.bin')
+          const pkg = path.join(versionRoot, 'node_modules', '@deepseek-ai', 'dsh')
+          await mkdir(bin, { recursive: true })
+          await mkdir(pkg, { recursive: true })
+          await writeFile(path.join(bin, 'dsh.cmd'), '@echo off\r\n', 'utf8')
+          await writeFile(path.join(pkg, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.1.7-rc.1' }), 'utf8')
+          return { exitCode: 0, output: '' }
+        },
+      })
+
+      await service.installDsh('0.1.7-rc.1')
+
+      const install = commands.find(command => command.args[0] === 'add')
+      expect(install?.args).toContain('@deepseek-ai/dsh@0.1.7-rc.1')
+      expect(install?.env.npm_config_registry).toBe('https://mirror.test')
+      expect(install?.env.NPM_CONFIG_REGISTRY).toBe('https://mirror.test')
+      expect(install?.env.https_proxy).toBe('http://127.0.0.1:7890')
+    } finally {
+      vi.unstubAllGlobals()
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
