@@ -45,6 +45,10 @@ env:
 jobs:
   build:
     name: 构建并发布官方整合包
+    # 上传目标就是本仓库时内置的 GITHUB_TOKEN 足够，不必再让维护者手配 PAT；
+    # 只有跨仓库上传（上游跑同一条工作流发到序曲）才需要 OVERTURE_RELEASE_TOKEN。
+    permissions:
+      contents: write
     # 包是 Windows 专用的：officecli 是 win-x64 单二进制，原生模块也按 win32 预编译。
     runs-on: windows-latest
     steps:
@@ -172,12 +176,19 @@ jobs:
         if: steps.check.outputs.build == 'true'
         shell: bash
         env:
-          TOKEN: ${{ secrets.OVERTURE_RELEASE_TOKEN }}
+          PAT: ${{ secrets.OVERTURE_RELEASE_TOKEN }}
+          TOKEN: ${{ secrets.OVERTURE_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "$TOKEN" ]; then
-            echo "::warning::未配置 OVERTURE_RELEASE_TOKEN，跳过自动上传；zip 见本工作流 artifact。"
-            exit 0
+            echo "::error::没有可用的上传凭据（OVERTURE_RELEASE_TOKEN 与 GITHUB_TOKEN 都为空）。"
+            exit 1
+          fi
+          # 内置 token 只对当前仓库有效。跨仓库时必须显式配 PAT，
+          # 否则会以一个读不到的 403 收场——宁可在这里说清楚。
+          if [ "$RELEASE_REPOSITORY" != "$GITHUB_REPOSITORY" ] && [ -z "$PAT" ]; then
+            echo "::error::上传目标是另一个仓库（$RELEASE_REPOSITORY），内置 GITHUB_TOKEN 无权写入，请配置 OVERTURE_RELEASE_TOKEN。"
+            exit 1
           fi
           # 官方包机制只查 releases/latest，所以必须挂到最新那个 Release 上。
           tag=$(curl -sSL "https://api.github.com/repos/$RELEASE_REPOSITORY/releases/latest" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).tag_name ?? ""))')
