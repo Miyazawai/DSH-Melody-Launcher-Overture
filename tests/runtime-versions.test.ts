@@ -45,6 +45,9 @@ describe('runtime version indexes', () => {
       '--fetch-retry-maxtimeout=10000',
       '@deepseek-ai/dsh@0.1.1-rc.1',
     ])
+  })
+
+  it('DSH 安装：registry 走旗标、超时按 116MB 二进制量级放宽', () => {
     expect(buildManagedDshPnpmArgs('C:\\dsh\\versions\\0.1.1-rc.1', 'v0.1.1-rc.1')).toEqual([
       'add',
       '--dir',
@@ -53,9 +56,16 @@ describe('runtime version indexes', () => {
       '--lockfile=true',
       '--ignore-scripts',
       '--reporter=append-only',
-      '--fetch-timeout=30000',
+      '--fetch-timeout=600000',
       '--fetch-retries=1',
       '@deepseek-ai/dsh@0.1.1-rc.1',
+    ])
+    // pnpm 11 不读 npm_config_registry，只有旗标能把镜像源传下去；顺序也钉住：
+    // registry 必须在包名之前，否则会被 pnpm 当成包参数。
+    expect(buildManagedDshPnpmArgs('C:\\r', '0.1.7-rc.1', 'https://registry.npmmirror.com')).toEqual([
+      'add', '--dir', 'C:\\r', '--save-exact', '--lockfile=true', '--ignore-scripts',
+      '--reporter=append-only', '--fetch-timeout=600000', '--fetch-retries=1',
+      '--registry=https://registry.npmmirror.com', '@deepseek-ai/dsh@0.1.7-rc.1',
     ])
   })
 
@@ -258,9 +268,9 @@ describe('DSH 版本安装的网络环境', () => {
       await service.installDsh('0.1.7-rc.1')
 
       const install = commands.find(command => command.args[0] === 'add')
+      // registry 必须由旗标带上——环境变量 pnpm 11 不认。
       expect(install?.args).toContain('@deepseek-ai/dsh@0.1.7-rc.1')
-      expect(install?.env.npm_config_registry).toBe('https://mirror.test')
-      expect(install?.env.NPM_CONFIG_REGISTRY).toBe('https://mirror.test')
+      expect(install?.args).toContain('--registry=https://mirror.test')
       expect(install?.env.https_proxy).toBe('http://127.0.0.1:7890')
     } finally {
       vi.unstubAllGlobals()

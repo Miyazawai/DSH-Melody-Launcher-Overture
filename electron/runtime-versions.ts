@@ -48,7 +48,33 @@ export function dshRegistryCandidates(npmRegistry?: string | null): string[] {
  * DSH 是一棵很大的依赖树。安装时显式固定网络行为和锁文件行为，
  * 避免某个 registry 请求无限重试，或每次启动都重新求解整棵树。
  * 脚本统一在依赖落盘后单独重建，避免第三方 postinstall 阻塞解析阶段。
+ *
+ * fetch-timeout 是**整个请求**的超时，不是空闲超时。DSH 0.1.7 起依赖里带
+ * `@deepseek-ai/libreoffice-kit-win32-x64`（压缩 116MB / 解包 325MB），
+ * 610KB/s 的连接就要 190 秒——原来那个 30 秒在任何源上都不可能装完。
  */
+const DSH_FETCH_TIMEOUT_MS = 600_000
+
+/**
+ * registry 必须走 `--registry` 旗标：pnpm 11 不读 `npm_config_registry` 环境变量
+ * （实测设了照样打 registry.npmjs.org），只有旗标和 .npmrc 生效。
+ */
+export function buildManagedDshPnpmArgs(root: string, version: string, registry?: string | null): string[] {
+  return [
+    'add',
+    '--dir', root,
+    '--save-exact',
+    '--lockfile=true',
+    '--ignore-scripts',
+    '--reporter=append-only',
+    `--fetch-timeout=${DSH_FETCH_TIMEOUT_MS}`,
+    '--fetch-retries=1',
+    ...(registry ? [`--registry=${registry}`] : []),
+    `${DSH_PACKAGE_NAME}@${normalizeDshVersion(version)}`,
+  ]
+}
+
+/** npm 变体：生产代码目前不走这条，保留给既有测试与手工排查。 */
 export function buildManagedDshInstallArgs(root: string, version: string): string[] {
   return [
     'install',
@@ -66,20 +92,6 @@ export function buildManagedDshInstallArgs(root: string, version: string): strin
     '--fetch-retry-factor=2',
     '--fetch-retry-mintimeout=1000',
     '--fetch-retry-maxtimeout=10000',
-    `${DSH_PACKAGE_NAME}@${normalizeDshVersion(version)}`,
-  ]
-}
-
-export function buildManagedDshPnpmArgs(root: string, version: string): string[] {
-  return [
-    'add',
-    '--dir', root,
-    '--save-exact',
-    '--lockfile=true',
-    '--ignore-scripts',
-    '--reporter=append-only',
-    '--fetch-timeout=30000',
-    '--fetch-retries=1',
     `${DSH_PACKAGE_NAME}@${normalizeDshVersion(version)}`,
   ]
 }
@@ -510,14 +522,11 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
         heartbeat.unref()
         return executeTrackedCommand(pnpm.executable, args, {
           cwd: root,
-          // 与插件安装同一套网络环境：镜像源 + 用户代理。此前这条链漏了，pnpm 只会
-          // 按默认值去 registry.npmjs.org，大陆网络下新发布的大体积二进制（如 0.1.7 引入的
-          // @deepseek-ai/libreoffice-kit-win32-x64）一超时就是几十秒的「看起来卡住了」。
+          // 代理走环境变量（pnpm 认这个）；registry 不走——pnpm 11 忽略 npm_config_registry，
+          // 必须用 --registry 旗标，见 buildManagedDshPnpmArgs。
           env: withExecutableDirectoryOnPath(node.node, {
             ...process.env,
             ...installNetwork.proxy,
-            npm_config_registry: installNetwork.npmRegistry,
-            NPM_CONFIG_REGISTRY: installNetwork.npmRegistry,
             FORCE_COLOR: '0',
             NPM_CONFIG_UPDATE_NOTIFIER: 'false',
           }),
@@ -536,7 +545,7 @@ export function createRuntimeVersionService(options: RuntimeVersionServiceOption
           nodeVersion: await probeNodeVersion(node.node),
         })
       options.emitProgress(progressFor(normalized, lastProgressMessage, 'downloading', currentPercent))
-      const result = await runPackageManagerCommand(buildManagedDshPnpmArgs(root, normalized))
+      const result = await runPackageManagerCommand(buildManagedDshPnpmArgs(root, normalized, installNetwork.npmRegistry))
       if (result.exitCode !== 0) throw new Error(await installFailureMessage(`DSH ${normalized} 安装`, result))
       if (hasDshScriptPackage(root)) {
         options.emitProgress(progressFor(normalized, `正在执行 ${DSH_SUBPROCESS_LOCAL_PACKAGE} 安装脚本`, 'configuring', 90))
