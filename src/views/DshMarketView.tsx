@@ -1,12 +1,19 @@
 import { Check, ExternalLink, LoaderCircle, RefreshCw, Search, Star, Store, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLauncherApi } from '../api/client'
+import { CatalogPagination } from '../components/CatalogPagination'
 import { PageHeading } from '../components/PageHeading'
 import { SkeletonCards } from '../components/Skeleton'
 import { formatStars } from '../lib/format'
 import type { DshMarketCatalog, DshMarketPlugin, DshMarketProgress } from '../types'
 
 type Sort = 'stars' | 'updated' | 'name'
+
+/**
+ * 每页卡片数。精选目录有几千条，整表铺开时任何一次状态更新都要重挂几千张卡片
+ * （issue #12 的装机卡顿一半是这么来的），所以只渲染当前页。
+ */
+const MARKET_PAGE_SIZE = 48
 
 /**
  * 目录结果的模块级缓存：切走 tab 组件被卸载后，重进时先用旧目录直接渲染、
@@ -34,6 +41,7 @@ export function DshMarketView({ onProfileChanged, embedded = false, activeProfil
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [progress, setProgress] = useState<DshMarketProgress | null>(null)
+  const [page, setPage] = useState(1)
 
   const load = async () => {
     setLoading(true)
@@ -89,6 +97,20 @@ export function DshMarketView({ onProfileChanged, embedded = false, activeProfil
         : left.name.localeCompare(right.name))
   }, [catalog, query, category, sort])
 
+  const pageCount = Math.max(1, Math.ceil(visible.length / MARKET_PAGE_SIZE))
+  // 目录刷新后结果可能变短，钳住页码避免出现空页。
+  const currentPage = Math.min(page, pageCount)
+  const shown = visible.slice((currentPage - 1) * MARKET_PAGE_SIZE, currentPage * MARKET_PAGE_SIZE)
+
+  // 换筛选条件就回到第一页，否则会停在一个筛选后不存在的位置上。
+  useEffect(() => { setPage(1) }, [query, category, sort])
+
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  const flipPage = (next: number) => {
+    setPage(next)
+    gridRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
+
   const mutate = async (plugin: DshMarketPlugin, action: 'install' | 'update' | 'uninstall' | 'toggle', enabled?: boolean) => {
     setBusy(plugin.name)
     setError(null)
@@ -140,8 +162,8 @@ export function DshMarketView({ onProfileChanged, embedded = false, activeProfil
       {error && <div className="error-banner"><span>{error}</span><button type="button" onClick={() => void load()}>重试</button></div>}
       {loading && catalog === null && <><div className="settings-hint">正在读取 DSH Market 目录…</div><SkeletonCards count={8} /></>}
       {!loading && catalog !== null && visible.length === 0 && <div className="empty-state"><Search size={22} /><span>没有匹配的精选插件。</span></div>}
-      <div className="dsh-market-grid">
-        {visible.map(plugin => {
+      <div ref={gridRef} className="dsh-market-grid">
+        {shown.map(plugin => {
           const isBusy = busy === plugin.name
           return (
             <article key={`${plugin.owner}/${plugin.name}`} className="dsh-market-card">
@@ -153,6 +175,16 @@ export function DshMarketView({ onProfileChanged, embedded = false, activeProfil
           )
         })}
       </div>
+      {pageCount > 1 && (
+        <CatalogPagination
+          page={currentPage}
+          pageCount={pageCount}
+          summary={`当前页 ${shown.length} 个，共 ${visible.length} 个精选插件`}
+          label="精选插件分页"
+          loading={loading}
+          onPageChange={flipPage}
+        />
+      )}
     </div>
   )
 }

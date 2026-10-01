@@ -7564,9 +7564,36 @@ input:focus-visible {
   }
 }
 
+/* 列表读取失败的可重试横幅（DSH Market 与技能市场共用）。 */
+.error-banner {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  gap: 8px;
+  border: 1px solid #e4bcbc;
+  border-radius: 8px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  font-size: 11px;
+  line-height: 17px;
+}
+.error-banner span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.error-banner button {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 32%, transparent);
+  border-radius: 6px;
+  color: var(--danger);
+  background: var(--surface);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.error-banner button:hover { border-color: var(--danger); }
+
 /* ---- DSH Market (独立于资源市场) ---- */
-.dsh-market-page { min-height: 0; overflow: auto; }
-.dsh-market-note { display: flex; min-height: 34px; align-items: center; justify-content: space-between; margin-bottom: 10px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: var(--surface-soft); font-size: 10px; }
+.dsh-market-page { min-height: 0; overflow: auto; }.dsh-market-note { display: flex; min-height: 34px; align-items: center; justify-content: space-between; margin-bottom: 10px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: var(--surface-soft); font-size: 10px; }
 .dsh-market-note span { display: inline-flex; align-items: center; gap: 6px; }
 .dsh-market-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 150px 120px; align-items: center; margin-bottom: 12px; gap: 8px; }
 .dsh-market-search { display: flex; height: 34px; align-items: center; padding: 0 11px; gap: 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--muted); }

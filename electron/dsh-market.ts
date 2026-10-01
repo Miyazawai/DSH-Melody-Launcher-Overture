@@ -23,6 +23,10 @@ import { withExecutableDirectoryOnPath } from './process'
 
 const REGISTRY_URL = 'https://awesome-dsh-plugin.com/plugins.json'
 const NPM_NAME = /^(@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/i
+// 远端返回的包名/版本会拼进 `dsh plugin add <spec>` 的参数：Windows 上子进程经 cmd.exe
+// 批处理行拉起，白名单正则是唯一一道防线（与 electron/process.ts 的引号包裹配合），
+// 所以任何来自 raw.githubusercontent / npm 搜索结果的字符串都必须先过形状校验。
+const NPM_VERSION = /^[0-9A-Za-z][0-9A-Za-z._+-]{0,127}$/
 const GITHUB_REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 const CORE = new Set(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless'])
 
@@ -494,8 +498,8 @@ export function createDshMarketService(options: DshMarketOptions) {
       if (!response.ok) return null
       const manifest = await response.json() as { name?: unknown; version?: unknown }
       return {
-        name: typeof manifest?.name === 'string' && manifest.name.trim() !== '' ? manifest.name.trim() : null,
-        version: typeof manifest?.version === 'string' && manifest.version.trim() !== '' ? manifest.version.trim() : null,
+        name: typeof manifest?.name === 'string' && NPM_NAME.test(manifest.name.trim()) ? manifest.name.trim() : null,
+        version: typeof manifest?.version === 'string' && NPM_VERSION.test(manifest.version.trim()) ? manifest.version.trim() : null,
       }
     } catch { return null }
   }
@@ -512,7 +516,7 @@ export function createDshMarketService(options: DshMarketOptions) {
       const target = folder.toLowerCase()
       const match = body.objects
         ?.map(item => item.package?.name)
-        .find(name => typeof name === 'string' && name.split('/').at(-1)?.toLowerCase() === target)
+        .find(name => typeof name === 'string' && NPM_NAME.test(name) && name.split('/').at(-1)?.toLowerCase() === target)
       return match ?? null
     } catch { return null }
   }

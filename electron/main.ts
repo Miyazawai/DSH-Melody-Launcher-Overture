@@ -19,7 +19,7 @@ import { buildPluginCommandArgs, createInstaller, syncProfilePnpmConfig, validat
 import { registerIpcHandlers } from './ipc'
 import { createLauncherUpdater, type LauncherUpdater } from './launcher-update'
 import { createGitHubAuthService, type GitHubAuthService } from './github-auth'
-import { buildNetworkEnvironment, npmRegistryCandidates } from './proxy'
+import { buildNetworkEnvironment, npmRegistryCandidates, refreshWindowsSystemProxy } from './proxy'
 import {
   ensureNodeRuntime,
   ensurePnpmRuntime,
@@ -1018,9 +1018,13 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.whenReady().then(async () => {
+  // 系统代理先探起来（异步，与下面的启动步骤并行）：之后所有子进程都只读缓存，
+  // 不必再在事件循环上同步查注册表。等完再建服务，确保第一次装包/启动就带上代理。
+  const systemProxyProbe = refreshWindowsSystemProxy()
   await recoverLegacyCredentials(path.join(app.getPath('userData'), 'dsh-credentials-compat')).catch(error => {
     console.error('[credentials] 旧版 DSH 凭据恢复失败。', error)
   })
+  await systemProxyProbe
   try {
     processSupervisor = await createProcessSupervisor({
       root: path.join(app.getPath('userData'), 'process-supervisor'),

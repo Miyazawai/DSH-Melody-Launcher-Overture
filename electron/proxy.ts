@@ -1,4 +1,5 @@
-import { spawnSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import type { NetworkSettings } from '../src/types'
 
 /**
@@ -70,28 +71,79 @@ export async function requestNpmMetadata(
   throw new Error(`读取 npm 元数据失败：${failures.join('；')}`)
 }
 
-/** 读取 Windows 系统代理，规则代理梯子（Clash 等）开启「系统代理」时返回代理地址。 */
+/** 读取 Windows 系统代理（规则代理梯子开启「系统代理」后写入的注册表项）。 */
+type RegistryValueReader = (valueName: 'ProxyEnable' | 'ProxyServer') => Promise<string | null>
+
+/**
+ * 系统代理缓存。
+ *
+ * 探测走异步子进程：`buildNetworkEnvironment()` 有 13 个调用点、全在主进程事件循环上，
+ * 早先每次用 `spawnSync('reg', …)` 都会把浏览器进程的窗口消息泵冻住几百毫秒——装机高峰
+ * （pnpm 正在狂写输出）叠加起来就是用户报的「整个窗口没有响应」。现在同步调用方只读缓存，
+ * 过期时后台重新探测，本次返回上一个已知值。
+ */
+const SYSTEM_PROXY_TTL_MS = 60_000
+const SYSTEM_PROXY_PROBE_TIMEOUT_MS = 2_000
+const INTERNET_SETTINGS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'
+
+const execFileAsync = promisify(execFile)
+
+const defaultRegistryReader: RegistryValueReader = async valueName => {
+  const { stdout } = await execFileAsync(
+    'reg',
+    ['query', INTERNET_SETTINGS_KEY, '/v', valueName],
+    { windowsHide: true, encoding: 'utf8', timeout: SYSTEM_PROXY_PROBE_TIMEOUT_MS },
+  )
+  return stdout
+}
+
+let systemProxy: { value: string | null; probedAt: number } | null = null
+let systemProbe: Promise<string | null> | null = null
+let registryReader: RegistryValueReader = defaultRegistryReader
+
+async function probeWindowsSystemProxy(): Promise<string | null> {
+  const enabled = await registryReader('ProxyEnable')
+  if (!enabled || !/0x1(?!\d)/i.test(enabled)) return null
+  const server = await registryReader('ProxyServer')
+  if (!server) return null
+  const match = /ProxyServer\s+REG_SZ\s+(\S+)/i.exec(server)
+  if (!match?.[1]) return null
+  return normalizeProxyServer(match[1].trim())
+}
+
+/** 重新探测系统代理（Windows 之外直接返回 null）；并发调用共用同一次探测。 */
+export function refreshWindowsSystemProxy(): Promise<string | null> {
+  if (process.platform !== 'win32') return Promise.resolve(null)
+  if (systemProbe) return systemProbe
+  systemProbe = (async () => {
+    let value: string | null = null
+    try {
+      value = await probeWindowsSystemProxy()
+    } catch {
+      // 注册表读不到就当作没开代理；探测失败不能影响任何一次网络操作。
+      value = null
+    }
+    systemProbe = null
+    systemProxy = { value, probedAt: Date.now() }
+    return value
+  })()
+  return systemProbe
+}
+
+/**
+ * 最近一次探测到的系统代理；从未探测过（或已过期）时会顺带触发一次后台探测，
+ * 但本次调用立即返回，绝不阻塞调用方。
+ */
 export function detectWindowsSystemProxy(): string | null {
   if (process.platform !== 'win32') return null
-  try {
-    const enabled = spawnSync(
-      'reg',
-      ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings', '/v', 'ProxyEnable'],
-      { windowsHide: true, encoding: 'utf8' },
-    )
-    if (enabled.status !== 0 || !/0x1(?!\d)/i.test(enabled.stdout)) return null
-    const server = spawnSync(
-      'reg',
-      ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings', '/v', 'ProxyServer'],
-      { windowsHide: true, encoding: 'utf8' },
-    )
-    if (server.status !== 0) return null
-    const match = /ProxyServer\s+REG_SZ\s+(\S+)/i.exec(server.stdout)
-    if (!match?.[1]) return null
-    return normalizeProxyServer(match[1].trim())
-  } catch {
-    return null
-  }
+  if (!systemProxy || Date.now() - systemProxy.probedAt >= SYSTEM_PROXY_TTL_MS) void refreshWindowsSystemProxy()
+  return systemProxy?.value ?? null
+}
+
+/** 注入注册表读取实现（测试用），并作废当前缓存。 */
+export function configureSystemProxyDetection(reader?: RegistryValueReader): void {
+  registryReader = reader ?? defaultRegistryReader
+  systemProxy = null
 }
 
 function normalizeProxyServer(value: string): string | null {

@@ -56,6 +56,9 @@ export function pluginTrialStateKey(profileName: string, packageName: string): s
   return `${profileName}:${packageName}`
 }
 
+/** 高频日志合帧窗口（毫秒），与安装进度的合帧窗口同一量级。 */
+const RUNTIME_LOG_FRAME_MS = 120
+
 export function useLauncherStore() {
   const api = useLauncherApi()
   const { toast, showToast, dismissToast } = useToast()
@@ -93,6 +96,8 @@ export function useLauncherStore() {
   })
   const githubAuthRefreshVersion = useRef(0)
   const [logs, setLogs] = useState<RuntimeOutput[]>([])
+  // 高频日志的合帧状态；见 queueRuntimeLog。
+  const runtimeLogFrame = useRef<{ pending: Array<Omit<RuntimeOutput, 'timestamp'>>; processLines: number; lastFlushAt: number; timer: number | null }>({ pending: [], processLines: 0, lastFlushAt: 0, timer: null })
   // 真实进程输出（onRuntimeOutput）的计数：App 用它判断是否自动弹出运行日志，
   // 市场/目录同步等合成的进度日志不会计入，避免切页时灵动岛被顶出来。
   const [processLogCount, setProcessLogCount] = useState(0)
@@ -128,6 +133,57 @@ export function useLauncherStore() {
       return [...current.slice(-(MAX_LOG_LINES - 1)), { ...entry, timestamp: new Date().toISOString() }]
     })
   }, [])
+
+  /** 把攒下的日志一次性落进环形缓冲；合帧定时器到期或卸载时调用。 */
+  const flushRuntimeLogFrame = useCallback(() => {
+    const frame = runtimeLogFrame.current
+    frame.timer = null
+    frame.lastFlushAt = Date.now()
+    const pending = frame.pending
+    const processLines = frame.processLines
+    if (pending.length === 0 && processLines === 0) return
+    frame.pending = []
+    frame.processLines = 0
+    if (pending.length > 0) {
+      const timestamp = new Date().toISOString()
+      setLogs(current => {
+        const batch: RuntimeOutput[] = []
+        let previous = current[current.length - 1]
+        for (const entry of pending) {
+          // 与逐条写入同样的相邻重复行去重，只是整批一次成型。
+          if (previous && previous.channel === entry.channel && previous.level === entry.level && previous.text === entry.text) continue
+          const item = { ...entry, timestamp }
+          batch.push(item)
+          previous = item
+        }
+        if (batch.length === 0) return current
+        const keep = Math.max(0, MAX_LOG_LINES - batch.length)
+        return [...(keep > 0 ? current.slice(-keep) : []), ...batch]
+      })
+    }
+    // 真实进程输出的计数按批次条数累加，与逐条写入时的语义一致。
+    if (processLines > 0) setProcessLogCount(current => current + processLines)
+  }, [])
+
+  /**
+   * 高频日志（进程输出、市场安装进度）按时间窗合帧。
+   *
+   * pnpm 装大依赖时 stdout/stderr 每秒可达上百个 chunk，逐条 setState 会让挂在插件页的整个
+   * 应用反复全量重渲染——issue #12 里「装完插件整机没有响应」就是这么来的。这里 120ms 内的
+   * 多条一次 setState 落进环形缓冲，逐条语义（相邻重复行去重、行数上限）保持不变。
+   */
+  const queueRuntimeLog = useCallback((entry: Omit<RuntimeOutput, 'timestamp'>, countsAsProcessLine: boolean) => {
+    const frame = runtimeLogFrame.current
+    frame.pending.push(entry)
+    if (countsAsProcessLine) frame.processLines += 1
+    if (frame.timer != null) return
+    const elapsed = Date.now() - frame.lastFlushAt
+    if (elapsed >= RUNTIME_LOG_FRAME_MS) {
+      flushRuntimeLogFrame()
+      return
+    }
+    frame.timer = window.setTimeout(flushRuntimeLogFrame, RUNTIME_LOG_FRAME_MS - elapsed)
+  }, [flushRuntimeLogFrame])
 
   useEffect(() => {
     let disposed = false
@@ -288,10 +344,7 @@ export function useLauncherStore() {
       }
 
     const unsubscribers = [
-      api.onRuntimeOutput(output => {
-        appendRuntimeLog(output)
-        setProcessLogCount(current => current + 1)
-      }),
+      api.onRuntimeOutput(output => queueRuntimeLog(output, true)),
       api.onRuntimeState(state => {
         setRuntime(state)
         // 非正常退出（如启动参数被 DSH 拒绝）主进程会记诊断；日志抽屉已移除，
@@ -310,11 +363,11 @@ export function useLauncherStore() {
         // 市场的插件级操作（安装/更新/卸载）与目录同步一样，只写日志行，
         // 不进入安装活动状态：避免触发灵动岛自动弹出、整合包切换/启动被短时锁定。
         if (typeof progress.message === 'string' && progress.message.trim()) {
-          appendRuntimeLog({
+          queueRuntimeLog({
             channel: 'plugin',
             level: progress.phase === 'error' ? 'error' : progress.phase === 'complete' ? 'success' : 'info',
             text: `[dsh-market] ${progress.message} · ${progress.percent ?? 0}%`,
-          })
+          }, false)
         }
       }),
       api.onLauncherUpdateProgress(progress => {
@@ -340,8 +393,13 @@ export function useLauncherStore() {
         window.clearTimeout(installProgressFrame.current.timer)
         installProgressFrame.current.timer = null
       }
+      if (runtimeLogFrame.current.timer != null) {
+        window.clearTimeout(runtimeLogFrame.current.timer)
+        // 卸载前把攒着的几行落进缓冲，别把最后的报错丢掉。
+        flushRuntimeLogFrame()
+      }
     }
-  }, [api, showToast])
+  }, [api, flushRuntimeLogFrame, queueRuntimeLog, showToast])
 
   const refreshProfile = useCallback(async () => {
     try {
