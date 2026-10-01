@@ -9182,6 +9182,11 @@ input:focus-visible {
 /* 切换版本（升版副本）对话框：选版本 + 命名，首句说明"旧包不动"。 */
 .pack-clone-dialog .modal-content { display: grid; gap: 10px; }
 .pack-clone-dialog .form-field { margin-top: 2px; }
+
+/* 手动添加插件（issue #10）：一个输入框 + 说明，与其它弹窗同一套骨架。 */
+.plugin-add-dialog .modal-content { display: grid; gap: 10px; }
+.plugin-add-dialog .form-field input { font-family: Consolas, monospace; }
+.plugin-add-dialog .dialog-note code { padding: 1px 5px; border-radius: 4px; background: var(--surface-soft); font-family: Consolas, monospace; font-size: 10.5px; }
 .pack-clone-versions { max-height: 210px; overflow-y: auto; }
 
 /* DSH 异常退出弹窗：原本写在组件里的 <style> 模板串，挪到这里和其他弹窗同一处。 */

@@ -1,5 +1,5 @@
 import { Check, ExternalLink, LoaderCircle, RefreshCw, Search, Star, Store, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLauncherApi } from '../api/client'
 import { CatalogPagination } from '../components/CatalogPagination'
 import { PageHeading } from '../components/PageHeading'
@@ -28,9 +28,11 @@ interface DshMarketViewProps {
   embedded?: boolean
   /** 当前激活整合包名：变化时重拉安装态。由上层传，不在这里再开一份 store。 */
   activeProfileName: string | null
+  /** 面板头右侧追加的动作（如「手动添加插件」——目录读不出来时那条路仍然能走）。 */
+  extraActions?: ReactNode
 }
 
-export function DshMarketView({ onProfileChanged, embedded = false, activeProfileName }: DshMarketViewProps) {
+export function DshMarketView({ onProfileChanged, embedded = false, activeProfileName, extraActions }: DshMarketViewProps) {
   const api = useLauncherApi()
   const [catalog, setCatalog] = useState<DshMarketCatalog | null>(cachedCatalog)
   const [query, setQuery] = useState('')
@@ -129,7 +131,7 @@ export function DshMarketView({ onProfileChanged, embedded = false, activeProfil
   }
 
   const categories = Object.entries(catalog?.categories ?? {})
-  const refreshActions = <><button type="button" className="secondary-button" onClick={() => void checkUpdates()} disabled={loading || checkingUpdates}><RefreshCw size={14} className={checkingUpdates ? 'spin' : undefined} />检查更新</button><button type="button" className="secondary-button" onClick={() => void load()} disabled={loading || checkingUpdates}><RefreshCw size={14} className={loading ? 'spin' : undefined} />刷新目录</button></>
+  const refreshActions = <>{extraActions}<button type="button" className="secondary-button" onClick={() => void checkUpdates()} disabled={loading || checkingUpdates}><RefreshCw size={14} className={checkingUpdates ? 'spin' : undefined} />检查更新</button><button type="button" className="secondary-button" onClick={() => void load()} disabled={loading || checkingUpdates}><RefreshCw size={14} className={loading ? 'spin' : undefined} />刷新目录</button></>
   return (
     <div className={embedded ? 'dsh-market-page dsh-market-embedded' : 'page dsh-market-page'}>
       {embedded

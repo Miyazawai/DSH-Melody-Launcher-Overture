@@ -89,6 +89,7 @@ const api: LauncherApi = {
   toggleDshMarketPlugin: (name, enabled) => ipcRenderer.invoke(IPC.dshMarketToggle, { name, enabled }),
   checkDshMarketUpdates: force => ipcRenderer.invoke(IPC.dshMarketUpdates, force),
   installPlugin: request => ipcRenderer.invoke(IPC.pluginsInstall, request),
+  installPluginFromNpm: request => ipcRenderer.invoke(IPC.pluginsInstallNpm, request),
   uninstallPlugin: packageName => ipcRenderer.invoke(IPC.pluginsUninstall, packageName),
   trialPlugin: (packageName, profileName) => ipcRenderer.invoke(IPC.pluginsTrial, { packageName, profileName }),
   readPluginTrials: () => ipcRenderer.invoke(IPC.pluginsTrialRead),

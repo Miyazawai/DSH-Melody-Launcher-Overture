@@ -847,6 +847,27 @@ export function createInstaller(options: InstallerOptions): Installer {
         emit({ repository: fullName, kind, phase: 'configuring', percent: 90, message: '正在更新插件配置' })
         const settings = await options.readSettings()
         const profile = await readProfile(settings.dshHome, settings.profileName, options.pluginReceiptsPath)
+        // 这条路是给「市场打不开」用的，所以不跑 analyzeRepository（那正是打不开的一步）。
+        // 来源靠 DSH 写进 package.json 的 `github:owner/repo` 依赖串反查，不额外问网络。
+        const installedPlugin = profile.plugins.find(plugin => plugin.repositoryFullName === fullName)
+        if (installedPlugin) {
+          emit({ repository: fullName, kind, phase: 'verifying', percent: 94, message: '正在验证插件组合配置' })
+          await verifyProfileComposition(settings.profileName, fullName)
+          // 没有收据的话，这个插件在「已安装」列表里认不出来源，跨包搬运与切换整合包时
+          // 也重建不出来（installNpmPackage 那条路径一直在记，唯独这条漏了）。
+          await recordPluginInstall(options.pluginReceiptsPath, {
+            repository: fullName,
+            packageName: installedPlugin.packageName,
+            packId: settings.profileName,
+            source: 'github',
+            subdirectory: null,
+            version: installedPlugin.version,
+            commit: '',
+            defaultBranch: '',
+            targetId: installedPlugin.packageName,
+            installedAt: new Date().toISOString(),
+          })
+        }
         const dshInstallation = await detectDsh()
         emit({ repository: fullName, kind, phase: 'complete', percent: 100, message: '插件安装完成' })
         return { kind, profile, settings, dshInstallation }

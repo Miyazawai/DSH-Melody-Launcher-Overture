@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { copyFile, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { IPC, IPC_EVENTS } from '../src/constants'
-import type { AiSessionCreateInput, ApplicationInstallRequest, AppSettings, CustomApiProviderInput, OfficialPackRelease, OfficialPackStatus, PackCreateRequest, PackInstallResult, PluginInstallRequest, PresetInstallRequest, SkillInstallRequest, SkillInstallTarget, WindowMode, ProfileRepositoryImportMode, PackPluginEntry } from '../src/types'
+import type { AiSessionCreateInput, ApplicationInstallRequest, AppSettings, CustomApiProviderInput, OfficialPackRelease, OfficialPackStatus, PackCreateRequest, PackInstallResult, NpmPluginInstallRequest, PluginInstallRequest, PresetInstallRequest, SkillInstallRequest, SkillInstallTarget, WindowMode, ProfileRepositoryImportMode, PackPluginEntry } from '../src/types'
 import type { SnapshotPrivacyInclude } from './pack-snapshot'
 import type { ApplicationAddonManager } from './application-addons'
 import type { RecommendedWebUiService } from './recommended-web-ui'
@@ -590,6 +590,17 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       targetId: request.targetId,
       // release 源插件：meta-repo 分析得到的 tgz 直链，覆盖重分析得到的 github 源。
       tarballUrl: typeof request.tarballUrl === 'string' ? request.tarballUrl : undefined,
+    })
+  })
+  // 手动按 npm 包名添加插件（issue #10）：市场目录读不出来时也能装。包名与版本必须先过
+  // 白名单再进 `dsh plugin add` 的参数——Windows 上这条命令要过 cmd.exe 批处理行。
+  ipcMain.handle(IPC.pluginsInstallNpm, async (_event, request: NpmPluginInstallRequest) => {
+    assertProfileMutationAvailable()
+    if (!request || !isSafePackageName(request.packageName)) throw new Error('插件名称无效。')
+    return installer.installNpmPackage({
+      packageName: request.packageName,
+      version: typeof request.version === 'string' ? request.version : undefined,
+      repository: typeof request.repository === 'string' ? request.repository : undefined,
     })
   })
   ipcMain.handle(IPC.pluginsUninstall, async (_event, payload: string | { packageName: string; profileName?: string }) => {

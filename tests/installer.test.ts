@@ -211,6 +211,11 @@ function profileState(profileName: string, packageName: string): ProfileState {
   }
 }
 
+function profileStateWithRepository(profileName: string, packageName: string, repositoryFullName: string): ProfileState {
+  const base = profileState(profileName, packageName)
+  return { ...base, plugins: base.plugins.map(plugin => ({ ...plugin, repositoryFullName })) }
+}
+
 function localDirectoryTarget(localDirectory: string): PluginInstallTarget {
   return {
     id: 'demo-plugin:.',
@@ -278,6 +283,49 @@ describe('installNpmPackage', () => {
     await expect(installer.installNpmPackage({ packageName: 'bad package' })).rejects.toThrow(/包名/)
     await expect(installer.installNpmPackage({ packageName: 'demo-plugin', version: '1.0.0 latest' })).rejects.toThrow(/版本/)
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe('install：市场打不开时的 GitHub 直装（issue #10）', () => {
+  it('直接把 github 地址交给 dsh plugin add，并登记来源、核对组合配置', async () => {
+    vi.mocked(readProfile).mockImplementation(async (_dshHome, profileName) => profileStateWithRepository(profileName as string, 'demo-plugin', 'owner/repo'))
+    const { installer, calls } = createTestInstaller()
+
+    const result = await installer.install('owner/repo')
+
+    expect(calls.find(call => call.args.includes('add'))?.args).toEqual([
+      '--yes', '@deepseek-ai/dsh', 'plugin', '--profile', 'web', 'add', 'github:owner/repo',
+    ])
+    // 这条路的存在意义就是不问 GitHub：一次分析请求都不许发。
+    expect(analyzeRepository).not.toHaveBeenCalled()
+    expect(calls.some(call => call.args.includes('--dump-config'))).toBe(true)
+    expect(recordPluginInstall).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      repository: 'owner/repo',
+      packageName: 'demo-plugin',
+      packId: 'web',
+      source: 'github',
+    }))
+    expect(result.kind).toBe('plugin')
+  })
+
+  it('认不出来源仓库时不写假收据', async () => {
+    vi.mocked(readProfile).mockImplementation(async (_dshHome, profileName) => profileState(profileName as string, 'demo-plugin'))
+    const { installer } = createTestInstaller()
+
+    await installer.install('owner/repo')
+
+    // 收据是「这个插件从哪来」的唯一依据，猜错会让跨包搬运装出来源不符的插件。
+    expect(recordPluginInstall).not.toHaveBeenCalled()
+  })
+
+  it('组合验证不过就把安装判失败，而不是留下一个启不来的插件', async () => {
+    vi.mocked(readProfile).mockImplementation(async (_dshHome, profileName) => profileStateWithRepository(profileName as string, 'demo-plugin', 'owner/repo'))
+    const { installer } = createTestInstaller(undefined, async (_executable, args) => (
+      args.includes('--dump-config') ? { exitCode: 1, output: 'plugin "demo-plugin" is not a bundle' } : { exitCode: 0, output: '' }
+    ))
+
+    await expect(installer.install('owner/repo')).rejects.toThrow(/组合验证失败/)
+    expect(recordPluginInstall).not.toHaveBeenCalled()
   })
 })
 

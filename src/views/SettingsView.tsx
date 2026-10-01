@@ -9,6 +9,7 @@ import {
   Layers3,
   LoaderCircle,
   Package,
+  PackagePlus,
   Pencil,
   RefreshCw,
   Search,
@@ -26,6 +27,7 @@ import { resolveLauncherApi } from '../api/client'
 import { downloadPercent, formatBytes, formatSpeed } from '../lib/format'
 import { SkeletonStrip } from '../components/Skeleton'
 import { DshMarketView } from './DshMarketView'
+import { PluginAddDialog } from '../components/dialogs/PluginAddDialog'
 import {
   SKILL_CATEGORIES,
   SKILL_MARKET_SOURCES,
@@ -548,6 +550,9 @@ function SettingsPluginsTab({
   refreshLocked: boolean
 }) {
   const [subView, setSubView] = useState<'installed' | 'market'>('installed')
+  const [addOpen, setAddOpen] = useState(false)
+  // 两个子视图的头都放一枚：市场目录读不出来时，「已安装」这一侧也得有能点开的入口。
+  const addButton = <button type="button" className="secondary-button" onClick={() => setAddOpen(true)}><PackagePlus size={14} />手动添加</button>
   return (
     <div className="settings-stack">
       <div className="settings-segmented" role="tablist" aria-label="插件视图">
@@ -559,6 +564,7 @@ function SettingsPluginsTab({
         <section className="settings-panel">
           <div className="settings-panel-heading">
             <div className="settings-panel-title"><Layers3 size={17} /><span>已安装插件</span>{profile.plugins.length > 0 && <span className="settings-count">{profile.plugins.length}</span>}</div>
+            {addButton}
             <PanelRefresh onClick={onRefresh} disabled={refreshLocked} />
           </div>
           <div className="settings-hint">开关决定插件在下次启动时是否加载；停用不会删除本体。</div>
@@ -577,15 +583,22 @@ function SettingsPluginsTab({
                 onOpenFolder={plugin.builtin ? undefined : () => onOpenPluginFolder(plugin.packageName)}
               />
             ))}
-            {profile.plugins.length === 0 && <div className="settings-empty">当前环境还没有插件；切到「DSH Market」点安装。</div>}
+            {profile.plugins.length === 0 && <div className="settings-empty">当前环境还没有插件；切到「DSH Market」点安装，或用上面「手动添加」直接填 GitHub 地址 / npm 包名。</div>}
           </div>
         </section>
       </div>
       <div className={subView === 'market' ? undefined : 'view-hidden'}>
         <section className="settings-panel">
-          <DshMarketView embedded activeProfileName={activeProfileName} onProfileChanged={onProfileChanged} />
+          <DshMarketView embedded activeProfileName={activeProfileName} onProfileChanged={onProfileChanged} extraActions={addButton} />
         </section>
       </div>
+      {addOpen && (
+        <PluginAddDialog
+          profileName={activeProfileName}
+          onClose={() => setAddOpen(false)}
+          onInstalled={onProfileChanged}
+        />
+      )}
     </div>
   )
 }

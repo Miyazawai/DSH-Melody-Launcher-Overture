@@ -240,6 +240,17 @@ export interface PluginInstallRequest {
   tarballUrl?: string
 }
 
+/**
+ * 手动添加插件：市场目录打不开时，用户直接给一个 npm 包名（可带 @version）。
+ * 走的是 `dsh plugin add <name>`，不碰 GitHub 分析、也不碰精选目录。
+ */
+export interface NpmPluginInstallRequest {
+  packageName: string
+  version?: string
+  /** 可选的 owner/repo，只用于「已安装」列表里显示来源链接。 */
+  repository?: string
+}
+
 export interface DshInstallationStatus {
   installed: boolean
   version: string | null
@@ -1272,6 +1283,8 @@ export interface LauncherApi {
   toggleDshMarketPlugin(name: string, enabled: boolean): Promise<DshMarketInstalledPlugin[]>
   checkDshMarketUpdates(force?: boolean): Promise<Record<string, DshMarketUpdateStatus>>
   installPlugin(request: string | PluginInstallRequest): Promise<RepositoryInstallResult>
+  /** 手动按 npm 包名装插件（issue #10）：市场目录读不出来时的备用入口。 */
+  installPluginFromNpm(request: NpmPluginInstallRequest): Promise<RepositoryInstallResult>
   uninstallPlugin(packageName: string): Promise<ProfileState>
   trialPlugin(packageName: string, profileName?: string): Promise<PluginTrialResult>
   readPluginTrials(): Promise<PluginTrialResult[]>

@@ -570,7 +570,9 @@ export function createDshMarketService(options: DshMarketOptions) {
     if (active) throw new Error('dsh-market 正在执行另一个插件操作，请等待完成。')
     active = true
     try {
-      const registry = await loadRegistry()
+      // 装已知插件不该依赖目录此刻能被拉下来：ensureRegistry 会先吃 30 分钟的磁盘缓存，
+      // 只有冷启动没缓存时才真的联网（loadRegistry 拉不到就整句「目录为空」，装不上任何插件）。
+      const registry = await ensureRegistry()
       const entry = registry.plugins!.find(item => item.name === name || item.npm === name)
       if (!entry) throw new Error('插件不在 dsh-market 精选目录中。')
       const target = dshMarketInstallTarget(entry)

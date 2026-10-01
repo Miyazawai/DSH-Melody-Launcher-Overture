@@ -1248,6 +1248,34 @@ export const demoApi: LauncherApi = {
       packageName: analysis?.targets[0].packageName,
     }
   },
+  installPluginFromNpm: async request => {
+    const repository = request.repository ?? `npm:${request.packageName}`
+    installProgressListeners.forEach(listener => listener({ repository, kind: 'plugin', phase: 'preparing', percent: 5, message: '正在准备 npm 插件' }))
+    await wait(700)
+    installProgressListeners.forEach(listener => listener({ repository, kind: 'plugin', phase: 'downloading', percent: 40, message: '正在下载插件及依赖', indeterminate: true }))
+    await wait(900)
+    installProgressListeners.forEach(listener => listener({ repository, kind: 'plugin', phase: 'configuring', percent: 88, message: '正在核对插件加载顺序' }))
+    demoPlugins = renumber([...demoPlugins, {
+      packageName: request.packageName,
+      displayName: request.packageName.split('/').at(-1) ?? request.packageName,
+      version: request.version ?? 'latest',
+      description: '演示：通过 npm 包名手动添加的插件',
+      enabled: true,
+      builtin: false,
+      locked: false,
+      compatible: true,
+      order: 0,
+    }])
+    installProgressListeners.forEach(listener => listener({ repository, kind: 'plugin', phase: 'complete', percent: 100, message: '插件安装完成' }))
+    return {
+      kind: 'plugin',
+      profile: profile(),
+      settings: demoSettings,
+      dshInstallation: demoDshInstallation,
+      installedProfileName: demoSettings.profileName,
+      packageName: request.packageName,
+    }
+  },
   uninstallPlugin: async packageName => {
     demoPlugins = renumber(demoPlugins.filter(plugin => plugin.packageName !== packageName))
     return profile()
