@@ -5,7 +5,7 @@ import type { AppSettings, ProfileState } from '../src/types'
 import { readPackRegistry, type PackRecord } from './pack-registry'
 import { readPluginReceipts, removePluginReceipt } from './plugin-receipts'
 import { readPackManifest } from './pack-manifest-store'
-import { readProfile, isSafePackageName, isSafeProfileName } from './profile'
+import { readProfile, isDesktopHomeProfile, isSafePackageName, isSafeProfileName } from './profile'
 
 /** Metadata stored next to the DSH package manifest. It is deliberately not
  * used by DSH itself; package.json remains the runtime source of truth. */
@@ -347,7 +347,7 @@ export async function listProfiles(options: ProfileServiceOptions): Promise<Prof
   const root = path.join(dshHome, 'profiles')
   await mkdir(root, { recursive: true })
   const entries = await readdir(root, { withFileTypes: true })
-  const names = entries.filter(entry => entry.isDirectory() && isSafeProfileName(entry.name)).map(entry => entry.name)
+  const names = entries.filter(entry => entry.isDirectory() && isSafeProfileName(entry.name) && !isDesktopHomeProfile(entry.name)).map(entry => entry.name)
   if (!names.includes(current.profileName)) names.push(current.profileName)
   // Existing installations predate profile.yaml. Materialize metadata lazily
   // while scanning so every visible Profile is self-contained afterwards.
@@ -355,6 +355,8 @@ export async function listProfiles(options: ProfileServiceOptions): Promise<Prof
   // launcher builds carry `dsh-pack-*`, which third-party plugins read as a
   // local dev link and therefore refuse to auto-update.
   for (const name of names) {
+    // 官方桌面端独占的那个目录归它自己管，我们连清单名都不替它改。
+    if (isDesktopHomeProfile(name)) continue
     const directory = profileDirFor(dshHome, name)
     await ensureProfileManifestName(directory)
     if (!await exists(metadataPath(directory))) await writeProfileMetadata(dshHome, name, { dshVersion: current.dshVersion ?? null, source: { kind: 'local' } })
@@ -420,7 +422,7 @@ export async function consolidatePluginPool(dshHome: string): Promise<{ profiles
   // the union of installed plugin specifications. This makes a newly-created
   // Profile see the same physical plugin pool while keeping bundles/order local.
   for (const entry of profileEntries) {
-    if (!entry.isDirectory() || !isSafeProfileName(entry.name)) continue
+    if (!entry.isDirectory() || !isSafeProfileName(entry.name) || isDesktopHomeProfile(entry.name)) continue
     const directory = path.join(profilesRoot, entry.name)
     await ensureProfileWorkspaceConfig(directory)
     await ensureProfileCoreBundles(directory)
@@ -498,6 +500,8 @@ export async function consolidatePluginPool(dshHome: string): Promise<{ profiles
 }
 
 export async function createProfile(options: ProfileServiceOptions, input: ProfileCreateOptions): Promise<ProfileSummary> {
+  // 整合包派生名一律带 `pack-` 前缀，撞不上这个名字；这里挡的是直接走 profile API 的调用。
+  if (isDesktopHomeProfile(input.name)) throw new Error('「desktop」是官方桌面端自己占用的环境目录，启动器不在那里建包。')
   const dshHome = await homeOf(options)
   const scoped = { ...options, dshHome }
   const directory = profileDirFor(dshHome, input.name)

@@ -239,6 +239,18 @@ export function isSafeProfileName(value: string): boolean {
   return /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(value)
 }
 
+/**
+ * 官方桌面端（DSH Desktop）独占的那个 profile 目录。
+ *
+ * 它和我们共用同一个 DSH 家目录，但那个目录归桌面端自己管——官方文档写明连 `dsh` CLI
+ * 都不许改它。而我们这边只要列一次 profile 就会把它的 `package.json` 清单名改掉、顺手补一个
+ * `profile.yaml`，启动归并还会重写它的 bundles 与 workspace 文件。所以它一律**只看不写**：
+ * 列目录时跳过、启动归并跳过、卸载不扇出到它。
+ */
+export function isDesktopHomeProfile(name: string): boolean {
+  return name.toLowerCase() === 'desktop'
+}
+
 export function isSafeRepositoryName(value: string): boolean {
   return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value)
 }

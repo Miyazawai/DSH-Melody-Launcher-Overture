@@ -47,7 +47,7 @@ import { prepareSubdirectoryPlugin, type PluginSourceProgress } from './plugin-s
 import { readPluginReceipts, recordPluginInstall, removePluginReceipt } from './plugin-receipts'
 import { readPresetReceipts, recordPresetInstall } from './preset-receipts'
 import { readSkillReceipts, recordSkillInstall, removeSkillReceipt } from './skill-receipts'
-import { isSafePackageName, isSafeProfileName, readProfile } from './profile'
+import { isDesktopHomeProfile, isSafePackageName, isSafeProfileName, readProfile } from './profile'
 import { withExecutableDirectoryOnPath } from './process'
 import { buildNetworkEnvironment, NPM_OFFICIAL_REGISTRY } from './proxy'
 import { analyzeSkillRepository, analyzeSkillRepositoryFromArchive } from './skill-catalog'
@@ -900,7 +900,8 @@ export function createInstaller(options: InstallerOptions): Installer {
         try {
           const entries = await readdir(path.join(settings.dshHome, 'profiles'), { withFileTypes: true })
           for (const entry of entries) {
-            if (entry.isDirectory() && isSafeProfileName(entry.name)) targetProfiles.add(entry.name)
+            // 卸载会扇出到本机每个 profile，官方桌面端那个目录必须排除在外：它归桌面端自己管。
+            if (entry.isDirectory() && isSafeProfileName(entry.name) && !isDesktopHomeProfile(entry.name)) targetProfiles.add(entry.name)
           }
         } catch {
           // profiles 目录尚未创建时仍保留当前 Profile 作为唯一候选。

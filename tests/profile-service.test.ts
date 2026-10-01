@@ -257,3 +257,56 @@ describe('Profile service', () => {
     expect(manifest.dependencies).toEqual({ '@demo/plugin': '1.0.0' })
   })
 })
+
+describe('官方桌面端独占的 desktop 目录：只看不写', () => {
+  /** 造一个官方桌面端环境，返回它的清单原文，供逐字节比对。 */
+  async function seedDesktopHome(env: { dshHome: string }): Promise<string> {
+    const directory = path.join(env.dshHome, 'profiles', 'desktop')
+    await mkdir(directory, { recursive: true })
+    const manifest = JSON.stringify({
+      name: 'desktop',
+      private: true,
+      dependencies: { '@deepseek-ai/dsh-base': '0.2.0-rc.2', '@demo/desktop-only-plugin': '1.4.0' },
+      dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@demo/desktop-only-plugin'] } },
+    }, null, 2)
+    await writeFile(path.join(directory, 'package.json'), `${manifest}\n`, 'utf8')
+    return `${manifest}\n`
+  }
+
+  const desktopManifest = (env: { dshHome: string }) => readFile(path.join(env.dshHome, 'profiles', 'desktop', 'package.json'), 'utf8')
+
+  it('列环境时既不出现在结果里，也不替它改清单名或补元数据文件', async () => {
+    const env = await fixture()
+    const original = await seedDesktopHome(env)
+
+    const profiles = await listProfiles(env.options)
+
+    expect(profiles.map(item => item.id)).toEqual(['web'])
+    expect(await desktopManifest(env)).toBe(original)
+    // 这两样是我们给自家包懒创建的，落到别人目录里就是越权写入。
+    await expect(access(path.join(env.dshHome, 'profiles', 'desktop', 'profile.yaml'))).rejects.toThrow()
+    await expect(access(path.join(env.dshHome, 'profiles', 'desktop', 'pnpm-workspace.yaml'))).rejects.toThrow()
+  })
+
+  it('启动期的插件池归并不碰它的清单与 workspace 文件', async () => {
+    const env = await fixture()
+    const original = await seedDesktopHome(env)
+    await writeFile(path.join(env.dshHome, 'profiles', 'desktop', 'pnpm-workspace.yaml'), 'packages:\n  - "."\n', 'utf8')
+    const workspaceBefore = await readFile(path.join(env.dshHome, 'profiles', 'desktop', 'pnpm-workspace.yaml'), 'utf8')
+
+    await consolidatePluginPool(env.dshHome)
+    await ensureProfileCoreBundles(path.join(env.dshHome, 'profiles', 'web'))
+
+    expect(await desktopManifest(env)).toBe(original)
+    expect(await readFile(path.join(env.dshHome, 'profiles', 'desktop', 'pnpm-workspace.yaml'), 'utf8')).toBe(workspaceBefore)
+    // 归并确实改了我们自己的包，证明上面「没变」不是因为整段没跑。
+    const web = JSON.parse(await readFile(path.join(env.dshHome, 'profiles', 'web', 'package.json'), 'utf8')) as { dsh: { profile: { bundles: string[] } } }
+    expect(web.dsh.profile.bundles.length).toBeGreaterThan(0)
+  })
+
+  it('拒绝在 desktop 这个名字下建包', async () => {
+    const env = await fixture()
+    await seedDesktopHome(env)
+    await expect(createProfile(env.options, { name: 'desktop' })).rejects.toThrow(/官方桌面端/)
+  })
+})
