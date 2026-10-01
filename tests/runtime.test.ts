@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { PassThrough } from 'node:stream'
 import os from 'node:os'
@@ -423,4 +424,93 @@ describe('应用加载项运行模式', () => {
   // 这条用例里有两轮 waitFor（各 10 秒预算）。测试超时必须比它们加起来还长，
   // 否则负载高时先被 vitest 判超时，报错看不出是"没落盘"还是"预算不够"。
   }, 30_000)
+
+  it('启动前把非法凭据引用名改成合法写法，且改名先于拉起进程', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-launcher-runtime-ref-repair-'))
+    const dshHome = path.join(root, 'dsh-home')
+    const repairRoot = path.join(root, 'repair')
+    await mkdir(dshHome, { recursive: true })
+    await writeFile(
+      path.join(dshHome, '.credentials.yaml'),
+      'version: 1\nrefs:\n  "1": legacy-secret\n  DEEPSEEK_API_KEY: keep-me\n',
+      'utf8',
+    )
+    try {
+      const settings = { ...controllerSettings(), dshHome, dshVersion: '0.1.7-rc.2' }
+      const child = fakeChild(4401)
+      // 在拉起 DSH 的那一刻读盘：只有这样才证明改名发生在 spawn 之前，而不是事后补的。
+      let sourceAtSpawn = ''
+      const spawnProcess = vi.fn(() => {
+        sourceAtSpawn = readFileSync(path.join(dshHome, '.credentials.yaml'), 'utf8')
+        return child
+      })
+      const outputs: string[] = []
+      const runtime = createRuntimeController({
+        readSettings: async () => settings,
+        prepareNodeRuntime: async () => managedNode(),
+        fallbackWorkspace: () => process.cwd(),
+        emitOutput: (_level, text) => { outputs.push(text) },
+        emitState: () => {},
+        openExternal: () => {},
+        spawnProcess,
+        credentialsRefRepairRoot: repairRoot,
+      })
+
+      await runtime.start()
+      expect(spawnProcess).toHaveBeenCalledTimes(1)
+      expect(sourceAtSpawn).toContain('_1: legacy-secret')
+      expect(sourceAtSpawn).toContain('DEEPSEEK_API_KEY: keep-me')
+      expect(sourceAtSpawn).not.toContain('"1":')
+      expect(outputs.some(line => line.includes('已自动修正凭据引用名：1→_1'))).toBe(true)
+      // 原件的备份落在 userData 侧，家目录里不许多出文件（整合包导出的黑名单认精确文件名）。
+      expect((await readdir(repairRoot)).filter(name => name.endsWith('.yaml'))).toHaveLength(1)
+      expect(await readdir(dshHome)).toEqual(['.credentials.yaml'])
+
+      // 仍然启动失败时，改名记录与备份路径要进诊断——那是失败弹窗和「复制给 agent 的提示词」
+      // 唯一能看到它的地方。
+      child.stderr.write('dsh: startup failed: 1 required plugin did not activate\n')
+      child.emit('exit', 1)
+      await waitFor(async () => {
+        const diagnostics = runtime.state().lastFailure?.diagnostics ?? ''
+        expect(diagnostics).toContain('已自动修正凭据引用名')
+        expect(diagnostics).toContain('原始文件备份在')
+        expect(diagnostics).toContain(repairRoot)
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    }
+  }, 20_000)
+
+  it('引用名都合法时这一步严格什么都不做', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-launcher-runtime-ref-clean-'))
+    const dshHome = path.join(root, 'dsh-home')
+    const repairRoot = path.join(root, 'repair')
+    await mkdir(dshHome, { recursive: true })
+    const legal = 'version: 1\nrefs:\n  DEEPSEEK_API_KEY: keep-me\n  TEST_TOKEN: test-secret\n'
+    await writeFile(path.join(dshHome, '.credentials.yaml'), legal, 'utf8')
+    try {
+      const settings = { ...controllerSettings(), dshHome, dshVersion: '0.1.7-rc.2' }
+      const child = fakeChild(4411)
+      const spawnProcess = vi.fn(() => child)
+      const runtime = createRuntimeController({
+        readSettings: async () => settings,
+        prepareNodeRuntime: async () => managedNode(),
+        fallbackWorkspace: () => process.cwd(),
+        emitOutput: () => {},
+        emitState: () => {},
+        openExternal: () => {},
+        spawnProcess,
+        credentialsRefRepairRoot: repairRoot,
+      })
+
+      await runtime.start()
+      expect(spawnProcess).toHaveBeenCalledTimes(1)
+      expect(await readFile(path.join(dshHome, '.credentials.yaml'), 'utf8')).toBe(legal)
+      // 没改动就不写盘、不留备份：否则每次启动都会多一份历史文件。
+      expect(await readdir(repairRoot).catch(() => [])).toEqual([])
+      child.emit('exit', 0)
+    } finally {
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    }
+  }, 20_000)
 })

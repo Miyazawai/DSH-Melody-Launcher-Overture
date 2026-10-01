@@ -15,6 +15,8 @@ import {
   prepareLegacyCredentials,
   type LegacyCredentialsSession,
 } from './dsh-credentials-compat'
+import { repairCredentialRefs } from './credentials-ref-repair'
+import { describeRefRenames } from './credentials-refs'
 
 /** DSH 进程的生命周期：启动、停止、输出转发与状态广播。 */
 
@@ -137,6 +139,8 @@ export interface RuntimeControllerOptions {
   stopProcess?: (processToStop: ChildProcessWithoutNullStreams) => Promise<void>
   /** 启动旧版 DSH 时使用的临时凭据兼容备份目录。 */
   legacyCredentialsBackupRoot?: string
+  /** 修正非法凭据引用名时存放原始文件备份的目录（必须在 dshHome 之外）。 */
+  credentialsRefRepairRoot?: string
   /** 启动器 pnpm 插件仓库根目录（插件装在 plugin-store 下），供 DSH 子进程继承。 */
   packageStoreRoot?: string
   /** DSH 子进程应使用的 npm 镜像源（默认 npmmirror）。 */
@@ -378,6 +382,24 @@ export function createRuntimeController(options: RuntimeControllerOptions): Runt
     let initialLegacyCredentials = false
     const selectedLaunchPort = port
 
+    // DSH 0.1.1 起用 /^[A-Za-z_][A-Za-z0-9_]*$/ 严格校验凭据引用名：一个非法名字就会让
+    // credentials 插件拒绝激活，连带 connection/authorization 等十来个插件全起不来，
+    // 整合包以退出码 1 收场（issue #11）。命令行时代留下的文件里确实有 `1`、`https://…`
+    // 这种名字，普通用户不可能自己读懂那行英文堆栈，所以在拉起进程之前先就地合法化。
+    // 这一步必须排在下面的格式探测之前：兼容视图会静默丢掉非法条目，先丢掉就轮不到改名了。
+    let credentialRefNote: string | null = null
+    if (options.credentialsRefRepairRoot) {
+      const repair = await repairCredentialRefs(settings.dshHome, options.credentialsRefRepairRoot)
+      if (repair.status === 'repaired') {
+        credentialRefNote = `已自动修正凭据引用名：${describeRefRenames(repair.renames)}`
+          + `；原始文件备份在 ${repair.backupPath}${repair.settingsRewritten ? '（settings.yaml 里的指向一并改过）' : ''}`
+        options.emitOutput('info', credentialRefNote)
+      } else if (repair.status === 'skipped' && repair.reason !== 'locked') {
+        credentialRefNote = `凭据引用名没能自动修正：${repair.message}`
+        options.emitOutput('error', credentialRefNote)
+      }
+    }
+
     if (options.legacyCredentialsBackupRoot) {
       const format = await detectDshCredentialsFormat(settings.dshVersion ?? null, credentialsProbeExecutable)
       initialLegacyCredentials = format === 'legacy'
@@ -437,6 +459,8 @@ export function createRuntimeController(options: RuntimeControllerOptions): Runt
           `启动命令：${commandLine}`,
           `工作目录：${cwd}`,
           `退出代码：${code ?? '未知'}`,
+          // 改名过程（或它为什么没改成）只有这一处能递进失败弹窗与复制给 agent 的提示词。
+          ...(credentialRefNote ? [credentialRefNote] : []),
           '',
           diagnosticOutput.trim() || '进程没有输出诊断信息。',
         ])

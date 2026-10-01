@@ -5,6 +5,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createRuntimeController } from '../electron/runtime'
+import { isLegacyCredentialsFormatError } from '../electron/dsh-credentials-compat'
 import type { NodeRuntime } from '../electron/node-runtime'
 import type { AppSettings, LaunchFailureStage } from '../src/types'
 import {
@@ -192,5 +193,38 @@ describe('launchFailureHeadline 认 DSH 的数据格式拒绝', () => {
 
   it('认不出的原因仍走原来的取行规则，不被强行解释', () => {
     expect(launchFailureHeadline(nested('Error: listen EADDRINUSE 127.0.0.1:3080'))).toContain('EADDRINUSE')
+  })
+})
+
+describe('launchFailureHeadline 认 DSH 拒绝非法凭据引用名（issue #11）', () => {
+  const refused = (message: string): string => [
+    '失败阶段：运行中退出',
+    '启动命令：dsh.cmd web --no-open --port 3080',
+    '退出代码：1',
+    '',
+    'dsh: startup failed: 1 required plugin did not activate',
+    `TypeError: ${message}`,
+    '    at LocalCredentialProvider.loadInitial',
+  ].join('\n')
+
+  it('refs 布局下的非法名字给人话，且不把名字和值抄进摘要', () => {
+    const headline = launchFailureHeadline(refused('credential ref "1" must match /^[A-Za-z_][A-Za-z0-9_]*$/'))
+    expect(headline).toContain('名字不合法')
+    expect(headline).toContain('自动把名字改成合法写法')
+    expect(headline).not.toContain('must match')
+    expect(headline).not.toContain('did not activate')
+  })
+
+  it('平铺布局的拒绝同样认得（上游会先静默放弃迁移，所以签名不一样）', () => {
+    const headline = launchFailureHeadline(refused('credentials-local: /home/u/.dsh/.credentials.yaml uses the pre-release flat layout. Add `version: 1` and nest the existing 2 entries under `refs:`'))
+    expect(headline).toContain('平铺格式')
+    expect(headline).not.toContain('Add `version: 1`')
+  })
+
+  it('不与旧版凭据格式重试的识别串互相误命中', () => {
+    // 这条是「version 值不是字符串」，属于旧格式重试的触发条件，绝不该被当成非法引用名。
+    const legacyOnly = refused('the value for "version" in .credentials.yaml must be a string')
+    expect(launchFailureHeadline(legacyOnly)).not.toContain('名字不合法')
+    expect(isLegacyCredentialsFormatError(refused('credential ref "1" must match /^[A-Za-z_][A-Za-z0-9_]*$/'))).toBe(false)
   })
 })

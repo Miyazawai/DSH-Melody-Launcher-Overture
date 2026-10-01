@@ -1,7 +1,8 @@
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { parseDocument } from 'yaml'
 import type { CredentialStatus } from '../src/types'
+import { writeFileAtomic } from './fs-atomic'
 
 const DEEPSEEK_CREDENTIAL = 'DEEPSEEK_API_KEY'
 const CREDENTIAL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -47,26 +48,22 @@ function parseCredentials(source: string) {
   if (!isRecord(values)) {
     throw new Error('DSH 凭据文件的 refs 必须是凭据映射。')
   }
+  // 旧环境/手工编辑留下的文件里可能混着 DSH 读不懂的条目（名字是 `1` 或一条 URL）。
+  // 这些条目在启动前会被自动改成合法写法（见 credentials-ref-repair），但在启动发生之前，
+  // 启动器自己的读与写不能因为它们而整体失败——否则用户连 DeepSeek 的 Key 都存不进去。
+  // 所以这里只把无法使用的条目挡在外面，其余照常工作。
+  const readable: Record<string, string> = {}
   for (const [name, secret] of Object.entries(values)) {
-    if (!CREDENTIAL_NAME.test(name) || typeof secret !== 'string' || secret.length === 0) {
-      throw new Error('DSH 凭据文件包含无效条目，请先在 DSH 中修复后重试。')
-    }
+    if (!CREDENTIAL_NAME.test(name) || typeof secret !== 'string' || secret.length === 0) continue
+    readable[name] = secret
   }
-  return { document, values: values as Record<string, string>, modern }
+  return { document, values: readable, modern }
 }
 
 async function writeCredentialDocument(dshHome: string, content: string): Promise<void> {
-  await mkdir(dshHome, { recursive: true, mode: 0o700 })
-  const target = credentialsPath(dshHome)
-  const temporary = `${target}.${process.pid}.${Date.now()}.tmp`
-  try {
-    await writeFile(temporary, content, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-    await rename(temporary, target)
-    await chmod(target, 0o600)
-  } catch (error) {
-    await rm(temporary, { force: true }).catch(() => undefined)
-    throw error
-  }
+  // 走统一的原子写：凭据文件已存在时绝不截断重写，Windows 上 Defender 瞬时占用导致的
+  // EPERM 也有重试表兜底（以前这里手写 temp+rename，没有重试，保存密钥会偶发失败）。
+  await writeFileAtomic(credentialsPath(dshHome), content, { mode: 0o600, dirMode: 0o700 })
 }
 
 export async function getDeepSeekCredentialStatus(dshHome: string): Promise<CredentialStatus> {

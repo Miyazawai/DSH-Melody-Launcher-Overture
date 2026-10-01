@@ -83,4 +83,31 @@ records:
     await writeFile(path.join(temporaryHome, '.credentials.yaml'), '- not\n- a mapping\n', 'utf8')
     await expect(setDeepSeekApiKey(temporaryHome, 'sk-test')).rejects.toThrow('必须是 Key 与密钥组成的映射')
   })
+
+  it('still reads and saves the DeepSeek key when the document carries illegal ref names', async () => {
+    // issue #11 的连带症状：文件里只要有一条名字非法（`1`、一条 URL），以前整个读写都会抛，
+    // 用户在启动器里连 DeepSeek 的 Key 都存不进去。非法条目本身交给启动前的自动改名。
+    await writeFile(
+      path.join(temporaryHome, '.credentials.yaml'),
+      'version: 1\nrefs:\n  "1": legacy-secret\n  DEEPSEEK_API_KEY: deepseek-secret\n',
+      'utf8',
+    )
+
+    await expect(getDeepSeekCredentialStatus(temporaryHome)).resolves.toEqual({ configured: true })
+    await expect(setDeepSeekApiKey(temporaryHome, 'sk-replaced')).resolves.toEqual({ configured: true })
+
+    const content = await readFile(path.join(temporaryHome, '.credentials.yaml'), 'utf8')
+    expect(content).toContain('DEEPSEEK_API_KEY: sk-replaced')
+    expect(content).toContain('"1": legacy-secret')
+  })
+
+  it('treats an empty value as unusable without failing the whole document', async () => {
+    await writeFile(
+      path.join(temporaryHome, '.credentials.yaml'),
+      'version: 1\nrefs:\n  BROKEN_TOKEN: ""\n  DEEPSEEK_API_KEY: deepseek-secret\n',
+      'utf8',
+    )
+
+    await expect(getDeepSeekCredentialStatus(temporaryHome)).resolves.toEqual({ configured: true })
+  })
 })

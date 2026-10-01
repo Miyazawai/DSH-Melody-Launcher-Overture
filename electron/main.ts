@@ -264,6 +264,9 @@ function createServices(): Services {
     openExternal: url => void shell.openExternal(url),
     resolveApplicationLaunchPlan: () => applicationAddons.launchPlan(),
     legacyCredentialsBackupRoot: path.join(userData, 'dsh-credentials-compat'),
+    // 非法凭据引用名的原始备份。目录必须独立于上面那个：开机时的旧格式恢复会把
+    // dsh-credentials-compat 里的记录逐条覆盖回目标文件，混在一起会把改名结果冲掉。
+    credentialsRefRepairRoot: path.join(userData, 'dsh-credentials-ref-repair'),
     packageStoreRoot: path.join(userData, 'plugin-store'),
     prepareOfficeCliTool,
   })
