@@ -21,7 +21,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react'
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useLauncherApi } from '../api/client'
 import { resolveLauncherApi } from '../api/client'
 import { downloadPercent, formatBytes, formatSpeed } from '../lib/format'
@@ -1406,7 +1406,8 @@ function SettingsPacks({
           // 删除待确认态强制展开：确认按钮不能藏在收起的操作条里。
           const railOpen = railPackId === pack.id || armedRemove?.id === pack.id
           return (
-            <div key={pack.id} className={`settings-pack-row ${isActive ? 'active' : ''}`}>
+            <Fragment key={pack.id}>
+            <div className={`settings-pack-row ${isActive ? 'active' : ''}`}>
               <div className="settings-pack-copy">
                 {renaming?.id === pack.id ? (
                   <span className="settings-pack-rename">
@@ -1492,11 +1493,15 @@ function SettingsPacks({
                 )}
               </div>
             </div>
+              {/* 紧跟官方整合包排：桌面端也是「官方的」，散在列表末尾容易被当成随便一个本地包。
+                  它不是我们托管的整合包，所以这一行自己拉状态、自己决定消不消失；
+                  没有导出/删除/切版本，只有「管理插件」跳到插件页那个分段。 */}
+              {pack.officialVersion && <DesktopPackRow onManagePlugins={() => onNavigateTab('plugins')} />}
+            </Fragment>
           )
         })}
-        {/* 官方桌面端不是我们托管的整合包，所以这一行自己拉状态、自己决定消不消失；
-            它没有导出/删除/切版本，只有「管理插件」跳到插件页那个分段。 */}
-        <DesktopPackRow onManagePlugins={() => onNavigateTab('plugins')} />
+        {/* 官方整合包被删掉时（可删、可一键恢复）桌面端那行不能跟着消失，退回列表末尾。 */}
+        {!packs.some(pack => pack.officialVersion) && <DesktopPackRow onManagePlugins={() => onNavigateTab('plugins')} />}
       </div>
     </div>
   )
