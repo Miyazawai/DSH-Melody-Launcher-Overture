@@ -3,7 +3,7 @@
  * 整合包只由「新建 / 导入」产生；下载 DSH 版本不再自动建包，也没有启动补发同步。
  */
 
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -58,6 +58,30 @@ describe('migrateToPackHomesV2', () => {
     expect(env.stored.packsV2Migrated).toBe(true)
     // 这个 fixture 的家目录里没有 DSH 自己跑出来的数据，所以不该挂「命令行部署」。
     expect(records.some(record => record.native)).toBe(false)
+  })
+
+  it('装了官方桌面端时，不把它的 desktop 目录收编成包', async () => {
+    const env = await fixture()
+    // 真机上桌面端就是这么个形状：只有它自己的清单与 patch 层，没有我们的 profile.yaml。
+    const desktopDir = path.join(env.dshHome, 'profiles', 'desktop')
+    await mkdir(desktopDir, { recursive: true })
+    await writeFile(path.join(desktopDir, 'package.json'), JSON.stringify({
+      name: 'dsh-profile-desktop',
+      private: true,
+      dependencies: {},
+      dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } },
+    }), 'utf8')
+
+    await migrateToPackHomesV2(env.deps)
+
+    const records = await readPackRegistry(env.registryPath)
+    // 一旦它进了注册表，用户就能切换它；profileName 变成 'desktop' 之后，插件开关、
+    // 市场安装、启动参数会全部改朝桌面端自己的目录写。
+    expect(records.map(record => record.id).sort()).toEqual(['pack-legacy-import', 'web'])
+    expect(env.stored.profileName).not.toBe('desktop')
+    expect(env.stored.activePackId).not.toBe('desktop')
+    // 收编是只读动作，但顺手也别给它补一个我们的元数据文件。
+    expect(await readdir(desktopDir)).toEqual(['package.json'])
   })
 
   it('家目录里已有会话记录时，收编进来的包标为命令行部署', async () => {

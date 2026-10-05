@@ -13,7 +13,7 @@ import { readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import type { AppSettings } from '../src/types'
-import { isSafeProfileName } from './profile'
+import { isDesktopHomeProfile, isSafeProfileName } from './profile'
 import { readProfileMetadata } from './profile-service'
 import { readPackRegistry, upsertPackRecord } from './pack-registry'
 
@@ -73,6 +73,10 @@ export async function migrateToPackHomesV2(deps: PackHomeMigrationDeps): Promise
   for (const entry of entries) {
     if (!entry.isDirectory() || !isSafeProfileName(entry.name)) continue
     if (entry.name === DEFAULT_PACK_ID || entry.name === 'node_modules') continue
+    // 官方桌面端独占的那个目录不能收编成包：一旦它进了注册表，用户就能切换它，
+    // 而 `profileName` 一变成 `desktop`，插件开关、市场安装、启动参数那一大片代码
+    // 就全都改朝它的目录写——那正是 electron/profile.ts:isDesktopHomeProfile 要挡的事。
+    if (isDesktopHomeProfile(entry.name)) continue
     const existing = await readPackRegistry(deps.registryPath)
     if (existing.some(record => record.id === entry.name)) continue
     const metadata = await readProfileMetadata(settings.dshHome, entry.name).catch(() => null)
