@@ -14,7 +14,7 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/Miyazawai/DSH-Melody-Launcher-Overture/build.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/actions/workflows/build.yml)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases)
 [![Upstream](https://img.shields.io/badge/上游-rirko%2Fdsh--melody--launcher-6C7BFF?style=for-the-badge&logo=github&logoColor=white)](https://github.com/rirko/dsh-melody-launcher)
-[![Tests](https://img.shields.io/badge/tests-861%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
+[![Tests](https://img.shields.io/badge/tests-933%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
 
 [![Electron](https://img.shields.io/badge/Electron-43-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
@@ -49,6 +49,13 @@
 | 多套环境互相污染，删了重装 | 新建一个整合包，天然隔离，互不影响 |
 | 把自己的配置折腾半天分享给朋友 | 导出 = 整个环境打包成 zip，对方导入即可启动 |
 | 开终端、记命令、盯输出 | 一个按钮启动，进程与日志全程托管 |
+
+## v1.0.3 更新亮点
+
+- **装完插件不再把整台电脑拖死** —— 在 DSH Market 装 `dsh-web-all` 这类大依赖，Windows 会弹「没有响应」：安装输出被逐条送进界面，而插件页那 3400+ 张卡片不分页，每一次刷新都要全量重渲染；主进程那边还在用同步调用查系统代理，把窗口消息泵直接冻住。现在输出合帧、市场分页、代理探测改异步并缓存。
+- **web 整合包一启动就退出（代码 1）修好了** —— 起因是凭据文件里有把 API 名字填成纯数字或一条 URL 的，DSH 的凭据插件拒绝激活、另外十个插件跟着全在等它。启动器现在在拉起 DSH 之前先把这些名字改成合法写法，**密钥值一个字节不动**，改之前留原件备份，反复启动也不会重复改名。
+- **市场打不开也能装插件** —— 插件页多了「手动添加」：填 GitHub 仓库地址或 npm 包名（可带版本号）直接装，不查精选目录、也不调用 GitHub 的接口。
+- **官方桌面端也管** —— DeepSeek 09-29 发了官方桌面端，它和 CLI 共用同一个数据目录。启动器现在能列出它装了哪几个插件、经它自己那条命令装卸、一键让它走国内镜像（只动 `registry` 一个键，可恢复原样），也能直接打开它。启用与停用做不了——它对外只开放安装与卸载，那条命令没有开关，这件事写在界面上而不是等用户找了才发现。
 
 ## v1.0.2 更新亮点
 
