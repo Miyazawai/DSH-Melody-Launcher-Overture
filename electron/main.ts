@@ -10,6 +10,7 @@ import { applyWindowMode, createMainWindow, createRendererChannel } from './app-
 import { createCatalogSyncService, type CatalogSyncService } from './catalog-sync'
 import { createCopilotSessionManager, type CopilotSessionManager } from './copilot-sessions'
 import { createDshMarketService, type DshMarketService } from './dsh-market'
+import { createDesktopPluginsService, type DesktopPluginsService } from './desktop-plugins'
 import { runCommand } from './command'
 import { readDeepSeekApiKey } from './credentials'
 import { resolveAgentApiForModel, resolveCopilotAgentApi } from './copilot-api'
@@ -104,6 +105,7 @@ interface Services {
   applicationAddons: ApplicationAddonManager
   catalogSync: CatalogSyncService
   dshMarket: DshMarketService
+  desktopPlugins: DesktopPluginsService
   recommendedWebUi: RecommendedWebUiService
   runtimeVersions: RuntimeVersionService
   profiles: ProfileService
@@ -486,6 +488,15 @@ function createServices(): Services {
     emitOutput: (level, text) => events.output('plugin', level, text),
   })
 
+  // 官方桌面端的插件管理：独立一条链路，走它自带的 dsh 命令，不碰 installer/dsh-market
+  // 那套（那些会往 profile 里写 store-dir 与我们的收据）。家目录用未派生的 readStored，
+  // 因为桌面端永远住在默认家目录，不跟着激活包漂移。
+  const desktopPlugins = createDesktopPluginsService({
+    readStoredSettings: () => settings.readStored(),
+    emitOutput: (level, text) => events.output('plugin', level, text),
+    journalRoot: path.join(userData, 'desktop-mirror-backups'),
+  })
+
   const pluginTrial = createPluginTrialManager({
     readSettings: () => settings.read(),
     prepareNodeRuntime: () => prepareNodeRuntime('plugin'),
@@ -518,6 +529,7 @@ function createServices(): Services {
       if (pluginTrial.isBusy()) return '插件试运行正在进行'
       if (applicationAddons.isBusy()) return '应用加载项操作正在进行'
       if (dshMarket.isBusy()) return 'DSH Market 操作正在进行'
+      if (desktopPlugins.isBusy()) return '官方桌面端插件操作正在进行'
       if (packManager?.isBusy()) return '整合包操作正在进行'
       return null
     },
@@ -973,7 +985,7 @@ function createServices(): Services {
     })
   }).catch(error => events.output('plugin', 'error', `旧整合包/插件池迁移失败：${error instanceof Error ? error.message : String(error)}`))
 
-  return { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager: packManager!, githubAuth, applicationAddons, catalogSync, dshMarket, recommendedWebUi, runtimeVersions, profiles: profileService, profilePoolReady, restoreOfficialPack, listOfficialPackVersions: async () => listOfficialPackVersions(await officialListDeps()), readOfficialPackStatus: force => resolveOfficialPackStatus(force === true), installOfficialPackVersion, officialPackBootstrap }
+  return { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager: packManager!, githubAuth, applicationAddons, catalogSync, dshMarket, desktopPlugins, recommendedWebUi, runtimeVersions, profiles: profileService, profilePoolReady, restoreOfficialPack, listOfficialPackVersions: async () => listOfficialPackVersions(await officialListDeps()), readOfficialPackStatus: force => resolveOfficialPackStatus(force === true), installOfficialPackVersion, officialPackBootstrap }
 }
 
 function openMainWindow(): void {

@@ -697,6 +697,27 @@ export interface RepositoryInstallResult {
   packageName?: string
 }
 
+/**
+ * 官方桌面端（DSH Desktop）管理面板的状态。
+ *
+ * 它不是整合包：那份环境归桌面端自己管，我们只能读它的清单、通过它自带的命令装卸插件。
+ * 未安装时只有 `installed: false`，其余字段全空。
+ */
+export interface DesktopPluginState {
+  installed: boolean
+  /** 桌面端版本，如 `0.2.0-rc.2`。 */
+  version?: string | null
+  executable?: string
+  /** 按进程名探测的运行状态（它常被用户自己打开，不是我们 spawn 的子进程）。 */
+  running?: boolean
+  pluginCount?: number
+  plugins?: ManagedPlugin[]
+  /** 它 profile 的 .npmrc 里当前的 registry；null = 没配过，走默认源。 */
+  registry?: string | null
+  /** 点「配镜像」时会写入的值（来自用户的网络设置）。 */
+  mirrorRegistry?: string
+}
+
 export interface RuntimeState {
   running: boolean
   pid: number | null
@@ -1285,6 +1306,15 @@ export interface LauncherApi {
   installPlugin(request: string | PluginInstallRequest): Promise<RepositoryInstallResult>
   /** 手动按 npm 包名装插件（issue #10）：市场目录读不出来时的备用入口。 */
   installPluginFromNpm(request: NpmPluginInstallRequest): Promise<RepositoryInstallResult>
+  /** 官方桌面端：读它的环境状态（未安装时 installed:false）。 */
+  desktopStatus(): Promise<DesktopPluginState>
+  desktopInstall(target: { kind: 'github' | 'npm'; name: string; version?: string }): Promise<void>
+  desktopUninstall(packageName: string): Promise<void>
+  /** 让它走国内镜像（只写它 profile 的 registry 一个键，可恢复原样）。 */
+  desktopApplyMirror(): Promise<void>
+  desktopRestoreMirror(): Promise<void>
+  /** 打开桌面端应用本身——它不是我们托管的进程，这里只负责把它叫起来。 */
+  desktopOpen(): Promise<void>
   uninstallPlugin(packageName: string): Promise<ProfileState>
   trialPlugin(packageName: string, profileName?: string): Promise<PluginTrialResult>
   readPluginTrials(): Promise<PluginTrialResult[]>

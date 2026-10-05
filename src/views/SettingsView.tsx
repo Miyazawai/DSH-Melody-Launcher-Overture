@@ -27,6 +27,7 @@ import { resolveLauncherApi } from '../api/client'
 import { downloadPercent, formatBytes, formatSpeed } from '../lib/format'
 import { SkeletonStrip } from '../components/Skeleton'
 import { DshMarketView } from './DshMarketView'
+import { DesktopPackRow, DesktopPluginsPanel } from './DesktopPluginsPanel'
 import { PluginAddDialog } from '../components/dialogs/PluginAddDialog'
 import {
   SKILL_CATEGORIES,
@@ -549,7 +550,7 @@ function SettingsPluginsTab({
   onRefresh: () => void
   refreshLocked: boolean
 }) {
-  const [subView, setSubView] = useState<'installed' | 'market'>('installed')
+  const [subView, setSubView] = useState<'installed' | 'market' | 'desktop'>('installed')
   const [addOpen, setAddOpen] = useState(false)
   // 两个子视图的头都放一枚：市场目录读不出来时，「已安装」这一侧也得有能点开的入口。
   const addButton = <button type="button" className="secondary-button" onClick={() => setAddOpen(true)}><PackagePlus size={14} />手动添加</button>
@@ -558,6 +559,7 @@ function SettingsPluginsTab({
       <div className="settings-segmented" role="tablist" aria-label="插件视图">
         <button type="button" role="tab" aria-selected={subView === 'installed'} className={subView === 'installed' ? 'active' : ''} onClick={() => setSubView('installed')}>已安装</button>
         <button type="button" role="tab" aria-selected={subView === 'market'} className={subView === 'market' ? 'active' : ''} onClick={() => setSubView('market')}>DSH Market</button>
+        <button type="button" role="tab" aria-selected={subView === 'desktop'} className={subView === 'desktop' ? 'active' : ''} onClick={() => setSubView('desktop')}>官方桌面端</button>
       </div>
       {/* 两个子视图都保持挂载，切换只切可见性：DSH Market 不再每次重建+重拉目录 */}
       <div className={subView === 'installed' ? undefined : 'view-hidden'}>
@@ -590,6 +592,11 @@ function SettingsPluginsTab({
       <div className={subView === 'market' ? undefined : 'view-hidden'}>
         <section className="settings-panel">
           <DshMarketView embedded activeProfileName={activeProfileName} onProfileChanged={onProfileChanged} extraActions={addButton} />
+        </section>
+      </div>
+      <div className={subView === 'desktop' ? undefined : 'view-hidden'}>
+        <section className="settings-panel">
+          <DesktopPluginsPanel />
         </section>
       </div>
       {addOpen && (
@@ -1487,6 +1494,9 @@ function SettingsPacks({
             </div>
           )
         })}
+        {/* 官方桌面端不是我们托管的整合包，所以这一行自己拉状态、自己决定消不消失；
+            它没有导出/删除/切版本，只有「管理插件」跳到插件页那个分段。 */}
+        <DesktopPackRow onManagePlugins={() => onNavigateTab('plugins')} />
       </div>
     </div>
   )

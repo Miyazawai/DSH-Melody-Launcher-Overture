@@ -7623,6 +7623,14 @@ input:focus-visible {
 .dsh-market-link:hover { color: var(--accent); }
 .dsh-market-action { min-height: 29px !important; padding: 0 8px !important; font-size: 10px !important; }
 
+/* 官方桌面端面板：镜像那一行是自成一体的动作条，行内不放开关。 */
+.desktop-mirror-row { display: flex; align-items: center; justify-content: space-between; margin: 10px 0 6px; padding: 10px 12px; gap: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); }
+.desktop-mirror-copy { display: grid; min-width: 0; gap: 3px; }
+.desktop-mirror-copy strong { color: var(--ink); font-size: 11.5px; }
+.desktop-mirror-copy span { color: var(--muted); font-size: 10.5px; line-height: 16px; }
+.desktop-mirror-copy code { padding: 1px 5px; border-radius: 4px; background: var(--surface); font-family: Consolas, monospace; font-size: 10px; }
+.settings-desktop-row { border-style: dashed; }
+
 /* ---- AI 尝试安装 ---- */
 
 .ai-ready-actions {

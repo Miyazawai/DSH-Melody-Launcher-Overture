@@ -11,13 +11,15 @@ interface PluginAddDialogProps {
   onClose: () => void
   /** 装完让上层重读当前包的插件列表。 */
   onInstalled: () => Promise<void> | void
+  /** 目标是官方桌面端自己的环境：走它自带的命令，且装完没有「启用/停用」这一步。 */
+  desktop?: boolean
 }
 
 /**
  * 手动添加插件（issue #10）：填 GitHub 地址或 npm 包名就能装，不依赖 DSH Market 目录，
  * 也不调用 GitHub 的分析接口——市场页打不开的时候这两点才是要紧的。
  */
-export function PluginAddDialog({ profileName, onClose, onInstalled }: PluginAddDialogProps) {
+export function PluginAddDialog({ profileName, onClose, onInstalled, desktop = false }: PluginAddDialogProps) {
   const api = useLauncherApi()
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
@@ -34,8 +36,13 @@ export function PluginAddDialog({ profileName, onClose, onInstalled }: PluginAdd
     setBusy(true)
     setError(null)
     try {
-      if (target.kind === 'github') await api.installPlugin(target.name)
-      else await api.installPluginFromNpm({ packageName: target.name, ...(target.version !== undefined ? { version: target.version } : {}) })
+      if (desktop) {
+        await api.desktopInstall({ kind: target.kind, name: target.name, ...(target.version !== undefined ? { version: target.version } : {}) })
+      } else if (target.kind === 'github') {
+        await api.installPlugin(target.name)
+      } else {
+        await api.installPluginFromNpm({ packageName: target.name, ...(target.version !== undefined ? { version: target.version } : {}) })
+      }
       await onInstalled()
       onClose()
     } catch (cause) {
@@ -74,12 +81,16 @@ export function PluginAddDialog({ profileName, onClose, onInstalled }: PluginAdd
       </label>
       {error && <div className="error-banner"><span>{error}</span><button type="button" onClick={() => setError(null)}>忽略</button></div>}
       <p className="dialog-note">
-        会装进当前整合包{profileName ? <>「<strong>{profileName}</strong>」</> : null}，并在下次启动 DSH 时生效。切换整合包后请切到目标包再装。
+        {desktop
+          ? <>会装进<strong>官方桌面端自己的环境</strong>；它正在运行的话，要重启桌面端才会加载。</>
+          : <>会装进当前整合包{profileName ? <>「<strong>{profileName}</strong>」</> : null}，并在下次启动 DSH 时生效。切换整合包后请切到目标包再装。</>}
       </p>
       <p className="dialog-note">这条入口不需要插件市场能打开：它直接让 DSH 按你填的来源装，不查精选目录、也不读 GitHub 的接口。</p>
       <p className="dialog-note">npm 包名可以不写版本号（装最新版）。带 <code>@version</code> 时写 <code>1.2.3</code>、<code>0.1.7-rc.1</code> 或 <code>latest</code>。</p>
       <p className="dialog-note">填 GitHub 地址时给到<strong>仓库</strong>就行，不用精确到子目录；monorepo 里的子包建议填它的 npm 包名，装完才是可比的版本号。</p>
-      <p className="dialog-note">如果装完提示「DSH 没有把它识别为有效 Bundle」，说明这个包本身不是 DSH 插件，或者还缺插件补丁文件。</p>
+      {desktop
+        ? <p className="dialog-note">装完之后，<strong>启用与停用要回桌面端自己的插件管理页</strong>：它提供的命令只支持安装与卸载，启动器替它改开关会和它内部状态对不上。</p>
+        : <p className="dialog-note">如果装完提示「DSH 没有把它识别为有效 Bundle」，说明这个包本身不是 DSH 插件，或者还缺插件补丁文件。</p>}
     </ModalShell>
   )
 }

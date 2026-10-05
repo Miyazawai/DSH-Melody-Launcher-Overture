@@ -32,6 +32,7 @@ import {
   togglePlugin,
 } from './profile'
 import type { RuntimeController } from './runtime'
+import type { DesktopPluginsService } from './desktop-plugins'
 import type { SettingsStore } from './settings'
 import type { GitHubAuthService } from './github-auth'
 import { createLinkedComponentController } from './linked-components'
@@ -69,6 +70,8 @@ export interface IpcDependencies {
   applicationAddons: ApplicationAddonManager
   catalogSync: CatalogSyncService
   dshMarket: DshMarketService
+  /** 官方桌面端的插件管理（只经它自带的命令，不碰我们自己的安装链路）。 */
+  desktopPlugins: DesktopPluginsService
   recommendedWebUi: RecommendedWebUiService
   runtimeVersions: RuntimeVersionService
   profiles: ProfileService
@@ -89,7 +92,7 @@ export interface IpcDependencies {
 }
 
 export function registerIpcHandlers(deps: IpcDependencies): void {
-  const { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager, githubAuth, applicationAddons, catalogSync, dshMarket, recommendedWebUi, runtimeVersions, profiles, skillsShIndexPath, newsCachePath, restoreOfficialPack, listOfficialPackVersions, readOfficialPackStatus, installOfficialPackVersion } = deps
+  const { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager, githubAuth, applicationAddons, catalogSync, dshMarket, desktopPlugins, recommendedWebUi, runtimeVersions, profiles, skillsShIndexPath, newsCachePath, restoreOfficialPack, listOfficialPackVersions, readOfficialPackStatus, installOfficialPackVersion } = deps
   const linkedComponents = createLinkedComponentController({
     readSettings: () => settings.read(),
     readProfile,
@@ -108,6 +111,9 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     if (copilot.isMutationBusy()) throw new Error('DSH Copilot 修改任务进行中，请等待完成。')
     if (applicationAddons.isBusy()) throw new Error('应用加载项操作进行中，请等待完成。')
     if (dshMarket.isBusy()) throw new Error('DSH Market 插件操作进行中，请等待完成。')
+    // 桌面端的装卸是另一条独立链路（走它自带的命令），不并进这把锁的话，
+    // 一次两分钟的安装在跑期间照样能切整合包、装我们自己的插件。
+    if (desktopPlugins.isBusy()) throw new Error('官方桌面端插件操作进行中，请等待完成。')
     if (recommendedWebUi.isBusy()) throw new Error('官方推荐整合包安装进行中，请等待完成。')
     if (runtimeVersions.isBusy()) throw new Error('运行环境版本操作进行中，请等待完成。')
   }
@@ -603,6 +609,35 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       repository: typeof request.repository === 'string' ? request.repository : undefined,
     })
   })
+  // 官方桌面端：它的环境不归我们托管，所以这里只有「读它的清单」和「用它自带的命令装卸」。
+  // 这些入口不经过 installer，因此包名/仓库名的校验在这里和服务层各做一道。
+  ipcMain.handle(IPC.desktopStatus, () => desktopPlugins.status())
+  ipcMain.handle(IPC.desktopInstall, async (_event, target: { kind?: unknown; name?: unknown; version?: unknown }) => {
+    assertProfileMutationAvailable()
+    if (!target || (target.kind !== 'github' && target.kind !== 'npm') || typeof target.name !== 'string' || !target.name.trim()) {
+      throw new Error('插件来源无效。')
+    }
+    return desktopPlugins.install({
+      kind: target.kind,
+      name: target.name.trim(),
+      ...(typeof target.version === 'string' && target.version.trim() ? { version: target.version.trim() } : {}),
+    })
+  })
+  ipcMain.handle(IPC.desktopUninstall, async (_event, packageName: string) => {
+    assertProfileMutationAvailable()
+    if (!isSafePackageName(packageName)) throw new Error('插件名称无效。')
+    return desktopPlugins.uninstall(packageName)
+  })
+  ipcMain.handle(IPC.desktopMirrorApply, async () => {
+    assertProfileMutationAvailable()
+    return desktopPlugins.applyMirror()
+  })
+  ipcMain.handle(IPC.desktopMirrorRestore, async () => {
+    assertProfileMutationAvailable()
+    return desktopPlugins.restoreMirror()
+  })
+  ipcMain.handle(IPC.desktopOpen, () => desktopPlugins.open())
+
   ipcMain.handle(IPC.pluginsUninstall, async (_event, payload: string | { packageName: string; profileName?: string }) => {
     assertProfileMutationAvailable()
     const packageName = typeof payload === 'string' ? payload : payload?.packageName

@@ -17,6 +17,7 @@ import type {
   CustomApiProvider,
   DshInstallationStatus,
   DshMarketCatalog,
+  DesktopPluginState,
   DshMarketProgress,
   DshUpdateStatus,
   RuntimeEnvironmentState,
@@ -165,6 +166,21 @@ let demoInstalledApplications: InstalledApplicationAddon[] = [{
   updatedAt: '2026-08-17T00:00:00.000Z',
 }]
 let demoInstalledPresets: InstalledPreset[] = []
+/** 演示模式下的桌面端样子：假装装了 0.2.0-rc.2、里面有两个外部插件、没配镜像。 */
+let demoDesktopState: DesktopPluginState = {
+  installed: true,
+  version: '0.2.0-rc.2',
+  executable: 'C:\\Demo\\DeepSeek Harness.exe',
+  running: false,
+  registry: null,
+  mirrorRegistry: 'https://registry.npmmirror.com',
+  pluginCount: 2,
+  plugins: [
+    { packageName: 'dsh-session-context-menu', displayName: 'dsh-session-context-menu', version: '0.3.1', description: '会话列表的右键菜单。', enabled: true, builtin: false, locked: false, compatible: true, order: 1 },
+    { packageName: '@demo/desktop-theme', displayName: 'desktop-theme', version: '1.0.4', description: '桌面端外观补丁。', enabled: true, builtin: false, locked: false, compatible: true, order: 2 },
+  ],
+}
+
 let demoDshMarketPlugins: DshMarketCatalog['plugins'] = [
   { name: 'dsh-explorer', owner: 'No-PRM', url: 'https://github.com/No-PRM/dsh-explorer', category: 'ui', description: { zh: 'Git 优先的文件树侧栏。', en: 'Git-first file tree sidebar.' }, npm: null, stars: 2, added: '2026-08-16', install: 'dsh plugin add github:No-PRM/dsh-explorer', installed: false, enabled: false, version: null, updateAvailable: false, updateVersion: null },
   { name: 'dsh-message-rail', owner: 'wx-yss', url: 'https://github.com/wx-yss/dsh-message-rail', category: 'ui', description: { zh: '会话消息导航栏。', en: 'Session message navigation rail.' }, npm: 'dsh-message-rail', stars: 2, added: '2026-08-15', install: 'dsh plugin add dsh-message-rail', installed: false, enabled: false, version: null, updateAvailable: false, updateVersion: null },
@@ -1280,6 +1296,34 @@ export const demoApi: LauncherApi = {
     demoPlugins = renumber(demoPlugins.filter(plugin => plugin.packageName !== packageName))
     return profile()
   },
+  desktopStatus: async () => ({ ...demoDesktopState }),
+  desktopInstall: async target => {
+    const name = target.kind === 'github' ? target.name.split('/').at(-1) ?? target.name : target.name
+    demoDesktopState = {
+      ...demoDesktopState,
+      plugins: [...(demoDesktopState.plugins ?? []), {
+        packageName: name,
+        displayName: name,
+        version: target.version ?? 'latest',
+        description: '演示：通过桌面端自带的命令安装的插件',
+        enabled: true,
+        builtin: false,
+        locked: false,
+        compatible: true,
+        order: (demoDesktopState.plugins?.length ?? 0) + 1,
+      }],
+      pluginCount: (demoDesktopState.plugins?.length ?? 0) + 1,
+    }
+    await wait(900)
+  },
+  desktopUninstall: async packageName => {
+    const plugins = (demoDesktopState.plugins ?? []).filter(plugin => plugin.packageName !== packageName)
+    demoDesktopState = { ...demoDesktopState, plugins, pluginCount: plugins.length }
+    await wait(500)
+  },
+  desktopApplyMirror: async () => { await wait(300); demoDesktopState = { ...demoDesktopState, registry: demoDesktopState.mirrorRegistry ?? null } },
+  desktopRestoreMirror: async () => { await wait(300); demoDesktopState = { ...demoDesktopState, registry: null } },
+  desktopOpen: async () => { await wait(400); demoDesktopState = { ...demoDesktopState, running: true } },
   trialPlugin: async (packageName, profileName = demoSettings.profileName) => {
     const startedAt = new Date().toISOString()
     const running: PluginTrialResult = {
