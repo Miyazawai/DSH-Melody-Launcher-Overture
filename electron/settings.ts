@@ -1,7 +1,9 @@
+import { statSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { DEFAULT_PROFILE_NAME, DSH_PACKAGE_NAME } from '../src/constants'
-import type { AppSettings, DshInstallationStatus, NetworkSettings, UiTheme } from '../src/types'
+import { ACCENT_PATTERN, APPEARANCE_IMAGE_EXTENSIONS, clampBackgroundOpacity, clampPanelOpacity } from '../src/lib/appearance'
+import type { AppSettings, AppearanceSettings, DshInstallationStatus, NetworkSettings, UiTheme } from '../src/types'
 import { managedDshExecutable } from './dsh-install'
 import { isSafeProfileName } from './profile'
 
@@ -62,6 +64,45 @@ function validWebPort(value: unknown): value is number {
 function validRuntimeVersion(value: unknown): value is string {
   return typeof value === 'string'
     && /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value.trim())
+}
+
+/** 外观图片上限，与 electron/appearance.ts 的复制通道保持一致。 */
+const MAX_APPEARANCE_IMAGE_BYTES = 10 * 1024 * 1024
+
+/** 外观图片路径：绝对路径 + 白名单扩展名 + 文件存在且 ≤10MB，缺一不可。 */
+function validAppearanceImagePath(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.trim() === '' || !path.isAbsolute(value)) return undefined
+  const extension = path.extname(value).slice(1).toLowerCase()
+  if (!APPEARANCE_IMAGE_EXTENSIONS.has(extension)) return undefined
+  try {
+    const info = statSync(value)
+    if (!info.isFile() || info.size > MAX_APPEARANCE_IMAGE_BYTES) return undefined
+  } catch {
+    return undefined
+  }
+  return path.resolve(value)
+}
+
+/**
+ * 外观自定义：逐字段宽松校验——非法项丢弃、其余保留，绝不抛错。
+ * 旧存档没有 appearance、或图片被删掉时，启动器仍要能读、能存。
+ */
+export function validAppearance(value: unknown): AppearanceSettings | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const appearance: AppearanceSettings = {}
+  if (typeof input.accent === 'string' && ACCENT_PATTERN.test(input.accent)) appearance.accent = input.accent.toLowerCase()
+  if (typeof input.panelOpacity === 'number' && Number.isFinite(input.panelOpacity)) {
+    appearance.panelOpacity = clampPanelOpacity(input.panelOpacity)
+  }
+  if (typeof input.backgroundOpacity === 'number' && Number.isFinite(input.backgroundOpacity)) {
+    appearance.backgroundOpacity = clampBackgroundOpacity(input.backgroundOpacity)
+  }
+  const backgroundPath = validAppearanceImagePath(input.backgroundPath)
+  if (backgroundPath) appearance.backgroundPath = backgroundPath
+  const logoPath = validAppearanceImagePath(input.logoPath)
+  if (logoPath) appearance.logoPath = logoPath
+  return Object.keys(appearance).length > 0 ? appearance : undefined
 }
 
 /** 网络镜像/代理偏好：任一项非空才保留；丢空项以避免存一堆空字符串。 */
@@ -132,6 +173,7 @@ export function validateSettings(input: AppSettings): AppSettings {
     webPort: input.webPort,
     openAfterLaunch: Boolean(input.openAfterLaunch),
     uiTheme: validUiTheme(input.uiTheme) ? input.uiTheme : 'deepseek',
+    appearance: validAppearance(input.appearance),
     aiDeveloperMode: Boolean(input.aiDeveloperMode),
     aiPrompt: typeof input.aiPrompt === 'string' ? input.aiPrompt.slice(0, 20_000) : '',
     network: validNetworkSettings(input.network),
@@ -160,6 +202,7 @@ export function mergeStoredSettings(defaults: AppSettings, stored: Partial<AppSe
       : defaults.launchArgs,
     webPort: storedPort,
     uiTheme: validUiTheme(stored.uiTheme) ? stored.uiTheme : defaults.uiTheme ?? 'deepseek',
+    appearance: validAppearance(stored.appearance),
     aiDeveloperMode: Boolean(stored.aiDeveloperMode),
     aiPrompt: typeof stored.aiPrompt === 'string' ? stored.aiPrompt.slice(0, 20_000) : '',
     network: validNetworkSettings(stored.network) ?? defaults.network,

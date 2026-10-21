@@ -3,6 +3,31 @@ export type WindowMode = 'launcher' | 'manager'
 export type HomeTab = 'start' | 'versions' | 'plugins' | 'skills' | 'presets' | 'packs'
 export type UiTheme = 'deepseek' | 'night'
 
+/**
+ * 启动器外观自定义（全部可选；缺省即上游默认外观）。
+ * 字段形状是 settings.json 的对外契约，旧存档没有 appearance 时必须照常读。
+ */
+export type AppearanceImageKind = 'background' | 'logo'
+export interface AppearanceImageSelection {
+  /** userData/appearance 下复制件的绝对路径。 */
+  path: string
+  /** 渲染层可直接加载的 URL（dsh-appearance://）。 */
+  url: string
+}
+
+export interface AppearanceSettings {
+  /** 主题色，#rrggbb；空 = 跟随当前主题的默认强调色。 */
+  accent?: string
+  /** 面板/按钮透明度，0.2–1，默认 1。 */
+  panelOpacity?: number
+  /** 背景图：userData/appearance 下复制件的绝对路径；空 = 跟随主题色淡渐变。 */
+  backgroundPath?: string
+  /** 背景图层整体透明度，0.1–1，默认 1；仅图片态有意义。 */
+  backgroundOpacity?: number
+  /** 首页品牌区头像替换图绝对路径；空 = 内置 launcher-logo.png。 */
+  logoPath?: string
+}
+
 export interface AppSettings {
   dshInstallPath: string
   /** 默认 DSH 家目录（无私有目录的整合包共用）；激活带私有目录的整合包后，read() 返回的 dshHome 即该包目录。 */
@@ -23,6 +48,8 @@ export interface AppSettings {
   openAfterLaunch: boolean
   /** 启动器界面配色；主表面由同一基色的明暗层级构成。 */
   uiTheme?: UiTheme
+  /** 外观自定义（主题色/透明度/背景图/头像）；旧存档无此字段。 */
+  appearance?: AppearanceSettings
   /** DSH Copilot 是否允许用户替换基础 persona。 */
   aiDeveloperMode?: boolean
   /** DSH Copilot 的用户提示词覆盖/追加内容。 */
@@ -1279,6 +1306,8 @@ export interface LauncherApi {
   getGitHubStarStatus(repository: string): Promise<boolean>
   setGitHubStar(repository: string, starred: boolean): Promise<boolean>
   chooseDirectory(kind: 'dshInstallPath' | 'dshHome' | 'workspace'): Promise<string | null>
+  /** 选择并复制一张外观图片；返回写进 settings 的路径与可直接加载的 URL；取消返回 null。 */
+  chooseAppearanceImage(kind: AppearanceImageKind): Promise<AppearanceImageSelection | null>
   readProfile(): Promise<ProfileState>
   listProfiles(): Promise<ProfileSummary[]>
   createProfile(request: ProfileCreateRequest): Promise<ProfileSummary>

@@ -64,6 +64,7 @@ const api: LauncherApi = {
   getGitHubStarStatus: repository => ipcRenderer.invoke(IPC.githubStarStatus, repository),
   setGitHubStar: (repository, starred) => ipcRenderer.invoke(IPC.githubStarSet, { repository, starred }),
   chooseDirectory: kind => ipcRenderer.invoke(IPC.chooseDirectory, kind),
+  chooseAppearanceImage: kind => ipcRenderer.invoke(IPC.appearanceChooseImage, kind),
   readProfile: () => ipcRenderer.invoke(IPC.profileRead),
   listProfiles: () => ipcRenderer.invoke(IPC.profilesList),
   createProfile: request => ipcRenderer.invoke(IPC.profilesCreate, request),

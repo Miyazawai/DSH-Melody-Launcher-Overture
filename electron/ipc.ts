@@ -3,7 +3,9 @@ import { existsSync } from 'node:fs'
 import { copyFile, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { IPC, IPC_EVENTS } from '../src/constants'
-import type { AiSessionCreateInput, ApplicationInstallRequest, AppSettings, CustomApiProviderInput, OfficialPackRelease, OfficialPackStatus, PackCreateRequest, PackInstallResult, NpmPluginInstallRequest, PluginInstallRequest, PresetInstallRequest, SkillInstallRequest, SkillInstallTarget, WindowMode, ProfileRepositoryImportMode, PackPluginEntry } from '../src/types'
+import type { AiSessionCreateInput, ApplicationInstallRequest, AppSettings, AppearanceImageKind, CustomApiProviderInput, OfficialPackRelease, OfficialPackStatus, PackCreateRequest, PackInstallResult, NpmPluginInstallRequest, PluginInstallRequest, PresetInstallRequest, SkillInstallRequest, SkillInstallTarget, WindowMode, ProfileRepositoryImportMode, PackPluginEntry } from '../src/types'
+import { APPEARANCE_IMAGE_EXTENSIONS } from '../src/lib/appearance'
+import { storeAppearanceImage } from './appearance'
 import type { SnapshotPrivacyInclude } from './pack-snapshot'
 import type { ApplicationAddonManager } from './application-addons'
 import type { RecommendedWebUiService } from './recommended-web-ui'
@@ -79,6 +81,8 @@ export interface IpcDependencies {
   skillsShIndexPath: string
   /** juya AI 日报 RSS 磁盘缓存路径（userData/juya-news-cache.json）。 */
   newsCachePath: string
+  /** 外观图片目录（userData/appearance）；选图后复制到这里再返回固定路径。 */
+  appearanceDirectory: string
   /** 恢复当前版本的官方默认整合包（下载导入走快照管线）；失败抛错。 */
   restoreOfficialPack: () => Promise<PackInstallResult>
   /** 列出 Release 上所有官方默认整合包版本（按版本降序）。 */
@@ -92,7 +96,7 @@ export interface IpcDependencies {
 }
 
 export function registerIpcHandlers(deps: IpcDependencies): void {
-  const { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager, githubAuth, applicationAddons, catalogSync, dshMarket, desktopPlugins, recommendedWebUi, runtimeVersions, profiles, skillsShIndexPath, newsCachePath, restoreOfficialPack, listOfficialPackVersions, readOfficialPackStatus, installOfficialPackVersion } = deps
+  const { settings, pluginReceiptsPath, runtime, installer, launcherUpdater, pluginTrial, aiInstaller, copilot, packManager, githubAuth, applicationAddons, catalogSync, dshMarket, desktopPlugins, recommendedWebUi, runtimeVersions, profiles, skillsShIndexPath, newsCachePath, appearanceDirectory, restoreOfficialPack, listOfficialPackVersions, readOfficialPackStatus, installOfficialPackVersion } = deps
   const linkedComponents = createLinkedComponentController({
     readSettings: () => settings.read(),
     readProfile,
@@ -246,6 +250,21 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       properties: ['openDirectory', 'createDirectory'],
     })
     return result.canceled ? null : result.filePaths[0]
+  })
+
+  // 外观图片：选文件 → 校验扩展名/大小 → 复制进 userData/appearance → 返回固定路径 + 协议 URL。
+  // 不走 file://：dev 下 http 源加载 file:// 会被 webSecurity 拦掉。
+  ipcMain.handle(IPC.appearanceChooseImage, async (_event, kind: AppearanceImageKind) => {
+    const window = deps.getWindow()
+    if (!window) return null
+    if (kind !== 'background' && kind !== 'logo') throw new Error('未知的外观图片类型。')
+    const result = await dialog.showOpenDialog(window, {
+      title: kind === 'background' ? '选择背景图片' : '选择头像图片',
+      properties: ['openFile'],
+      filters: [{ name: '图片', extensions: [...APPEARANCE_IMAGE_EXTENSIONS] }],
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    return storeAppearanceImage(result.filePaths[0], kind, appearanceDirectory)
   })
 
   ipcMain.handle(IPC.profileRead, async () => {

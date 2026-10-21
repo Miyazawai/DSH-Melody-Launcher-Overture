@@ -148,6 +148,8 @@ export const IPC = {
   skillMarketAnalyze: 'skill-market:analyze',
   skillMarketInstall: 'skill-market:install',
   skillMarketCatalog: 'skill-market:catalog',
+  /** 外观自定义：选择并复制背景图/头像。 */
+  appearanceChooseImage: 'appearance:choose-image',
   deepseekBalance: 'deepseek:balance',
   newsFeed: 'news:feed',
   dshUsage: 'dsh:usage',
