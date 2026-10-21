@@ -45,6 +45,8 @@
   --dur-fast: 160ms;
   --dur-base: 220ms;
   --dur-slow: 300ms;
+  /* 外观自定义：1 = 完全不透明；JS 会按设置覆盖 */
+  --panel-opacity: 1;
 }
 
 :root[data-theme='night'] {
@@ -311,7 +313,8 @@ input:focus-visible {
   padding-left: 16px;
   gap: 12px;
   color: var(--topbar-ink);
-  background: var(--topbar-bg);
+  /* 外观自定义：面板透明度同样作用于顶栏；白字压底，40% 下限与主按钮一致 */
+  background: color-mix(in srgb, var(--topbar-bg) calc(max(var(--panel-opacity), .40) * 100%), transparent);
   -webkit-app-region: drag;
 }
 
@@ -504,7 +507,7 @@ input:focus-visible {
   align-items: center;
   padding: 0 26px 16px;
   border-right: 1px solid var(--line);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) calc(var(--panel-opacity) * 100%), transparent);
   animation: launcher-rise 320ms cubic-bezier(.22,.61,.36,1) both;
 }
 
@@ -646,7 +649,7 @@ input:focus-visible {
   padding: 16px 18px;
   border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--line));
   border-radius: 14px;
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) calc(var(--panel-opacity) * 100%), transparent);
   box-shadow: 0 12px 32px rgba(38, 60, 88, 0.09);
 }
 
@@ -1061,7 +1064,7 @@ input:focus-visible {
   border: 1.5px solid var(--accent);
   border-radius: 8px;
   color: var(--accent);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) calc(var(--panel-opacity) * 100%), transparent);
   cursor: pointer;
   transition: transform 160ms cubic-bezier(.23,1,.32,1), background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
@@ -1121,7 +1124,7 @@ input:focus-visible {
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--ink);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) calc(var(--panel-opacity) * 100%), transparent);
   font-size: 12.5px;
   font-weight: 650;
   cursor: pointer;
@@ -1671,7 +1674,7 @@ input:focus-visible {
 
 .primary-command {
   color: #fff;
-  background: var(--accent);
+  background: color-mix(in srgb, var(--accent) calc(max(var(--panel-opacity), .40) * 100%), transparent);
 }
 
 .primary-command:hover:not(:disabled) {
@@ -9208,3 +9211,191 @@ input:focus-visible {
 .dsh-failure-log { margin: 0; max-height: 300px; overflow: auto; padding: 10px 12px; border-radius: 10px; background: var(--surface-strong); color: var(--ink); font: 12px/1.7 ui-monospace, "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
 .dsh-failure-hint { margin: 0; color: var(--quiet); font-size: 12px; line-height: 1.6; }
 .primary-command.is-copied { background: #2f9e54; border-color: #2f9e54; }
+
+/* ===== 外观自定义：整窗背景图层 / 图片态顶栏 / 设置面板控件 =====
+   图层挂在 .app-root（覆盖顶栏），主题色渐变垫在它之下；
+   图片层整层 alpha 走 --bg-opacity，压暗层与它等比缩放，调低即透出主题色渐变。 */
+.app-root {
+  position: relative;
+  background: linear-gradient(180deg, var(--app-bg) 0%, var(--workspace-bg) 100%);
+}
+
+.home-bg-layer {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background-image: var(--bg-image, none);
+  background-size: cover;
+  background-position: center;
+  opacity: var(--bg-opacity, 1);
+  pointer-events: none;
+}
+
+/* 有背景图时全窗压暗一层保文字可读（proposal 风险 3 的 veil），随 --bg-opacity 等比缩放 */
+.app-root[data-has-bg]::before {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  content: '';
+  background: rgba(8, 12, 20, 0.25);
+  opacity: var(--bg-opacity, 1);
+  pointer-events: none;
+}
+
+/* 内容层抬到背景图层之上；图片态把原本不透明的壳与首页底色让出来 */
+.app-root[data-has-bg] .app-content { z-index: 2; }
+.app-root[data-has-bg] .surface-stage { background: transparent; }
+.app-root[data-has-bg] .launcher-home { background: transparent; }
+.app-root[data-has-bg] .home-tab-page { background: transparent; }
+
+/* 图片态顶栏不吃主题色底，改半透明让图透出；日夜分流（2026-10-21 主人定）：
+   夜间压暗底 + 白字；日间白系底 + 深色字（整套顶栏 token 一起翻，否则白字糊在白底上） */
+:root[data-theme='night'] .app-root[data-has-bg] .topbar {
+  background: rgba(10, 14, 22, 0.34);
+}
+
+:root:not([data-theme='night']) .app-root[data-has-bg] .topbar {
+  --topbar-ink: var(--ink);
+  --topbar-ink-dim: rgba(38, 49, 61, 0.72);
+  --topbar-hover-bg: rgba(38, 49, 61, 0.08);
+  --topbar-hover-strong-bg: rgba(38, 49, 61, 0.14);
+  --topbar-border: rgba(38, 49, 61, 0.3);
+  --topbar-active-bg: var(--accent);
+  --topbar-active-ink: #fff;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+/* 关闭键悬停是实心红，字色固定白（不随日间深色 token 翻） */
+:root:not([data-theme='night']) .app-root[data-has-bg] .topbar-window-close:hover {
+  color: #fff;
+}
+
+/* —— 设置面板的「外观」分组控件 —— */
+.appearance-field {
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+  margin-top: 10px;
+}
+
+.appearance-label,
+.appearance-slider-row > span,
+.appearance-image-row > span {
+  color: #566170;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.appearance-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.appearance-swatch {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.appearance-swatch.auto {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: linear-gradient(135deg, var(--surface) 0 50%, var(--surface-strong) 50% 100%);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.appearance-swatch.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.appearance-custom-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.appearance-custom-color input {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.appearance-slider-row {
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+  margin-top: 10px;
+}
+
+.appearance-slider-row input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.appearance-slider-row em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.appearance-image-row {
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+  margin-top: 10px;
+}
+
+.appearance-image-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.appearance-image-actions small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appearance-logo-preview {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  object-fit: cover;
+}
+
+.appearance-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}

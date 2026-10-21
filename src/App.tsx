@@ -1,5 +1,5 @@
 import { Layers3, LoaderCircle } from 'lucide-react'
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { LauncherApiProvider, resolveLauncherApi, useLauncherApi } from './api/client'
 import { LauncherHome } from './components/LauncherHome'
 import { TopBar } from './components/TopBar'
@@ -15,7 +15,8 @@ import { usePackInstall } from './hooks/use-pack-install'
 import { isInstallProgressActive } from './lib/install-progress'
 import { HOME_TAB_ORDER } from './lib/nav'
 import { isDshVersionOlderThan } from './lib/dsh-version'
-import type { HomeTab } from './types'
+import { APPEARANCE_VARIABLE_KEYS, appearanceImageUrl, appearanceVariables } from './lib/appearance'
+import type { AppearanceSettings, HomeTab } from './types'
 
 // 启动页只看得到 LauncherHome；整合包/插件/技能/预设/版本这一整块面板（以及导入对话框）
 // 拆成按需加载的 chunk，首屏要解析的 JS 就少一截。
@@ -59,6 +60,8 @@ function LauncherShell() {
   // 对话框开关是纯展示状态，不进 store。
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updateOpen, setUpdateOpen] = useState(false)
+  // 设置面板拖动时先预览、后保存：null 表示不预览，回到已保存的 appearance。
+  const [previewAppearance, setPreviewAppearance] = useState<AppearanceSettings | null>(null)
   // 「导入会话」的目标包 id（入口长在那个包的卡片上）。
   const [sessionImportTarget, setSessionImportTarget] = useState<string | null>(null)
   // 「导出」对话框对应的包 id（隐私勾选项在那里决定）。
@@ -68,9 +71,18 @@ function LauncherShell() {
   // keep-mounted 集合：访问过的一级 tab 保持挂载，切换只切可见性。
   const visitedTabs = useRef(new Set<HomeTab>(['start']))
 
+  const theme = store.settings?.uiTheme ?? 'deepseek'
+  const effectiveAppearance = previewAppearance ?? store.settings?.appearance
+  // 外观变量挂在根元素：设置面板的实时预览与保存后的生效走同一条路径，
+  // 取消时把 previewAppearance 置 null 就会按已保存设置重算，天然还原。
   useEffect(() => {
-    document.documentElement.dataset.theme = store.settings?.uiTheme ?? 'deepseek'
-  }, [store.settings?.uiTheme])
+    const root = document.documentElement
+    root.dataset.theme = theme
+    for (const key of APPEARANCE_VARIABLE_KEYS) root.style.removeProperty(key)
+    for (const [key, value] of Object.entries(appearanceVariables(effectiveAppearance, theme))) {
+      root.style.setProperty(key, value)
+    }
+  }, [theme, effectiveAppearance])
 
   const installingResource = isInstallProgressActive(store.installProgress)
   const installingDsh = store.busy === BUSY.dshInstall
@@ -118,10 +130,17 @@ function LauncherShell() {
   }
 
   const { settings, profile } = store
+  const backgroundUrl = appearanceImageUrl(effectiveAppearance?.backgroundPath)
+  const logoSrc = appearanceImageUrl(effectiveAppearance?.logoPath)
   visitedTabs.current.add(navigation.homeTab)
 
   return (
-    <div className="app-root">
+    <div
+      className="app-root"
+      data-has-bg={backgroundUrl ? '1' : undefined}
+      style={backgroundUrl ? ({ '--bg-image': `url("${backgroundUrl}")` } as CSSProperties) : undefined}
+    >
+      {backgroundUrl && <div className="home-bg-layer" aria-hidden="true" />}
       <TopBar
         activeTab={navigation.homeTab}
         openWebVisible={store.runtime.running && Boolean(store.runtime.url)}
@@ -161,6 +180,7 @@ function LauncherShell() {
                     onOpenLauncherUpdate={() => setUpdateOpen(true)}
                     onNavigateTab={navigation.goHome}
                     onOpenSettings={() => setSettingsOpen(true)}
+                    logoSrc={logoSrc}
                   />
                 ) : (
                   <Suspense fallback={null}>
@@ -245,8 +265,14 @@ function LauncherShell() {
         <SettingsDialog
           settings={settings}
           busy={store.busy === BUSY.settings || profileMutationLocked}
-          onClose={() => setSettingsOpen(false)}
-          onSave={async next => { if (await store.saveSettings(next)) setSettingsOpen(false) }}
+          onPreview={setPreviewAppearance}
+          onClose={() => { setPreviewAppearance(null); setSettingsOpen(false) }}
+          onSave={async next => {
+            if (await store.saveSettings(next)) {
+              setPreviewAppearance(null)
+              setSettingsOpen(false)
+            }
+          }}
         />
       )}
       {packInstall.phase !== 'idle' && (

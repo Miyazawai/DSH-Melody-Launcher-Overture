@@ -34,6 +34,8 @@ interface LauncherHomeProps {
   onOpenLauncherUpdate: () => void
   onNavigateTab: (tab: HomeTab) => void
   onOpenSettings: () => void
+  /** 自定义头像 URL；空则用内置 launcher-logo.png（仅换 src，排版不动）。 */
+  logoSrc?: string | null
 }
 
 export function LauncherHome({
@@ -58,6 +60,7 @@ export function LauncherHome({
   onOpenLauncherUpdate,
   onNavigateTab,
   onOpenSettings,
+  logoSrc,
 }: LauncherHomeProps) {
   const needsInstallation = !dshInstallation.installed && !activeRuntimeReplacement
   // 零包引导态：没有激活包（通常是删光了整合包）时，首页两个按钮都指向整合包页引导新建。
@@ -67,7 +70,7 @@ export function LauncherHome({
     <div className="launcher-home">
       <section className="home-brand">
         <div className="home-brand-head">
-          <img className="home-brand-logo" src={`${import.meta.env.BASE_URL}launcher-logo.png`} alt="" width={112} height={112} draggable={false} />
+          <img className="home-brand-logo" src={logoSrc ?? `${import.meta.env.BASE_URL}launcher-logo.png`} alt="" width={112} height={112} draggable={false} />
           <h1 className="home-brand-name">
             <strong>DSH</strong>
             <span>Melody Launcher</span>

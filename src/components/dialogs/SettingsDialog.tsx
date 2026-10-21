@@ -1,9 +1,10 @@
-import { Check, Folder, Gamepad2, Globe, Info, LoaderCircle, Palette, Rocket, Wrench, X } from 'lucide-react'
+import { Check, Folder, Gamepad2, Globe, ImagePlus, Info, LoaderCircle, Palette, Rocket, RotateCcw, Wrench, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import packageMetadata from '../../../package.json'
 import { useLauncherApi } from '../../api/client'
 import { GITHUB_MIRROR_PRESETS } from '../../constants'
-import type { AppSettings, UiTheme } from '../../types'
+import { ACCENT_PRESETS, DEFAULT_THEME_ACCENT, appearanceImageUrl, clampBackgroundOpacity, clampPanelOpacity } from '../../lib/appearance'
+import type { AppSettings, AppearanceSettings, UiTheme } from '../../types'
 
 /**
  * 启动器设置：按 C 端实际需要分组——外观 / 启动 / 网络 / 官方推荐 / 关于；
@@ -15,6 +16,8 @@ interface SettingsDialogProps {
   busy: boolean
   onClose: () => void
   onSave: (settings: AppSettings) => void
+  /** 实时预览：把草稿里的 appearance 交给根组件应用；null = 回落到已保存设置。 */
+  onPreview: (appearance: AppearanceSettings | null) => void
 }
 
 const UI_THEMES: Array<{ id: UiTheme; label: string }> = [
@@ -36,7 +39,7 @@ function SettingsGroup({ icon, title, desc, children }: { icon: ReactNode; title
   )
 }
 
-export function SettingsDialog({ settings, busy, onClose, onSave }: SettingsDialogProps) {
+export function SettingsDialog({ settings, busy, onClose, onSave, onPreview }: SettingsDialogProps) {
   const api = useLauncherApi()
   const [draft, setDraft] = useState(settings)
   // 参数在界面上是一整行文本，保存时才切成数组。
@@ -51,27 +54,145 @@ export function SettingsDialog({ settings, busy, onClose, onSave }: SettingsDial
     if (chosen) setDraft(current => ({ ...current, [kind]: chosen }))
   }
 
+  // 外观草稿：每次改动都同步给根组件做实时预览；保存前不落盘。
+  const appearance: AppearanceSettings = draft.appearance ?? {}
+  const theme = draft.uiTheme ?? 'deepseek'
+  const previewAppearance = (next: AppSettings) => {
+    setDraft(next)
+    onPreview(next.appearance ?? null)
+  }
+  const updateAppearance = (patch: Partial<AppearanceSettings>) => {
+    const merged = { ...appearance, ...patch }
+    const cleaned = Object.fromEntries(
+      Object.entries(merged).filter(([, value]) => value !== undefined && value !== null && value !== ''),
+    ) as AppearanceSettings
+    previewAppearance({ ...draft, appearance: Object.keys(cleaned).length > 0 ? cleaned : undefined })
+  }
+  const resetAppearance = () => previewAppearance({ ...draft, appearance: undefined })
+  const chooseAppearanceImage = async (kind: 'background' | 'logo') => {
+    const picked = await api.chooseAppearanceImage(kind)
+    if (!picked) return
+    updateAppearance(kind === 'background' ? { backgroundPath: picked.path } : { logoPath: picked.path })
+  }
+  const fileLabel = (target: string | undefined): string => (target ? target.split(/[\\/]/).pop() ?? target : '')
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.currentTarget === event.target) onClose() }}>
       <section className="modal settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header><div><Gamepad2 size={19} /><h2 id="settings-title">启动器设置</h2></div><button type="button" className="icon-button settings-close-button" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onClose() }} aria-label="关闭设置"><X size={18} /></button></header>
         <div className="modal-content settings-groups">
-          <SettingsGroup icon={<Palette size={16} />} title="外观" desc="界面主题色，保存后立即生效。">
+          <SettingsGroup icon={<Palette size={16} />} title="外观" desc="界面主题、主题色与外观；保存后立即生效。">
             <div className="theme-options" role="radiogroup" aria-label="界面主题">
-              {UI_THEMES.map(theme => (
+              {UI_THEMES.map(option => (
                 <button
-                  key={theme.id}
+                  key={option.id}
                   type="button"
                   role="radio"
-                  aria-checked={(draft.uiTheme ?? 'deepseek') === theme.id}
-                  className={`theme-option ${(draft.uiTheme ?? 'deepseek') === theme.id ? 'selected' : ''}`}
-                  onClick={() => setDraft({ ...draft, uiTheme: theme.id })}
+                  aria-checked={theme === option.id}
+                  className={`theme-option ${theme === option.id ? 'selected' : ''}`}
+                  onClick={() => setDraft({ ...draft, uiTheme: option.id })}
                 >
-                  <span className={`theme-swatch ${theme.id}`} aria-hidden="true"><i /><i /><i /></span>
-                  <span>{theme.label}</span>
-                  {(draft.uiTheme ?? 'deepseek') === theme.id && <Check size={14} />}
+                  <span className={`theme-swatch ${option.id}`} aria-hidden="true"><i /><i /><i /></span>
+                  <span>{option.label}</span>
+                  {theme === option.id && <Check size={14} />}
                 </button>
               ))}
+            </div>
+
+            <div className="appearance-field">
+              <span className="appearance-label">主题色</span>
+              <div className="appearance-swatches" role="radiogroup" aria-label="主题色">
+                {ACCENT_PRESETS.map(preset => {
+                  const selected = (appearance.accent ?? null) === preset.color
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      className={`appearance-swatch ${preset.color ? '' : 'auto'} ${selected ? 'selected' : ''}`}
+                      style={preset.color ? { background: preset.color } : undefined}
+                      title={preset.label}
+                      onClick={() => updateAppearance({ accent: preset.color ?? undefined })}
+                    >
+                      {preset.color === null && <span>自动</span>}
+                    </button>
+                  )
+                })}
+                <label className="appearance-custom-color" title="自定义主题色">
+                  <input
+                    type="color"
+                    value={appearance.accent ?? DEFAULT_THEME_ACCENT[theme]}
+                    onChange={event => updateAppearance({ accent: event.target.value })}
+                  />
+                  <span>自定义</span>
+                </label>
+              </div>
+            </div>
+
+            <label className="appearance-slider-row">
+              <span>面板透明度</span>
+              <input
+                type="range"
+                min={20}
+                max={100}
+                step={1}
+                value={Math.round(clampPanelOpacity(appearance.panelOpacity ?? 1) * 100)}
+                onChange={event => updateAppearance({ panelOpacity: Number(event.currentTarget.value) / 100 })}
+              />
+              <em>{Math.round(clampPanelOpacity(appearance.panelOpacity ?? 1) * 100)}%</em>
+            </label>
+
+            <div className="appearance-image-row">
+              <span>背景图片</span>
+              <div className="appearance-image-actions">
+                <button type="button" className="secondary-button" onClick={() => void chooseAppearanceImage('background')}>
+                  <ImagePlus size={14} />选择图片…
+                </button>
+                {appearance.backgroundPath && (
+                  <button type="button" className="secondary-button" onClick={() => updateAppearance({ backgroundPath: undefined, backgroundOpacity: undefined })}>清除</button>
+                )}
+                <small title={appearance.backgroundPath ?? ''}>{appearance.backgroundPath ? fileLabel(appearance.backgroundPath) || '已选择' : '跟随主题色渐变'}</small>
+              </div>
+            </div>
+
+            {appearance.backgroundPath && (
+              <label className="appearance-slider-row">
+                <span>背景透明度</span>
+                <input
+                  type="range"
+                  min={10}
+                  max={100}
+                  step={1}
+                  value={Math.round(clampBackgroundOpacity(appearance.backgroundOpacity ?? 1) * 100)}
+                  onChange={event => updateAppearance({ backgroundOpacity: Number(event.currentTarget.value) / 100 })}
+                />
+                <em>{Math.round(clampBackgroundOpacity(appearance.backgroundOpacity ?? 1) * 100)}%</em>
+              </label>
+            )}
+
+            <div className="appearance-image-row">
+              <span>启动器头像</span>
+              <div className="appearance-image-actions">
+                <img
+                  className="appearance-logo-preview"
+                  src={appearanceImageUrl(appearance.logoPath) ?? `${import.meta.env.BASE_URL}launcher-logo.png`}
+                  alt=""
+                />
+                <button type="button" className="secondary-button" onClick={() => void chooseAppearanceImage('logo')}>
+                  <ImagePlus size={14} />选择图片…
+                </button>
+                {appearance.logoPath && (
+                  <button type="button" className="secondary-button" onClick={() => updateAppearance({ logoPath: undefined })}>清除</button>
+                )}
+                <small>仅替换首页头像</small>
+              </div>
+            </div>
+
+            <div className="appearance-actions">
+              <button type="button" className="secondary-button" onClick={resetAppearance}>
+                <RotateCcw size={14} />恢复外观默认
+              </button>
             </div>
           </SettingsGroup>
           <SettingsGroup icon={<Rocket size={16} />} title="启动" desc="DSH 本体目录存放程序与依赖；DSH_HOME 存放整合包、配置、插件和 Skills。">
