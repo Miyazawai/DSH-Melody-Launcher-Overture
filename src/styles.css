@@ -523,6 +523,8 @@ input:focus-visible {
 .home-brand-logo {
   width: 112px;
   height: 112px;
+  /* 自定义头像可能是非方图：contain 保比例，盒子尺寸不变（内置方图渲染完全不变） */
+  object-fit: contain;
   filter: drop-shadow(0 10px 22px rgba(38, 52, 104, 0.2));
 }
 
@@ -9283,7 +9285,8 @@ input:focus-visible {
 .appearance-label,
 .appearance-slider-row > span,
 .appearance-image-row > span {
-  color: #566170;
+  /* 用 token 而不是上游 form-field 的硬编码 #566170：夜间主题下后者在深底上几乎看不见 */
+  color: var(--muted);
   font-size: 11px;
   font-weight: 600;
 }
