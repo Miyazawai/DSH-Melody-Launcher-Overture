@@ -15,6 +15,10 @@
   --quiet: #8d9aa8;
   --line: #d3e0ec;
   --line-strong: #b9cddf;
+  /* 基色单独留一份：管理页把 --surface* 换成带 alpha 的值时，color-mix 需要一个不会被覆盖的基准 */
+  --surface-base: #ffffff;
+  --surface-soft-base: #f4f8fc;
+  --surface-strong-base: #e8f0f8;
   --surface: #ffffff;
   --surface-soft: #f4f8fc;
   --surface-strong: #e8f0f8;
@@ -62,6 +66,9 @@
   --quiet: #6e7f91;
   --line: #2d3742;
   --line-strong: #404b57;
+  --surface-base: #171e26;
+  --surface-soft-base: #1d2630;
+  --surface-strong-base: #242f3b;
   --surface: #171e26;
   --surface-soft: #1d2630;
   --surface-strong: #242f3b;
@@ -2903,7 +2910,7 @@ input:focus-visible {
 .management-pack-control {
   border-right: 1px solid var(--line);
   color: var(--ink);
-  background: #f8fafc;
+  background: color-mix(in srgb, #f8fafc calc(var(--panel-opacity) * 100%), transparent);
   font-size: 12px;
   font-weight: 750;
 }
@@ -3270,7 +3277,8 @@ input:focus-visible {
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  background: #fafbfd;
+  /* 面板透明度：这一列也是「面板」，不能保持实心白（保留原色调，仅加 alpha） */
+  background: color-mix(in srgb, #fafbfd calc(var(--panel-opacity) * 100%), transparent);
 }
 
 .resource-tabs {
@@ -3723,7 +3731,7 @@ input:focus-visible {
 .secondary-management-column,
 .skill-management-column {
   min-width: 0;
-  background: #fafbfd;
+  background: color-mix(in srgb, #fafbfd calc(var(--panel-opacity) * 100%), transparent);
 }
 
 .secondary-management-column {
@@ -3779,7 +3787,7 @@ input:focus-visible {
 }
 
 .preset-management-column {
-  background: #faf7fb;
+  background: color-mix(in srgb, #faf7fb calc(var(--panel-opacity) * 100%), transparent);
 }
 
 .preset-management-column .preset-glyph {
@@ -3837,7 +3845,7 @@ input:focus-visible {
 
 .skill-row.disabled {
   color: var(--muted);
-  background: #f7f9f7;
+  background: color-mix(in srgb, #f7f9f7 calc(var(--panel-opacity) * 100%), transparent);
 }
 
 .application-row {
@@ -4061,7 +4069,7 @@ input:focus-visible {
 }
 
 .plugin-row:hover {
-  background: #fafbf9;
+  background: color-mix(in srgb, #fafbf9 calc(var(--panel-opacity) * 100%), transparent);
 }
 
 .plugin-row.selected {
@@ -4079,7 +4087,7 @@ input:focus-visible {
 
 .plugin-row.disabled {
   color: var(--muted);
-  background: #fafbfd;
+  background: color-mix(in srgb, #fafbfd calc(var(--panel-opacity) * 100%), transparent);
 }
 
 .plugin-row.dragging {
@@ -9402,3 +9410,14 @@ input:focus-visible {
   justify-content: flex-end;
   margin-top: 12px;
 }
+
+/* ===== 外观自定义：管理页（整合包/DSH版本/插件/技能/预设）的面板透明度 =====
+   开始页的六个消费点单独处理；管理页把 surface 三兄弟在 .home-tab-page 作用域内
+   换成带 alpha 的值，页内所有 var(--surface*) 背景（面板/行/统计条/输入框）自动跟随。
+   color-mix 的基准用 --surface-*-base，避免与作用域内被覆盖的 --surface* 自引用。 */
+.home-tab-page {
+  --surface: color-mix(in srgb, var(--surface-base) calc(var(--panel-opacity) * 100%), transparent);
+  --surface-soft: color-mix(in srgb, var(--surface-soft-base) calc(var(--panel-opacity) * 100%), transparent);
+  --surface-strong: color-mix(in srgb, var(--surface-strong-base) calc(var(--panel-opacity) * 100%), transparent);
+}
+
