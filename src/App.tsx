@@ -130,8 +130,9 @@ function LauncherShell() {
   }
 
   const { settings, profile } = store
-  const backgroundUrl = appearanceImageUrl(effectiveAppearance?.backgroundPath)
-  const logoSrc = appearanceImageUrl(effectiveAppearance?.logoPath)
+  // 版本号让同一路径换图后 URL 也变化：背景层与头像 <img> 才会重新取图。
+  const backgroundUrl = appearanceImageUrl(effectiveAppearance?.backgroundPath, effectiveAppearance?.backgroundVersion)
+  const logoSrc = appearanceImageUrl(effectiveAppearance?.logoPath, effectiveAppearance?.logoVersion)
   visitedTabs.current.add(navigation.homeTab)
 
   return (

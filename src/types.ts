@@ -22,10 +22,17 @@ export interface AppearanceSettings {
   panelOpacity?: number
   /** 背景图：userData/appearance 下复制件的绝对路径；空 = 跟随主题色淡渐变。 */
   backgroundPath?: string
+  /**
+   * 背景图内容版本（毫秒时间戳）：选图时更新。
+   * 复制件文件名固定，换图后路径不变；渲染层用它区分 URL，避免复用旧图。
+   */
+  backgroundVersion?: number
   /** 背景图层整体透明度，0.1–1，默认 1；仅图片态有意义。 */
   backgroundOpacity?: number
   /** 首页品牌区头像替换图绝对路径；空 = 内置 launcher-logo.png。 */
   logoPath?: string
+  /** 头像图内容版本，语义同 backgroundVersion。 */
+  logoVersion?: number
 }
 
 export interface AppSettings {

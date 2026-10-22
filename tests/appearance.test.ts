@@ -7,6 +7,7 @@ import {
   clampPanelOpacity,
   hasBackgroundImage,
   mixHex,
+  nextAppearanceImageVersion,
   rgbaFromHex,
 } from '../src/lib/appearance'
 
@@ -88,6 +89,26 @@ describe('appearanceImageUrl', () => {
     expect(appearanceImageUrl('/tmp/evil.exe')).toBeNull()
     expect(appearanceImageUrl('')).toBeNull()
     expect(appearanceImageUrl(null)).toBeNull()
+  })
+
+  it('同一路径换图时用版本参数区分 URL（否则渲染层会复用旧图）', () => {
+    const stored = 'C:\\Users\\a\\AppData\\Roaming\\dsh-launcher\\appearance\\background.png'
+    expect(appearanceImageUrl(stored, 1700000000000)).toBe('dsh-appearance://background.png?v=1700000000000')
+    expect(appearanceImageUrl(stored, 1700000000001)).not.toBe(appearanceImageUrl(stored, 1700000000000))
+  })
+
+  it('没有版本号或版本号非法时退回原来的 URL', () => {
+    const stored = '/home/a/appearance/logo.webp'
+    expect(appearanceImageUrl(stored)).toBe('dsh-appearance://logo.webp')
+    expect(appearanceImageUrl(stored, Number.NaN)).toBe('dsh-appearance://logo.webp')
+    expect(appearanceImageUrl(stored, 0)).toBe('dsh-appearance://logo.webp')
+    expect(appearanceImageUrl(stored, -5)).toBe('dsh-appearance://logo.webp')
+  })
+
+  it('下一版图片版本号严格大于旧值', () => {
+    expect(nextAppearanceImageVersion(undefined)).toBeGreaterThan(0)
+    expect(nextAppearanceImageVersion(123)).toBeGreaterThan(123)
+    expect(nextAppearanceImageVersion(1700000000000)).toBeGreaterThan(1700000000000)
   })
 
   it('hasBackgroundImage 只认可加载的图', () => {

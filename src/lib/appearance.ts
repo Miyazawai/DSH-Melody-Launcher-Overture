@@ -28,7 +28,11 @@ export const ACCENT_PRESETS: ReadonlyArray<{ label: string; color: string | null
 
 export const APPEARANCE_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp'])
 
-/** 图片落在 userData/appearance/ 下的固定文件名：换图即换内容，路径不变。 */
+/**
+ * 图片落在 userData/appearance/ 下的固定文件名：换图即换内容，路径不变。
+ * 因此渲染层拼 URL 时必须带 appearanceVersion（见 appearanceImageUrl），
+ * 否则同一路径的 URL 不变，React 与浏览器都会继续显示旧图。
+ */
 export function appearanceAssetName(kind: AppearanceImageKind, extension: string): string {
   return `${kind}.${extension.replace(/^\./, '').toLowerCase()}`
 }
@@ -39,12 +43,25 @@ const APPEARANCE_ASSET_PATTERN = /^(?:background|logo)\.(?:png|jpe?g|webp)$/i
  * 渲染层把「设置里存的绝对路径」换成可加载的 URL。
  * 正常文件走自定义协议 dsh-appearance://（main 里注册，只允许 userData/appearance 下的两张图）；
  * demoApi / 测试可以塞 data: URL，原样返回。
+ *
+ * version 是图片内容版本：复制件文件名固定，换图后路径与 URL 都不变，
+ * 渲染层（React 属性 diff / 浏览器图片缓存）会继续显示旧图。带上 ?v= 后
+ * 每次换图都是新 URL，协议端会忽略查询串，只认文件名。
  */
-export function appearanceImageUrl(imagePath: string | null | undefined): string | null {
+export function appearanceImageUrl(imagePath: string | null | undefined, version?: number): string | null {
   if (!imagePath) return null
   if (/^(?:data:|https?:|blob:)/i.test(imagePath)) return imagePath
   const name = imagePath.split(/[\\/]/).pop() ?? ''
-  return APPEARANCE_ASSET_PATTERN.test(name) ? `dsh-appearance://${name}` : null
+  if (!APPEARANCE_ASSET_PATTERN.test(name)) return null
+  const token = typeof version === 'number' && Number.isFinite(version) && version > 0
+    ? `?v=${Math.trunc(version)}`
+    : ''
+  return `dsh-appearance://${name}${token}`
+}
+
+/** 选图后生成新的内容版本：至少比旧值大，跨会话也不会撞回旧 URL。 */
+export function nextAppearanceImageVersion(current?: number): number {
+  return Math.max(Date.now(), typeof current === 'number' && Number.isFinite(current) ? Math.trunc(current) + 1 : 0)
 }
 
 /** 会被 appearance 覆盖的全部根变量；应用前逐条 remove，避免换主题/清空后残留。 */

@@ -72,6 +72,34 @@ describe('appearance 校验（mergeStoredSettings）', () => {
     expect(dropped.appearance).toBeUndefined()
   })
 
+  it('保留图片版本号（只随对应图片路径一起保留）', async () => {
+    const root = await temporaryRoot()
+    const background = path.join(root, 'background.png')
+    const logo = path.join(root, 'logo.webp')
+    await writeFile(background, Buffer.from('png'))
+    await writeFile(logo, Buffer.from('webp'))
+
+    const kept = mergeStoredSettings(baseSettings, {
+      ...baseSettings,
+      appearance: { backgroundPath: background, backgroundVersion: 1700000000000, logoPath: logo, logoVersion: 42 },
+    })
+    expect(kept.appearance?.backgroundVersion).toBe(1700000000000)
+    expect(kept.appearance?.logoVersion).toBe(42)
+
+    const pathMissing = mergeStoredSettings(baseSettings, {
+      ...baseSettings,
+      appearance: { backgroundPath: path.join(root, 'missing.png'), backgroundVersion: 7 },
+    })
+    expect(pathMissing.appearance?.backgroundVersion).toBeUndefined()
+
+    const invalid = mergeStoredSettings(baseSettings, {
+      ...baseSettings,
+      appearance: { backgroundPath: background, backgroundVersion: -1, logoPath: logo, logoVersion: Number.NaN },
+    })
+    expect(invalid.appearance?.backgroundVersion).toBeUndefined()
+    expect(invalid.appearance?.logoVersion).toBeUndefined()
+  })
+
   it('拒绝非图片扩展名与超过 10MB 的图片', async () => {
     const root = await temporaryRoot()
     const exe = path.join(root, 'logo.exe')

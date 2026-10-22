@@ -3,7 +3,7 @@ import { useState, type ReactNode } from 'react'
 import packageMetadata from '../../../package.json'
 import { useLauncherApi } from '../../api/client'
 import { GITHUB_MIRROR_PRESETS } from '../../constants'
-import { ACCENT_PRESETS, DEFAULT_THEME_ACCENT, appearanceImageUrl, clampBackgroundOpacity, clampPanelOpacity } from '../../lib/appearance'
+import { ACCENT_PRESETS, DEFAULT_THEME_ACCENT, appearanceImageUrl, clampBackgroundOpacity, clampPanelOpacity, nextAppearanceImageVersion } from '../../lib/appearance'
 import type { AppSettings, AppearanceSettings, UiTheme } from '../../types'
 
 /**
@@ -72,7 +72,11 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onPreview }: S
   const chooseAppearanceImage = async (kind: 'background' | 'logo') => {
     const picked = await api.chooseAppearanceImage(kind)
     if (!picked) return
-    updateAppearance(kind === 'background' ? { backgroundPath: picked.path } : { logoPath: picked.path })
+    // 复制件文件名固定（background.png / logo.webp），只换文件内容；路径不变时
+    // React 与浏览器都会复用旧图。每次选图递增内容版本，让 URL 真正变化。
+    updateAppearance(kind === 'background'
+      ? { backgroundPath: picked.path, backgroundVersion: nextAppearanceImageVersion(appearance.backgroundVersion) }
+      : { logoPath: picked.path, logoVersion: nextAppearanceImageVersion(appearance.logoVersion) })
   }
   const fileLabel = (target: string | undefined): string => (target ? target.split(/[\\/]/).pop() ?? target : '')
 
@@ -150,7 +154,7 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onPreview }: S
                   <ImagePlus size={14} />选择图片…
                 </button>
                 {appearance.backgroundPath && (
-                  <button type="button" className="secondary-button" onClick={() => updateAppearance({ backgroundPath: undefined, backgroundOpacity: undefined })}>清除</button>
+                  <button type="button" className="secondary-button" onClick={() => updateAppearance({ backgroundPath: undefined, backgroundVersion: undefined, backgroundOpacity: undefined })}>清除</button>
                 )}
                 <small title={appearance.backgroundPath ?? ''}>{appearance.backgroundPath ? fileLabel(appearance.backgroundPath) || '已选择' : '跟随主题色渐变'}</small>
               </div>
@@ -176,14 +180,14 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onPreview }: S
               <div className="appearance-image-actions">
                 <img
                   className="appearance-logo-preview"
-                  src={appearanceImageUrl(appearance.logoPath) ?? `${import.meta.env.BASE_URL}launcher-logo.png`}
+                  src={appearanceImageUrl(appearance.logoPath, appearance.logoVersion) ?? `${import.meta.env.BASE_URL}launcher-logo.png`}
                   alt=""
                 />
                 <button type="button" className="secondary-button" onClick={() => void chooseAppearanceImage('logo')}>
                   <ImagePlus size={14} />选择图片…
                 </button>
                 {appearance.logoPath && (
-                  <button type="button" className="secondary-button" onClick={() => updateAppearance({ logoPath: undefined })}>清除</button>
+                  <button type="button" className="secondary-button" onClick={() => updateAppearance({ logoPath: undefined, logoVersion: undefined })}>清除</button>
                 )}
                 <small>仅替换首页头像</small>
               </div>

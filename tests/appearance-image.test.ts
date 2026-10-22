@@ -65,6 +65,10 @@ describe('resolveAppearanceAssetName', () => {
     expect(resolveAppearanceAssetName('dsh-appearance://background.png')).toBe('background.png')
     expect(resolveAppearanceAssetName('dsh-appearance://logo.WEBP')).toBe('logo.webp')
     expect(resolveAppearanceAssetName('dsh-appearance://background.png/../secret.png')).toBe('background.png')
+    // 渲染层用 ?v= 版本参数区分同路径的新图；协议只认文件名，参数必须被忽略。
+    expect(resolveAppearanceAssetName('dsh-appearance://background.png?v=1700000000000')).toBe('background.png')
+    expect(resolveAppearanceAssetName('dsh-appearance://logo.webp?v=2')).toBe('logo.webp')
+    expect(resolveAppearanceAssetName('dsh-appearance://background.png?v=1#frag')).toBe('background.png')
   })
 
   it('拒绝任意路径读取与陌生协议', () => {

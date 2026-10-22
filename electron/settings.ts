@@ -69,6 +69,11 @@ function validRuntimeVersion(value: unknown): value is string {
 /** 外观图片上限，与 electron/appearance.ts 的复制通道保持一致。 */
 const MAX_APPEARANCE_IMAGE_BYTES = 10 * 1024 * 1024
 
+/** 图片内容版本：正整数毫秒时间戳；只用于让渲染层认出「同一路径下换了图」。 */
+function validAppearanceImageVersion(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : undefined
+}
+
 /** 外观图片路径：绝对路径 + 白名单扩展名 + 文件存在且 ≤10MB，缺一不可。 */
 function validAppearanceImagePath(value: unknown): string | undefined {
   if (typeof value !== 'string' || value.trim() === '' || !path.isAbsolute(value)) return undefined
@@ -98,10 +103,19 @@ export function validAppearance(value: unknown): AppearanceSettings | undefined 
   if (typeof input.backgroundOpacity === 'number' && Number.isFinite(input.backgroundOpacity)) {
     appearance.backgroundOpacity = clampBackgroundOpacity(input.backgroundOpacity)
   }
+  // 版本号只在对应图片路径有效时保留：路径被删掉后留个孤立的版本号没有意义。
   const backgroundPath = validAppearanceImagePath(input.backgroundPath)
-  if (backgroundPath) appearance.backgroundPath = backgroundPath
+  if (backgroundPath) {
+    appearance.backgroundPath = backgroundPath
+    const backgroundVersion = validAppearanceImageVersion(input.backgroundVersion)
+    if (backgroundVersion) appearance.backgroundVersion = backgroundVersion
+  }
   const logoPath = validAppearanceImagePath(input.logoPath)
-  if (logoPath) appearance.logoPath = logoPath
+  if (logoPath) {
+    appearance.logoPath = logoPath
+    const logoVersion = validAppearanceImageVersion(input.logoVersion)
+    if (logoVersion) appearance.logoVersion = logoVersion
+  }
   return Object.keys(appearance).length > 0 ? appearance : undefined
 }
 
