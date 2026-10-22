@@ -14,7 +14,7 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/Miyazawai/DSH-Melody-Launcher-Overture/build.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=build)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/actions/workflows/build.yml)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture/releases)
 [![Upstream](https://img.shields.io/badge/上游-rirko%2Fdsh--melody--launcher-6C7BFF?style=for-the-badge&logo=github&logoColor=white)](https://github.com/rirko/dsh-melody-launcher)
-[![Tests](https://img.shields.io/badge/tests-933%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
+[![Tests](https://img.shields.io/badge/tests-962%20passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Miyazawai/DSH-Melody-Launcher-Overture)
 
 [![Electron](https://img.shields.io/badge/Electron-43-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
@@ -49,6 +49,12 @@
 | 多套环境互相污染，删了重装 | 新建一个整合包，天然隔离，互不影响 |
 | 把自己的配置折腾半天分享给朋友 | 导出 = 整个环境打包成 zip，对方导入即可启动 |
 | 开终端、记命令、盯输出 | 一个按钮启动，进程与日志全程托管 |
+
+## v1.0.4 更新亮点
+
+- **外观自定义** —— 设置页新增「外观」分组：主题色（预设 + 自定义取色）、面板透明度、整窗背景图（含背景透明度）、启动器头像。全部存在 `settings.json` 的可选 `appearance` 字段里，旧配置照常读写；保存后立即生效，重启保留。
+- **背景 / 头像换图立即生效** —— 复制件文件名固定，旧实现换图后 URL 不变，React 和浏览器会继续用旧图；现在 URL 带内容版本参数，同一张图连续替换也不需要先点「清除」。
+- **选图限制写在设置里** —— PNG / JPG / JPEG / WEBP，单张不超过 10MB，尺寸不限；格式不支持、超限或文件不存在时，面板内直接显示原因。
 
 ## v1.0.3 更新亮点
 
