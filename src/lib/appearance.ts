@@ -28,6 +28,12 @@ export const ACCENT_PRESETS: ReadonlyArray<{ label: string; color: string | null
 
 export const APPEARANCE_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp'])
 
+/** 单张外观图片上限；主进程复制校验与设置面板提示共用，避免两处数字漂移。 */
+export const MAX_APPEARANCE_IMAGE_BYTES = 10 * 1024 * 1024
+
+/** 设置面板展示的格式清单（与 APPEARANCE_IMAGE_EXTENSIONS 保持一致）。 */
+export const APPEARANCE_IMAGE_FORMAT_LABEL = 'PNG / JPG / JPEG / WEBP'
+
 /**
  * 图片落在 userData/appearance/ 下的固定文件名：换图即换内容，路径不变。
  * 因此渲染层拼 URL 时必须带 appearanceVersion（见 appearanceImageUrl），
@@ -62,6 +68,18 @@ export function appearanceImageUrl(imagePath: string | null | undefined, version
 /** 选图后生成新的内容版本：至少比旧值大，跨会话也不会撞回旧 URL。 */
 export function nextAppearanceImageVersion(current?: number): number {
   return Math.max(Date.now(), typeof current === 'number' && Number.isFinite(current) ? Math.trunc(current) + 1 : 0)
+}
+
+/**
+ * 选图 IPC 失败时的可读文案。
+ * Electron 会把主进程异常包成 "Error invoking remote method 'appearance:choose-image': Error: 原因"，
+ * 设置面板只需要最后那句人话（格式不支持 / 超过 10MB / 文件不存在）。
+ */
+export function appearancePickErrorText(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error)
+  return text
+    .replace(/^Error invoking remote method '[^']+':\s*/, '')
+    .replace(/^Error:\s*/, '')
 }
 
 /** 会被 appearance 覆盖的全部根变量；应用前逐条 remove，避免换主题/清空后残留。 */

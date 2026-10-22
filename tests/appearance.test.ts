@@ -9,6 +9,8 @@ import {
   mixHex,
   nextAppearanceImageVersion,
   rgbaFromHex,
+  appearancePickErrorText,
+  MAX_APPEARANCE_IMAGE_BYTES,
 } from '../src/lib/appearance'
 
 describe('外观颜色派生', () => {
@@ -109,6 +111,14 @@ describe('appearanceImageUrl', () => {
     expect(nextAppearanceImageVersion(undefined)).toBeGreaterThan(0)
     expect(nextAppearanceImageVersion(123)).toBeGreaterThan(123)
     expect(nextAppearanceImageVersion(1700000000000)).toBeGreaterThan(1700000000000)
+  })
+
+  it('选图失败只保留给人看的原因（剥掉 IPC 包装）', () => {
+    const wrapped = new Error("Error invoking remote method 'appearance:choose-image': Error: 图片不能超过 10MB。")
+    expect(appearancePickErrorText(wrapped)).toBe('图片不能超过 10MB。')
+    expect(appearancePickErrorText(new Error('外观图片仅支持 png / jpg / jpeg / webp。')))
+      .toBe('外观图片仅支持 png / jpg / jpeg / webp。')
+    expect(MAX_APPEARANCE_IMAGE_BYTES).toBe(10 * 1024 * 1024)
   })
 
   it('hasBackgroundImage 只认可加载的图', () => {

@@ -2,7 +2,7 @@ import { statSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { DEFAULT_PROFILE_NAME, DSH_PACKAGE_NAME } from '../src/constants'
-import { ACCENT_PATTERN, APPEARANCE_IMAGE_EXTENSIONS, clampBackgroundOpacity, clampPanelOpacity } from '../src/lib/appearance'
+import { ACCENT_PATTERN, APPEARANCE_IMAGE_EXTENSIONS, MAX_APPEARANCE_IMAGE_BYTES, clampBackgroundOpacity, clampPanelOpacity } from '../src/lib/appearance'
 import type { AppSettings, AppearanceSettings, DshInstallationStatus, NetworkSettings, UiTheme } from '../src/types'
 import { managedDshExecutable } from './dsh-install'
 import { isSafeProfileName } from './profile'
@@ -65,9 +65,6 @@ function validRuntimeVersion(value: unknown): value is string {
   return typeof value === 'string'
     && /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value.trim())
 }
-
-/** 外观图片上限，与 electron/appearance.ts 的复制通道保持一致。 */
-const MAX_APPEARANCE_IMAGE_BYTES = 10 * 1024 * 1024
 
 /** 图片内容版本：正整数毫秒时间戳；只用于让渲染层认出「同一路径下换了图」。 */
 function validAppearanceImageVersion(value: unknown): number | undefined {

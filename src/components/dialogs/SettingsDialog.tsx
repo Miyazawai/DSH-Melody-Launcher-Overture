@@ -3,7 +3,17 @@ import { useState, type ReactNode } from 'react'
 import packageMetadata from '../../../package.json'
 import { useLauncherApi } from '../../api/client'
 import { GITHUB_MIRROR_PRESETS } from '../../constants'
-import { ACCENT_PRESETS, DEFAULT_THEME_ACCENT, appearanceImageUrl, clampBackgroundOpacity, clampPanelOpacity, nextAppearanceImageVersion } from '../../lib/appearance'
+import {
+  ACCENT_PRESETS,
+  APPEARANCE_IMAGE_FORMAT_LABEL,
+  DEFAULT_THEME_ACCENT,
+  MAX_APPEARANCE_IMAGE_BYTES,
+  appearanceImageUrl,
+  appearancePickErrorText,
+  clampBackgroundOpacity,
+  clampPanelOpacity,
+  nextAppearanceImageVersion,
+} from '../../lib/appearance'
 import type { AppSettings, AppearanceSettings, UiTheme } from '../../types'
 
 /**
@@ -42,6 +52,8 @@ function SettingsGroup({ icon, title, desc, children }: { icon: ReactNode; title
 export function SettingsDialog({ settings, busy, onClose, onSave, onPreview }: SettingsDialogProps) {
   const api = useLauncherApi()
   const [draft, setDraft] = useState(settings)
+  // 选图失败（格式不支持 / 超过 10MB / 文件不存在）时在设置面板内就地提示。
+  const [imageError, setImageError] = useState<string | null>(null)
   // 参数在界面上是一整行文本，保存时才切成数组。
   const [argsText, setArgsText] = useState(settings.launchArgs.join(' '))
   // 镜像下拉的当前档位：空 = 自动、预设前缀之一、或「自定义」。
@@ -68,15 +80,23 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onPreview }: S
     ) as AppearanceSettings
     previewAppearance({ ...draft, appearance: Object.keys(cleaned).length > 0 ? cleaned : undefined })
   }
-  const resetAppearance = () => previewAppearance({ ...draft, appearance: undefined })
+  const resetAppearance = () => {
+    setImageError(null)
+    previewAppearance({ ...draft, appearance: undefined })
+  }
   const chooseAppearanceImage = async (kind: 'background' | 'logo') => {
-    const picked = await api.chooseAppearanceImage(kind)
-    if (!picked) return
-    // 复制件文件名固定（background.png / logo.webp），只换文件内容；路径不变时
-    // React 与浏览器都会复用旧图。每次选图递增内容版本，让 URL 真正变化。
-    updateAppearance(kind === 'background'
-      ? { backgroundPath: picked.path, backgroundVersion: nextAppearanceImageVersion(appearance.backgroundVersion) }
-      : { logoPath: picked.path, logoVersion: nextAppearanceImageVersion(appearance.logoVersion) })
+    setImageError(null)
+    try {
+      const picked = await api.chooseAppearanceImage(kind)
+      if (!picked) return
+      // 复制件文件名固定（background.png / logo.webp），只换文件内容；路径不变时
+      // React 与浏览器都会复用旧图。每次选图递增内容版本，让 URL 真正变化。
+      updateAppearance(kind === 'background'
+        ? { backgroundPath: picked.path, backgroundVersion: nextAppearanceImageVersion(appearance.backgroundVersion) }
+        : { logoPath: picked.path, logoVersion: nextAppearanceImageVersion(appearance.logoVersion) })
+    } catch (error) {
+      setImageError(appearancePickErrorText(error))
+    }
   }
   const fileLabel = (target: string | undefined): string => (target ? target.split(/[\\/]/).pop() ?? target : '')
 
@@ -192,6 +212,11 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onPreview }: S
                 <small>仅替换首页头像</small>
               </div>
             </div>
+
+            <p className="settings-group-note">
+              选图限制：{APPEARANCE_IMAGE_FORMAT_LABEL}，单张不超过 {MAX_APPEARANCE_IMAGE_BYTES / 1024 / 1024} MB，尺寸不限。背景图自动铺满整窗；头像按比例缩放，不拉伸。原图会被复制到启动器数据目录，之后移动或删除原图不影响外观。
+            </p>
+            {imageError && <p className="appearance-pick-error" role="alert">{imageError}</p>}
 
             <div className="appearance-actions">
               <button type="button" className="secondary-button" onClick={resetAppearance}>

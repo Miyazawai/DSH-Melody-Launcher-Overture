@@ -9411,6 +9411,13 @@ input:focus-visible {
   margin-top: 12px;
 }
 
+.appearance-pick-error {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
 /* ===== 外观自定义：管理页（整合包/DSH版本/插件/技能/预设）的面板透明度 =====
    开始页的六个消费点单独处理；管理页把 surface 三兄弟在 .home-tab-page 作用域内
    换成带 alpha 的值，页内所有 var(--surface*) 背景（面板/行/统计条/输入框）自动跟随。

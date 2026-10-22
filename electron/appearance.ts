@@ -1,6 +1,6 @@
 import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
-import { APPEARANCE_IMAGE_EXTENSIONS, appearanceAssetName } from '../src/lib/appearance'
+import { APPEARANCE_IMAGE_EXTENSIONS, MAX_APPEARANCE_IMAGE_BYTES, appearanceAssetName } from '../src/lib/appearance'
 import type { AppearanceImageKind } from '../src/types'
 
 /**
@@ -9,8 +9,6 @@ import type { AppearanceImageKind } from '../src/types'
  * 渲染层也只需要加载启动器自己目录里的固定文件（自定义协议只放行这一层）。
  * 本文件不依赖 electron，复制/校验逻辑可以直接单测。
  */
-
-export const MAX_APPEARANCE_IMAGE_BYTES = 10 * 1024 * 1024
 
 /** 渲染层加载外观图片的自定义协议；main 启动时登记，只映射 userData/appearance 下的两张图。 */
 export const APPEARANCE_SCHEME = 'dsh-appearance'
