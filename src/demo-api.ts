@@ -1020,6 +1020,14 @@ export const demoApi: LauncherApi = {
     : kind === 'dshHome'
       ? 'C:\\Users\\demo\\.dsh'
       : 'C:\\Users\\demo\\Projects',
+  // 浏览器演示没有主进程：直接给一张内置 SVG，让选图链路在 demo 里也能看到效果。
+  chooseAppearanceImage: async kind => {
+    const svg = kind === 'background'
+      ? '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#12a594"/></linearGradient></defs><rect width="1200" height="800" fill="url(#g)"/><circle cx="880" cy="180" r="260" fill="#fff" opacity=".18"/><circle cx="220" cy="680" r="300" fill="#fff" opacity=".10"/></svg>'
+      : '<svg xmlns="http://www.w3.org/2000/svg" width="112" height="112"><rect width="112" height="112" rx="26" fill="#7c5cff"/><text x="56" y="72" font-size="54" font-weight="700" text-anchor="middle" fill="#fff" font-family="sans-serif">D</text></svg>'
+    const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+    return { path: url, url }
+  },
   readProfile: async () => profile(),
   listProfiles: async () => [{
     id: demoSettings.profileName,

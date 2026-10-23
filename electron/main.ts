@@ -5,6 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { AppSettings, OfficialPackRelease, OfficialPackStatus, PackInstallResult, RuntimeOutput, WindowMode } from '../src/types'
 import { ACP_RUNTIME_DIRNAME, CREDENTIALS_LOCK_DIRNAME, createAiInstaller, healCredentialsLock, type AiInstaller } from './ai-install'
+import { registerAppearanceProtocol, registerAppearanceScheme } from './appearance-protocol'
 import { createApplicationAddonManager, type ApplicationAddonManager } from './application-addons'
 import { applyWindowMode, createMainWindow, createRendererChannel } from './app-window'
 import { createCatalogSyncService, type CatalogSyncService } from './catalog-sync'
@@ -59,6 +60,8 @@ import { recoverLegacyCredentials } from './dsh-credentials-compat'
  */
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url))
+// 自定义协议必须在 app ready 之前登记（Electron 的硬性顺序要求）。
+registerAppearanceScheme()
 // 窗口图标与托盘图标共用同一资源；dev 取 public/，打包取 dist/。
 const launcherIconPath = path.join(moduleDirectory, app.isPackaged ? '../dist/launcher-icon.png' : '../public/launcher-icon.png')
 
@@ -1050,10 +1053,14 @@ app.whenReady().then(async () => {
     console.error('[process-supervisor] 启动失败，退出时只能执行普通清理。', error)
   }
   services = createServices()
+  // 外观图片统一落在 userData/appearance/，渲染层经 dsh-appearance:// 读取。
+  const appearanceDirectory = path.join(app.getPath('userData'), 'appearance')
+  registerAppearanceProtocol(appearanceDirectory)
   registerIpcHandlers({
     ...services,
     skillsShIndexPath: path.join(app.getPath('userData'), 'skills-sh-index.json'),
     newsCachePath: path.join(app.getPath('userData'), 'juya-news-cache.json'),
+    appearanceDirectory,
     getWindow,
     setWindowMode: (mode: WindowMode) => applyWindowMode(mainWindow, mode),
   })

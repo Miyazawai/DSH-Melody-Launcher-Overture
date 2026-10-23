@@ -2,6 +2,26 @@
 
 本文件记录 DSH 旋律启动器（dsh-melody-launcher）的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本语义遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.4] - 2026-10-22 — 外观自定义
+
+### 新增功能
+
+- **启动器外观自定义**：设置页新增「外观」分组，包含主题色（预设色卡 + 自定义取色）、面板透明度、整窗背景图（含背景透明度）和启动器头像四项。所有值存进 `settings.json` 的可选 `appearance` 字段；旧存档没有这个字段时照常读写，默认外观与上游一致。保存后立即生效，重启保留。
+- **背景 / 头像选图通道**：支持 PNG / JPG / JPEG / WEBP，单张不超过 10MB，尺寸不限。选中的图片会复制进 `userData/appearance/`，之后移动或删除原图不影响外观；设置面板就地写明限制，格式不支持、超过 10MB 或文件不存在时显示可读原因，不再静默失败。
+- **自定义图片协议**：新增 `dsh-appearance://`，只放行 `userData/appearance/` 下的背景与头像两张固定图；dev 和打包态都不再走 `file://`，换图后 URL 带内容版本参数，避开渲染层复用旧图。
+
+### 修复
+
+- **同一路径换图后不刷新**：复制件文件名固定（`background.png` / `logo.png`），换图后路径与 URL 不变，React 和浏览器都继续用旧图，必须「清除再选」才会加载新图。现在 `appearance` 增加 `backgroundVersion` / `logoVersion`，每次选图递增并让 URL 带 `?v=`；同一张图连续替换也能立即生效。
+- **管理页不跟随面板透明度**：整合包 / DSH版本 / 插件 / 技能 / 预设页的面板此前仍是实心 `--surface`；现在在 `.home-tab-page` 作用域内把 surface 变量重映射为带 panelOpacity 的 `color-mix`。
+- **夜间外观分组标签对比度**：改用 `var(--muted)`，深色底上不再几乎看不见。
+- **非方头像被拉伸**：自定义头像改为等比缩放，不再强制 112×112 变形。
+
+### 已知限制
+
+- 选图时就会复制覆盖 `userData/appearance/` 下的副本，因此点「取消」只能回退设置字段，无法恢复上一张图的内容。
+- 便携版未做代码签名，SmartScreen 会提示；确认来源后再选择「仍要运行」。
+
 ## [v1.0.3] - 2026-10-05 — 装完插件不再拖死整机 · web 包起得来 · 官方桌面端也管
 
 ### 新增功能
